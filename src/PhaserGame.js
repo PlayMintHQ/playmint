@@ -3,7 +3,18 @@ import Phaser from 'phaser';
 class RunnerScene extends Phaser.Scene {
   constructor() {
     super({ key: 'RunnerScene' });
-    this.runSpeed = 350; // Increased slightly for more challenge
+  }
+
+  init(data) {
+    this.gameConfig = {
+      runSpeed: 350,
+      jumpForce: 750,
+      gravity: 1800,
+      obstacleDelay: 1200,
+      speedIncrement: 0.05,
+      ...data
+    };
+    this.runSpeed = this.gameConfig.runSpeed;
   }
 
   create() {
@@ -33,14 +44,14 @@ class RunnerScene extends Phaser.Scene {
     // Player
     this.player = this.add.rectangle(150, 480, 40, 40, 0x0000FF); // Blue
     this.physics.add.existing(this.player);
-    this.player.body.setGravityY(1800); // Slightly more gravity
+    this.player.body.setGravityY(this.gameConfig.gravity);
 
     // Obstacles
     this.obstacles = this.physics.add.group();
 
     // Spawn Obstacles Timer
     this.obstacleTimer = this.time.addEvent({
-      delay: 1200, // spawn every 1.2 seconds initially
+      delay: this.gameConfig.obstacleDelay,
       callback: this.spawnObstacle,
       callbackScope: this,
       loop: true
@@ -86,7 +97,7 @@ class RunnerScene extends Phaser.Scene {
 
     // Only jump if touching the ground
     if (this.player.body.touching.down) {
-      this.player.body.setVelocityY(-750); // Jump force matched to gravity
+      this.player.body.setVelocityY(-this.gameConfig.jumpForce);
     }
   }
 
@@ -127,7 +138,7 @@ class RunnerScene extends Phaser.Scene {
     });
 
     // Optional MVP expansion: slightly increase run speed over time
-    this.runSpeed += 0.05;
+    this.runSpeed += this.gameConfig.speedIncrement;
   }
 }
 
@@ -142,12 +153,13 @@ const config = {
       gravity: { y: 0 },
       debug: false
     }
-  },
-  scene: [RunnerScene]
+  }
 };
 
-const startGame = (parent) => {
-  return new Phaser.Game({ ...config, parent });
+const startGame = (parent, gameOptions) => {
+  const game = new Phaser.Game({ ...config, parent });
+  game.scene.add('RunnerScene', RunnerScene, true, gameOptions);
+  return game;
 };
 
 export default startGame;
