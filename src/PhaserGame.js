@@ -5,6 +5,11 @@ class RunnerScene extends Phaser.Scene {
     super({ key: 'RunnerScene' });
   }
 
+  preload() {
+    this.load.spritesheet('dude', 'assets/dude.png', { frameWidth: 32, frameHeight: 48 });
+    this.load.image('crate', 'assets/crate.png');
+  }
+
   init(data) {
     this.gameConfig = {
       runSpeed: 350,
@@ -21,10 +26,19 @@ class RunnerScene extends Phaser.Scene {
     this.isGameOver = false;
     this.score = 0;
 
-    this.cameras.main.setBackgroundColor('#87CEEB'); // Sky blue
+    // Create a smooth background gradient
+    let graphics = this.add.graphics();
+    graphics.fillGradientStyle(0x87CEEB, 0x87CEEB, 0xe0f7fa, 0xe0f7fa, 1);
+    graphics.fillRect(0, 0, 800, 600);
 
     // Score UI
-    this.scoreText = this.add.text(16, 16, 'Score: 0', { fontSize: '32px', fill: '#000' });
+    this.scoreText = this.add.text(16, 16, 'Score: 0', { 
+      fontFamily: 'system-ui, sans-serif', 
+      fontSize: '32px', 
+      fill: '#333',
+      fontStyle: 'bold'
+    });
+    this.scoreText.setShadow(2, 2, 'rgba(0,0,0,0.3)', 2);
     // Increase score based on survival time
     this.scoreTimer = this.time.addEvent({
       delay: 100, // every 100ms
@@ -37,14 +51,24 @@ class RunnerScene extends Phaser.Scene {
       loop: true
     });
 
-    // Floor
-    this.floor = this.add.rectangle(400, 550, 800, 100, 0x228B22); // Green
+    // Floor (anchored Top-Left implicitly at y=500 downward)
+    this.floor = this.add.rectangle(0, 500, 800, 100, 0x228B22).setOrigin(0, 0); // Green
     this.physics.add.existing(this.floor, true); // Static
 
+    // Animations
+    this.anims.create({
+      key: 'run',
+      frames: this.anims.generateFrameNumbers('dude', { start: 5, end: 8 }),
+      frameRate: 10,
+      repeat: -1
+    });
+
     // Player
-    this.player = this.add.rectangle(150, 480, 40, 40, 0x0000FF); // Blue
-    this.physics.add.existing(this.player);
+    this.player = this.physics.add.sprite(150, 350, 'dude'); // Spawn high so gravity forces contact
+    this.player.setScale(1.5);
     this.player.body.setGravityY(this.gameConfig.gravity);
+    this.player.setCollideWorldBounds(true);
+    this.player.play('run');
 
     // Obstacles
     this.obstacles = this.physics.add.group();
@@ -59,6 +83,7 @@ class RunnerScene extends Phaser.Scene {
 
     // Collisions
     this.physics.add.collider(this.player, this.floor);
+    this.physics.add.collider(this.obstacles, this.floor);
     this.physics.add.collider(this.player, this.obstacles, this.hitObstacle, null, this);
 
     // Input to jump or restart
@@ -76,15 +101,16 @@ class RunnerScene extends Phaser.Scene {
   spawnObstacle() {
     if (this.isGameOver) return;
 
-    // Randomize height slightly for variety (or stay same for simple hurdles)
-    const isHighObstacle = Phaser.Math.Between(0, 1) === 1;
-    const height = isHighObstacle ? 60 : 40;
-    const width = isHighObstacle ? 30 : 50;
+    // Variety for sizes
+    const scale = Phaser.Math.FloatBetween(0.8, 1.2);
 
-    const obstacle = this.add.rectangle(850, 500 - (height / 2), width, height, 0xFF0000); // Red
+    const obstacle = this.add.sprite(850, 400, 'crate'); // Spawn mid-air
+    obstacle.setScale(scale);
     this.physics.add.existing(obstacle);
     this.obstacles.add(obstacle);
-
+    
+    // Enable gravity so the obstacle naturally falls to exactly align with the floor
+    obstacle.body.setGravityY(this.gameConfig.gravity);
     obstacle.body.setVelocityX(-this.runSpeed);
   }
 
@@ -95,9 +121,11 @@ class RunnerScene extends Phaser.Scene {
       return;
     }
 
-    // Only jump if touching the ground
-    if (this.player.body.touching.down) {
+    // Only jump if touching the floor or resting on world bounds
+    if (this.player.body.touching.down || this.player.body.blocked.down) {
       this.player.body.setVelocityY(-this.gameConfig.jumpForce);
+      this.player.anims.stop();
+      this.player.setFrame(6); // A mid-air looking frame
     }
   }
 
@@ -106,20 +134,40 @@ class RunnerScene extends Phaser.Scene {
     this.isGameOver = true;
 
     this.physics.pause();
-    this.player.fillColor = 0x888888; // Turn gray
+    this.player.anims.stop();
+    this.player.setTint(0x888888); // Turn gray
 
-    const gameOverText = this.add.text(400, 250, 'GAME OVER\nPress Space or Click to Restart', {
-      fontFamily: 'sans-serif',
-      fontSize: '40px',
-      fill: '#FF0000',
-      align: 'center',
-      fontStyle: 'bold'
+    // Semi-transparent dark overlay for better contrast
+    const overlay = this.add.rectangle(400, 300, 800, 600, 0x000000, 0.6);
+    overlay.setDepth(10); // ensure it's on top of everything except text
+
+    const gameOverText = this.add.text(400, 260, 'GAME OVER', {
+      fontFamily: 'system-ui, sans-serif',
+      fontSize: '56px',
+      fill: '#FF4136',
+      fontStyle: '900'
     });
     gameOverText.setOrigin(0.5);
+    gameOverText.setShadow(2, 2, 'rgba(0,0,0,0.5)', 4);
+    gameOverText.setDepth(11);
+
+    const subText = this.add.text(400, 320, 'Press Space or Click to Restart', {
+      fontFamily: 'system-ui, sans-serif',
+      fontSize: '24px',
+      fill: '#FFFFFF',
+      fontStyle: 'bold'
+    });
+    subText.setOrigin(0.5);
+    subText.setDepth(11);
   }
 
   update(time, delta) {
     if (this.isGameOver) return;
+
+    // Resume running animation when touching down on floor or bounds
+    if ((this.player.body.touching.down || this.player.body.blocked.down) && !this.player.anims.isPlaying) {
+      this.player.play('run', true);
+    }
 
     // Simulate running by moving ground details left
     const moveAmount = this.runSpeed * (delta / 1000);

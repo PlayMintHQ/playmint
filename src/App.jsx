@@ -34,9 +34,10 @@ function App() {
   };
 
   return (
-    <div style={{ textAlign: 'center', fontFamily: 'sans-serif', backgroundColor: '#f0f0f0', minHeight: '100vh', padding: '20px' }}>
-      <h1 style={{ margin: 0, color: '#333' }}>Runner MVP</h1>
-      <p style={{ color: '#666', marginBottom: '10px' }}>Click or press SPACE to jump</p>
+    <div style={{ textAlign: 'center', fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: '#e2e8f0', minHeight: '100vh', padding: '40px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+      <div style={{ background: '#ffffff', padding: '30px', borderRadius: '16px', boxShadow: '0 10px 25px rgba(0,0,0,0.1)', maxWidth: '860px', width: '100%' }}>
+        <h1 style={{ margin: 0, color: '#1a202c', fontSize: '2.5rem', fontWeight: '800' }}>Runner MVP</h1>
+        <p style={{ color: '#4a5568', marginBottom: '20px', fontSize: '1.1rem' }}>Click or press <kbd style={{background: '#edf2f7', padding: '2px 6px', borderRadius: '4px', border: '1px solid #cbd5e0'}}>SPACE</kbd> to jump</p>
       
       <div style={{ marginBottom: '20px' }}>
         <span style={{ marginRight: '10px', fontWeight: 'bold' }}>Game Rules:</span>
@@ -46,12 +47,15 @@ function App() {
             onClick={() => setPresetKey(key)}
             style={{
               margin: '0 5px',
-              padding: '8px 16px',
-              backgroundColor: presetKey === key ? '#007BFF' : '#FFF',
-              color: presetKey === key ? '#FFF' : '#000',
-              border: '1px solid #CCC',
-              borderRadius: '4px',
-              cursor: 'pointer'
+              padding: '10px 20px',
+              backgroundColor: presetKey === key ? '#3182ce' : '#ffffff',
+              color: presetKey === key ? '#ffffff' : '#2d3748',
+              border: presetKey === key ? '2px solid #3182ce' : '2px solid #e2e8f0',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontWeight: '600',
+              boxShadow: presetKey === key ? '0 4px 6px rgba(49, 130, 206, 0.2)' : 'none',
+              transition: 'all 0.2s ease'
             }}
           >
             {GAME_PRESETS[key].name}
@@ -61,12 +65,15 @@ function App() {
           onClick={() => setPresetKey('custom')}
           style={{
             margin: '0 5px',
-            padding: '8px 16px',
-            backgroundColor: presetKey === 'custom' ? '#ff9900' : '#FFF',
-            color: presetKey === 'custom' ? '#FFF' : '#000',
-            border: '1px solid #CCC',
-            borderRadius: '4px',
-            cursor: 'pointer'
+            padding: '10px 20px',
+            backgroundColor: presetKey === 'custom' ? '#dd6b20' : '#ffffff',
+            color: presetKey === 'custom' ? '#ffffff' : '#2d3748',
+            border: presetKey === 'custom' ? '2px solid #dd6b20' : '2px solid #e2e8f0',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            fontWeight: '600',
+            boxShadow: presetKey === 'custom' ? '0 4px 6px rgba(221, 107, 32, 0.2)' : 'none',
+            transition: 'all 0.2s ease'
           }}
         >
           Custom
@@ -90,6 +97,7 @@ function App() {
       )}
 
       <GameComponent options={currentPreset} />
+      </div>
     </div>
   );
 }
