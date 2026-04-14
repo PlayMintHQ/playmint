@@ -1,3 +1,17 @@
+export const DEFAULT_CONFIG = {
+  runSpeed: 350,
+  jumpForce: 750,
+  gravity: 1800,
+  obstacleDelay: 1200,
+  speedIncrement: 0.05,
+  playerScale: 1.5,
+  obstacleScaleMin: 0.8,
+  obstacleScaleMax: 1.2,
+  floorHeight: 100,
+  floorTileScale: 0.15,
+  scoreTimerDelay: 100
+};
+
 export const GAME_PRESETS = {
   standard: {
     name: 'Standard',

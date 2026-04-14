@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { DEFAULT_CONFIG } from './gameConfig';
 
 class RunnerScene extends Phaser.Scene {
   constructor() {
@@ -13,11 +14,7 @@ class RunnerScene extends Phaser.Scene {
 
   init(data) {
     this.gameConfig = {
-      runSpeed: 350,
-      jumpForce: 750,
-      gravity: 1800,
-      obstacleDelay: 1200,
-      speedIncrement: 0.05,
+      ...DEFAULT_CONFIG,
       ...data
     };
     this.runSpeed = this.gameConfig.runSpeed;
@@ -42,7 +39,7 @@ class RunnerScene extends Phaser.Scene {
     this.scoreText.setShadow(2, 2, 'rgba(0,0,0,0.3)', 2);
     // Increase score based on survival time
     this.scoreTimer = this.time.addEvent({
-      delay: 100, // every 100ms
+      delay: this.gameConfig.scoreTimerDelay, // every 100ms
       callback: () => {
         if (!this.isGameOver) {
           this.score += 1;
@@ -53,9 +50,9 @@ class RunnerScene extends Phaser.Scene {
     });
 
     // Floor
-    this.floor = this.add.tileSprite(0, this.scale.height - 100, this.scale.width, 100, 'ground').setOrigin(0, 0);
-    this.floor.tileScaleX = 0.15;
-    this.floor.tileScaleY = 0.15;
+    this.floor = this.add.tileSprite(0, this.scale.height - this.gameConfig.floorHeight, this.scale.width, this.gameConfig.floorHeight, 'ground').setOrigin(0, 0);
+    this.floor.tileScaleX = this.gameConfig.floorTileScale;
+    this.floor.tileScaleY = this.gameConfig.floorTileScale;
     this.physics.add.existing(this.floor, true); // Static
 
     // Animations
@@ -68,7 +65,7 @@ class RunnerScene extends Phaser.Scene {
 
     // Player
     this.player = this.physics.add.sprite(150, this.scale.height - 250, 'dude'); // Spawn high so gravity forces contact
-    this.player.setScale(1.5);
+    this.player.setScale(this.gameConfig.playerScale);
     this.player.body.setGravityY(this.gameConfig.gravity);
     this.player.setCollideWorldBounds(true);
     this.player.play('run');
@@ -108,8 +105,8 @@ class RunnerScene extends Phaser.Scene {
     // Update world bounds to match new screen size
     this.physics.world.setBounds(0, 0, width, height);
 
-    this.floor.setPosition(0, height - 100);
-    this.floor.setSize(width, 100);
+    this.floor.setPosition(0, height - this.gameConfig.floorHeight);
+    this.floor.setSize(width, this.gameConfig.floorHeight);
     if (this.floor.body) {
       this.floor.body.updateFromGameObject();
     }
@@ -134,7 +131,7 @@ class RunnerScene extends Phaser.Scene {
     if (this.isGameOver) return;
 
     // Variety for sizes
-    const scale = Phaser.Math.FloatBetween(0.8, 1.2);
+    const scale = Phaser.Math.FloatBetween(this.gameConfig.obstacleScaleMin, this.gameConfig.obstacleScaleMax);
 
     const obstacle = this.add.sprite(this.scale.width + 50, this.scale.height - 200, 'crate'); // Spawn mid-air right off screen
     obstacle.setScale(scale);
