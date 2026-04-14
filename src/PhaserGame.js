@@ -8,6 +8,7 @@ class RunnerScene extends Phaser.Scene {
   preload() {
     this.load.spritesheet('dude', 'assets/dude.png', { frameWidth: 32, frameHeight: 48 });
     this.load.image('crate', 'assets/crate.png');
+    this.load.image('ground', 'assets/ground.png');
   }
 
   init(data) {
@@ -27,9 +28,9 @@ class RunnerScene extends Phaser.Scene {
     this.score = 0;
 
     // Create a smooth background gradient
-    let graphics = this.add.graphics();
-    graphics.fillGradientStyle(0x87CEEB, 0x87CEEB, 0xe0f7fa, 0xe0f7fa, 1);
-    graphics.fillRect(0, 0, 800, 600);
+    this.bgGraphics = this.add.graphics();
+    this.bgGraphics.fillGradientStyle(0x87CEEB, 0x87CEEB, 0xe0f7fa, 0xe0f7fa, 1);
+    this.bgGraphics.fillRect(0, 0, this.scale.width, this.scale.height);
 
     // Score UI
     this.scoreText = this.add.text(16, 16, 'Score: 0', { 
@@ -51,8 +52,10 @@ class RunnerScene extends Phaser.Scene {
       loop: true
     });
 
-    // Floor (anchored Top-Left implicitly at y=500 downward)
-    this.floor = this.add.rectangle(0, 500, 800, 100, 0x228B22).setOrigin(0, 0); // Green
+    // Floor
+    this.floor = this.add.tileSprite(0, this.scale.height - 100, this.scale.width, 100, 'ground').setOrigin(0, 0);
+    this.floor.tileScaleX = 0.15;
+    this.floor.tileScaleY = 0.15;
     this.physics.add.existing(this.floor, true); // Static
 
     // Animations
@@ -64,7 +67,7 @@ class RunnerScene extends Phaser.Scene {
     });
 
     // Player
-    this.player = this.physics.add.sprite(150, 350, 'dude'); // Spawn high so gravity forces contact
+    this.player = this.physics.add.sprite(150, this.scale.height - 250, 'dude'); // Spawn high so gravity forces contact
     this.player.setScale(1.5);
     this.player.body.setGravityY(this.gameConfig.gravity);
     this.player.setCollideWorldBounds(true);
@@ -90,11 +93,40 @@ class RunnerScene extends Phaser.Scene {
     this.input.keyboard.on('keydown-SPACE', this.jump, this);
     this.input.on('pointerdown', this.jump, this);
 
-    // Floor details to simulate running visually
-    this.groundDetails = this.add.group();
-    for (let i = 0; i < 6; i++) {
-      const detail = this.add.rectangle(i * 150, 520, 20, 10, 0x006400);
-      this.groundDetails.add(detail);
+    // Dynamic resize handler
+    this.scale.on('resize', this.handleResize, this);
+  }
+
+  handleResize(gameSize) {
+    const width = gameSize.width;
+    const height = gameSize.height;
+
+    this.bgGraphics.clear();
+    this.bgGraphics.fillGradientStyle(0x87CEEB, 0x87CEEB, 0xe0f7fa, 0xe0f7fa, 1);
+    this.bgGraphics.fillRect(0, 0, width, height);
+
+    // Update world bounds to match new screen size
+    this.physics.world.setBounds(0, 0, width, height);
+
+    this.floor.setPosition(0, height - 100);
+    this.floor.setSize(width, 100);
+    if (this.floor.body) {
+      this.floor.body.updateFromGameObject();
+    }
+
+    // Ensure player drops freely into expanded bounds or doesn't get buried when shrinking
+    if (this.player && this.player.y > this.floor.y - 30) {
+      this.player.y = this.floor.y - 50;
+      this.player.body.setVelocityY(0); // Reset velocity to avoid popping up wildly
+    }
+
+    if (this.isGameOver) {
+      if (this.overlay) {
+        this.overlay.setSize(width, height);
+        this.overlay.setPosition(width / 2, height / 2);
+      }
+      if (this.gameOverText) this.gameOverText.setPosition(width / 2, height / 2 - 40);
+      if (this.subText) this.subText.setPosition(width / 2, height / 2 + 20);
     }
   }
 
@@ -104,7 +136,7 @@ class RunnerScene extends Phaser.Scene {
     // Variety for sizes
     const scale = Phaser.Math.FloatBetween(0.8, 1.2);
 
-    const obstacle = this.add.sprite(850, 400, 'crate'); // Spawn mid-air
+    const obstacle = this.add.sprite(this.scale.width + 50, this.scale.height - 200, 'crate'); // Spawn mid-air right off screen
     obstacle.setScale(scale);
     this.physics.add.existing(obstacle);
     this.obstacles.add(obstacle);
@@ -138,27 +170,27 @@ class RunnerScene extends Phaser.Scene {
     this.player.setTint(0x888888); // Turn gray
 
     // Semi-transparent dark overlay for better contrast
-    const overlay = this.add.rectangle(400, 300, 800, 600, 0x000000, 0.6);
-    overlay.setDepth(10); // ensure it's on top of everything except text
+    this.overlay = this.add.rectangle(this.scale.width / 2, this.scale.height / 2, this.scale.width, this.scale.height, 0x000000, 0.6);
+    this.overlay.setDepth(10); // ensure it's on top of everything except text
 
-    const gameOverText = this.add.text(400, 260, 'GAME OVER', {
+    this.gameOverText = this.add.text(this.scale.width / 2, this.scale.height / 2 - 40, 'GAME OVER', {
       fontFamily: 'system-ui, sans-serif',
       fontSize: '56px',
       fill: '#FF4136',
       fontStyle: '900'
     });
-    gameOverText.setOrigin(0.5);
-    gameOverText.setShadow(2, 2, 'rgba(0,0,0,0.5)', 4);
-    gameOverText.setDepth(11);
+    this.gameOverText.setOrigin(0.5);
+    this.gameOverText.setShadow(2, 2, 'rgba(0,0,0,0.5)', 4);
+    this.gameOverText.setDepth(11);
 
-    const subText = this.add.text(400, 320, 'Press Space or Click to Restart', {
+    this.subText = this.add.text(this.scale.width / 2, this.scale.height / 2 + 20, 'Press Space or Click to Restart', {
       fontFamily: 'system-ui, sans-serif',
       fontSize: '24px',
       fill: '#FFFFFF',
       fontStyle: 'bold'
     });
-    subText.setOrigin(0.5);
-    subText.setDepth(11);
+    this.subText.setOrigin(0.5);
+    this.subText.setDepth(11);
   }
 
   update(time, delta) {
@@ -169,14 +201,8 @@ class RunnerScene extends Phaser.Scene {
       this.player.play('run', true);
     }
 
-    // Simulate running by moving ground details left
-    const moveAmount = this.runSpeed * (delta / 1000);
-    this.groundDetails.children.iterate((child) => {
-      child.x -= moveAmount;
-      if (child.x < -20) {
-        child.x = 820;
-      }
-    });
+    // Simulate running by scrolling the ground tile
+    this.floor.tilePositionX += (this.runSpeed * (delta / 1000)) / this.floor.tileScaleX;
 
     // Cleanup off-screen obstacles to free memory
     this.obstacles.children.iterate((obstacle) => {
@@ -195,6 +221,10 @@ const config = {
   width: 800,
   height: 600,
   parent: 'phaser-game-container',
+  scale: {
+    mode: Phaser.Scale.RESIZE,
+    autoCenter: Phaser.Scale.CENTER_BOTH,
+  },
   physics: {
     default: 'arcade',
     arcade: {

@@ -1,9 +1,34 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import GameComponent from './GameComponent';
 import { GAME_PRESETS } from './gameConfig';
 
 function App() {
   const [presetKey, setPresetKey] = useState('standard');
+  const [showCustomPanel, setShowCustomPanel] = useState(false);
+  const fullscreenContainerRef = useRef(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
+  }, []);
+
+  const handleFullscreen = () => {
+    if (fullscreenContainerRef.current && !document.fullscreenElement) {
+      fullscreenContainerRef.current.requestFullscreen().catch(err => {
+        console.error(`Error attempting to enable fullscreen: ${err.message}`);
+      });
+    }
+  };
+
+  const handleExitFullscreen = () => {
+    if (document.fullscreenElement) {
+      document.exitFullscreen();
+    }
+  };
   
   // Custom options state
   const [customParams, setCustomParams] = useState({
@@ -31,20 +56,23 @@ function App() {
 
   const applyCustom = () => {
     setAppliedCustomParams(customParams);
+    setShowCustomPanel(false);
   };
 
   return (
-    <div style={{ textAlign: 'center', fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: '#e2e8f0', minHeight: '100vh', padding: '40px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-      <div style={{ background: '#ffffff', padding: '30px', borderRadius: '16px', boxShadow: '0 10px 25px rgba(0,0,0,0.1)', maxWidth: '860px', width: '100%' }}>
-        <h1 style={{ margin: 0, color: '#1a202c', fontSize: '2.5rem', fontWeight: '800' }}>Runner MVP</h1>
-        <p style={{ color: '#4a5568', marginBottom: '20px', fontSize: '1.1rem' }}>Click or press <kbd style={{background: '#edf2f7', padding: '2px 6px', borderRadius: '4px', border: '1px solid #cbd5e0'}}>SPACE</kbd> to jump</p>
+    <div style={{ textAlign: 'center', fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: '#e2e8f0', minHeight: '100vh', padding: '40px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', boxSizing: 'border-box' }}>
+        <h1 style={{ margin: '0 0 20px 0', color: '#1a202c', fontFamily: '"Arial Black", Impact, sans-serif', fontSize: '3.5rem', fontWeight: '900', letterSpacing: '2px', textTransform: 'uppercase', textShadow: '2px 4px 6px rgba(0,0,0,0.1)' }}>Runner MVP</h1>
       
-      <div style={{ marginBottom: '20px' }}>
+      <div style={{ position: 'relative', marginBottom: '20px', zIndex: 10 }}>
+        <div>
         <span style={{ marginRight: '10px', fontWeight: 'bold' }}>Game Rules:</span>
         {Object.keys(GAME_PRESETS).map((key) => (
           <button
             key={key}
-            onClick={() => setPresetKey(key)}
+            onClick={() => {
+              setPresetKey(key);
+              setShowCustomPanel(false);
+            }}
             style={{
               margin: '0 5px',
               padding: '10px 20px',
@@ -62,7 +90,10 @@ function App() {
           </button>
         ))}
         <button
-          onClick={() => setPresetKey('custom')}
+          onClick={() => {
+            setPresetKey('custom');
+            setShowCustomPanel(true);
+          }}
           style={{
             margin: '0 5px',
             padding: '10px 20px',
@@ -78,26 +109,103 @@ function App() {
         >
           Custom
         </button>
-      </div>
-
-      {isCustom && (
-        <div style={{ marginBottom: '20px', padding: '15px', backgroundColor: '#fff', borderRadius: '8px', border: '1px solid #ddd', display: 'inline-block', textAlign: 'left' }}>
-          <h3 style={{ margin: '0 0 10px 0', textAlign: 'center' }}>Custom Parameters</h3>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-            <label style={{ fontSize: '14px' }}>Run Speed:<br/><input type="number" name="runSpeed" value={customParams.runSpeed} onChange={handleCustomChange} style={{ width: '100px', marginTop: '4px' }} /></label>
-            <label style={{ fontSize: '14px' }}>Jump Force:<br/><input type="number" name="jumpForce" value={customParams.jumpForce} onChange={handleCustomChange} style={{ width: '100px', marginTop: '4px' }}/></label>
-            <label style={{ fontSize: '14px' }}>Gravity:<br/><input type="number" name="gravity" value={customParams.gravity} onChange={handleCustomChange} style={{ width: '100px', marginTop: '4px' }}/></label>
-            <label style={{ fontSize: '14px' }}>Obstacle Delay (ms):<br/><input type="number" name="obstacleDelay" value={customParams.obstacleDelay} onChange={handleCustomChange} style={{ width: '100px', marginTop: '4px' }}/></label>
-            <label style={{ fontSize: '14px' }}>Speed Increment:<br/><input type="number" name="speedIncrement" step="0.01" value={customParams.speedIncrement} onChange={handleCustomChange} style={{ width: '100px', marginTop: '4px' }}/></label>
-          </div>
-          <div style={{ textAlign: 'center', marginTop: '15px' }}>
-            <button onClick={applyCustom} style={{ padding: '8px 16px', background: '#28a745', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>Apply & Restart Game</button>
-          </div>
+        <button
+          onClick={handleFullscreen}
+          style={{
+            margin: '0 5px 0 15px',
+            padding: '10px 20px',
+            backgroundColor: '#48bb78',
+            color: '#ffffff',
+            border: '2px solid #48bb78',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            fontWeight: '600',
+            boxShadow: '0 4px 6px rgba(72, 187, 120, 0.2)',
+            transition: 'all 0.2s ease'
+          }}
+        >
+          Go Fullscreen ⛶
+        </button>
         </div>
-      )}
 
-      <GameComponent options={currentPreset} />
+        {isCustom && showCustomPanel && (
+          <div style={{ 
+            position: 'fixed', 
+            top: 0, 
+            left: 0, 
+            right: 0, 
+            bottom: 0, 
+            backgroundColor: 'rgba(0,0,0,0.6)', 
+            zIndex: 2000, 
+            display: 'flex', 
+            justifyContent: 'center', 
+            alignItems: 'center' 
+          }}>
+            <div style={{
+              backgroundColor: '#fff', 
+              padding: '30px', 
+              borderRadius: '12px', 
+              boxShadow: '0 10px 25px rgba(0,0,0,0.3)',
+              textAlign: 'left'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                <h3 style={{ margin: 0, color: '#1a202c' }}>Custom Parameters</h3>
+                <button onClick={() => setShowCustomPanel(false)} style={{ background: 'transparent', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#888' }}>✖</button>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+                <label style={{ fontSize: '14px' }}>Run Speed:<br/><input type="number" name="runSpeed" value={customParams.runSpeed} onChange={handleCustomChange} style={{ width: '120px', marginTop: '6px', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e0' }} /></label>
+                <label style={{ fontSize: '14px' }}>Jump Force:<br/><input type="number" name="jumpForce" value={customParams.jumpForce} onChange={handleCustomChange} style={{ width: '120px', marginTop: '6px', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e0' }}/></label>
+                <label style={{ fontSize: '14px' }}>Gravity:<br/><input type="number" name="gravity" value={customParams.gravity} onChange={handleCustomChange} style={{ width: '120px', marginTop: '6px', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e0' }}/></label>
+                <label style={{ fontSize: '14px' }}>Obstacle Delay (ms):<br/><input type="number" name="obstacleDelay" value={customParams.obstacleDelay} onChange={handleCustomChange} style={{ width: '120px', marginTop: '6px', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e0' }}/></label>
+                <label style={{ fontSize: '14px' }}>Speed Increment:<br/><input type="number" name="speedIncrement" step="0.01" value={customParams.speedIncrement} onChange={handleCustomChange} style={{ width: '120px', marginTop: '6px', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e0' }}/></label>
+              </div>
+              <div style={{ textAlign: 'center', marginTop: '25px' }}>
+                <button onClick={applyCustom} style={{ padding: '10px 20px', background: '#28a745', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '16px' }}>Apply & Restart Game</button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
+
+      <div 
+        ref={fullscreenContainerRef} 
+        style={{ 
+          position: 'relative', 
+          backgroundColor: isFullscreen ? '#000' : 'transparent',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          width: isFullscreen ? '100vw' : '100%',
+          height: isFullscreen ? '100vh' : '600px',
+          maxWidth: isFullscreen ? 'none' : '800px',
+          margin: '0 auto'
+        }}
+      >
+        <GameComponent options={currentPreset} isFullscreen={isFullscreen} />
+        {isFullscreen && (
+          <button
+            onClick={handleExitFullscreen}
+            style={{
+              position: 'absolute',
+              top: '20px',
+              right: '20px',
+              padding: '10px 15px',
+              backgroundColor: 'rgba(0,0,0,0.6)',
+              color: '#fff',
+              border: '1px solid rgba(255,255,255,0.3)',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontWeight: 'bold',
+              zIndex: 100
+            }}
+          >
+            ✖ Exit Fullscreen
+          </button>
+        )}
+      </div>
+      <p style={{ color: '#4a5568', marginTop: '20px', fontSize: '1.2rem', fontWeight: '500' }}>
+        Click or press <kbd style={{background: '#edf2f7', padding: '4px 8px', borderRadius: '6px', border: '1px solid #cbd5e0', boxShadow: '0 2px 0 #cbd5e0', color: '#1a202c', fontFamily: 'monospace', fontWeight: 'bold'}}>SPACE</kbd> to jump
+      </p>
     </div>
   );
 }
