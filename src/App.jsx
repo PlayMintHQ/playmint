@@ -217,6 +217,13 @@ function App() {
                     </div>
                     <input type="range" name="gravity" min="500" max="3500" step="50" value={liveParams.gravity} onChange={handleSliderChange} style={{ width: '100%', accentColor: '#dd6b20' }} />
                   </div>
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                      <label style={{ fontWeight: 'bold', fontSize: '13px', color: '#4a5568' }}>Spawn Delay (ms)</label>
+                      <span style={{ fontWeight: 'bold', fontSize: '13px', color: '#dd6b20' }}>{Math.round(liveParams.obstacleDelay)}</span>
+                    </div>
+                    <input type="range" name="obstacleDelay" min="400" max="2500" step="100" value={liveParams.obstacleDelay} onChange={handleSliderChange} style={{ width: '100%', accentColor: '#dd6b20' }} />
+                  </div>
                 </div>
 
                 {/* Changed marginTop to 'auto' to push the button to the bottom of the tall panel */}

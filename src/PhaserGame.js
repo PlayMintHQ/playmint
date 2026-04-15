@@ -34,9 +34,9 @@ class RunnerScene extends Phaser.Scene {
     this.bgGraphics.fillRect(0, 0, this.scale.width, this.scale.height);
 
     // Score UI
-    this.scoreText = this.add.text(16, 16, 'Score: 0', { 
-      fontFamily: 'system-ui, sans-serif', 
-      fontSize: '32px', 
+    this.scoreText = this.add.text(16, 16, 'Score: 0', {
+      fontFamily: 'system-ui, sans-serif',
+      fontSize: '32px',
       fill: '#333',
       fontStyle: 'bold'
     });
@@ -101,13 +101,14 @@ class RunnerScene extends Phaser.Scene {
     this.scale.on('resize', this.handleResize, this);
 
     // Live tuning integration
+    // Live tuning integration
     this.updateConfigListener = (e) => {
       const newConfig = e.detail;
+      const oldDelay = this.gameConfig.obstacleDelay; // Remember old delay
+
       this.gameConfig = { ...this.gameConfig, ...newConfig };
 
       // Reset both baseSpeed and runSpeed so the slider is always authoritative.
-      // This discards any progressive speed built up during the run, giving
-      // a clean, predictable baseline exactly matching the slider value.
       this.baseSpeed = this.gameConfig.runSpeed;
       this.runSpeed = this.baseSpeed;
 
@@ -121,6 +122,21 @@ class RunnerScene extends Phaser.Scene {
             obstacle.body.setGravityY(this.gameConfig.gravity);
             obstacle.body.setVelocityX(-this.runSpeed);
           }
+        });
+      }
+
+      // If the obstacle delay changed, reset the spawn timer
+      if (oldDelay !== this.gameConfig.obstacleDelay) {
+        if (this.obstacleTimer) {
+          this.obstacleTimer.remove(); // Destroy old timer
+        }
+
+        // Create new timer with the updated delay
+        this.obstacleTimer = this.time.addEvent({
+          delay: this.gameConfig.obstacleDelay,
+          callback: this.spawnObstacle,
+          callbackScope: this,
+          loop: true
         });
       }
     };
@@ -174,7 +190,7 @@ class RunnerScene extends Phaser.Scene {
     obstacle.setScale(scale);
     this.physics.add.existing(obstacle);
     this.obstacles.add(obstacle);
-    
+
     // Enable gravity so the obstacle naturally falls to exactly align with the floor
     obstacle.body.setGravityY(this.gameConfig.gravity);
     obstacle.body.setVelocityX(-this.runSpeed);
