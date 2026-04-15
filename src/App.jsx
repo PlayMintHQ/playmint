@@ -8,6 +8,12 @@ function App() {
   const fullscreenContainerRef = useRef(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
+  // New states for inline Import/Export UI
+  const [exportStatus, setExportStatus] = useState('idle');
+  const [isImporting, setIsImporting] = useState(false);
+  const [importText, setImportText] = useState('');
+  const [importError, setImportError] = useState('');
+
   useEffect(() => {
     const onFullscreenChange = () => {
       setIsFullscreen(!!document.fullscreenElement);
@@ -15,8 +21,6 @@ function App() {
     document.addEventListener('fullscreenchange', onFullscreenChange);
     return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
   }, []);
-
-
 
   const handleFullscreen = () => {
     if (fullscreenContainerRef.current && !document.fullscreenElement) {
@@ -58,6 +62,45 @@ function App() {
     // Entering Custom mode: keep current liveParams as-is so the game
     // doesn't jump, and reveal the panel for editing.
     setPresetKey('custom');
+  };
+
+  const handleExport = () => {
+    try {
+      const configString = JSON.stringify(liveParams, null, 2);
+      navigator.clipboard.writeText(configString);
+      setExportStatus('copied');
+      setTimeout(() => setExportStatus('idle'), 2000); // Reset text after 2 seconds
+    } catch (error) {
+      console.error('Failed to copy config to clipboard:', error);
+    }
+  };
+
+  const handleImportToggle = () => {
+    setIsImporting(true);
+    setImportText('');
+    setImportError('');
+  };
+
+  const handleImportApply = () => {
+    try {
+      const importedConfig = JSON.parse(importText);
+      if (typeof importedConfig === 'object' && importedConfig !== null && Object.keys(importedConfig).length > 0) {
+        setLiveParams(importedConfig);
+        setPresetKey('custom');
+        setIsImporting(false);
+        setImportError('');
+      } else {
+        setImportError('Invalid format.');
+      }
+    } catch (error) {
+      console.error('Failed to import configuration:', error);
+      setImportError('Invalid JSON.');
+    }
+  };
+
+  const handleImportCancel = () => {
+    setIsImporting(false);
+    setImportError('');
   };
 
   const isCustom = presetKey === 'custom';
@@ -128,8 +171,6 @@ function App() {
         </div>
       </div>
 
-
-
       <div style={{
         display: 'flex',
         justifyContent: 'center',
@@ -183,8 +224,8 @@ function App() {
             {isCustom && (
               <div style={{
                 width: '100%',
-                height: '100%', /* <-- Added height 100% */
-                display: 'flex', /* <-- Added flexbox to manage internal spacing */
+                height: '100%',
+                display: 'flex',
                 flexDirection: 'column',
                 backgroundColor: '#fff',
                 padding: '20px',
@@ -226,10 +267,52 @@ function App() {
                   </div>
                 </div>
 
-                {/* Changed marginTop to 'auto' to push the button to the bottom of the tall panel */}
-                <div style={{ marginTop: 'auto' }}>
+                <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {isImporting ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '10px', backgroundColor: '#f7fafc', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
+                      <textarea
+                        value={importText}
+                        onChange={(e) => setImportText(e.target.value)}
+                        placeholder="Paste JSON here..."
+                        style={{ width: '100%', height: '80px', fontSize: '11px', padding: '6px', border: '1px solid #cbd5e0', borderRadius: '4px', boxSizing: 'border-box', fontFamily: 'monospace' }}
+                      />
+                      {importError && <span style={{ color: '#e53e3e', fontSize: '11px', fontWeight: 'bold' }}>{importError}</span>}
+                      <div style={{ display: 'flex', gap: '6px' }}>
+                        <button
+                          onClick={handleImportApply}
+                          style={{ flex: 1, padding: '6px 0', background: '#3182ce', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}
+                        >
+                          Apply
+                        </button>
+                        <button
+                          onClick={handleImportCancel}
+                          style={{ flex: 1, padding: '6px 0', background: '#e2e8f0', color: '#4a5568', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <button
+                        onClick={handleExport}
+                        style={{ width: '100%', padding: '8px 0', background: exportStatus === 'copied' ? '#2f855a' : '#48bb78', color: '#ffffff', border: 'none', borderRadius: '0', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)', transition: 'background 0.2s ease' }}
+                      >
+                        {exportStatus === 'copied' ? 'Copied to Clipboard!' : 'Export Config (JSON)'}
+                      </button>
+                      <button
+                        onClick={handleImportToggle}
+                        style={{ width: '100%', padding: '8px 0', background: '#3182ce', color: '#ffffff', border: 'none', borderRadius: '0', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}
+                      >
+                        Import Config (JSON)
+                      </button>
+                    </>
+                  )}
                   <button
-                    onClick={() => setLiveParams({ ...GAME_PRESETS['standard'] })}
+                    onClick={() => {
+                      setLiveParams({ ...GAME_PRESETS['standard'] });
+                      setIsImporting(false); // Reset import view on reset
+                    }}
                     style={{ width: '100%', padding: '8px 0', background: '#edf2f7', color: '#4a5568', border: 'none', borderRadius: '0', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}
                   >
                     Reset to Default
@@ -241,7 +324,6 @@ function App() {
         )}
       </div>
 
-      {/* Jump hint sits below the entire row */}
       <p style={{ color: '#4a5568', marginTop: '12px', fontSize: '1rem', fontWeight: '500' }}>
         Click or press <kbd style={{ background: '#edf2f7', padding: '4px 8px', borderRadius: '6px', border: '1px solid #cbd5e0', boxShadow: '0 2px 0 #cbd5e0', color: '#1a202c', fontFamily: 'monospace', fontWeight: 'bold' }}>SPACE</kbd> to jump
       </p>
