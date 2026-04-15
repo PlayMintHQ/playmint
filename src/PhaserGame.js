@@ -15,9 +15,13 @@ class RunnerScene extends Phaser.Scene {
   init(data) {
     this.gameConfig = {
       ...DEFAULT_CONFIG,
+      ...(window.__GAME_LIVE_CONFIG || {}),
       ...data
     };
-    this.runSpeed = this.gameConfig.runSpeed;
+    // baseSpeed is the slider-controlled foundation.
+    // runSpeed is the live value the game actively scales up over time.
+    this.baseSpeed = this.gameConfig.runSpeed;
+    this.runSpeed = this.baseSpeed;
   }
 
   create() {
@@ -90,8 +94,41 @@ class RunnerScene extends Phaser.Scene {
     this.input.keyboard.on('keydown-SPACE', this.jump, this);
     this.input.on('pointerdown', this.jump, this);
 
+    // Prevent Space from triggering the browser's default page-scroll behaviour
+    this.input.keyboard.addCapture('SPACE');
+
     // Dynamic resize handler
     this.scale.on('resize', this.handleResize, this);
+
+    // Live tuning integration
+    this.updateConfigListener = (e) => {
+      const newConfig = e.detail;
+      this.gameConfig = { ...this.gameConfig, ...newConfig };
+
+      // Reset both baseSpeed and runSpeed so the slider is always authoritative.
+      // This discards any progressive speed built up during the run, giving
+      // a clean, predictable baseline exactly matching the slider value.
+      this.baseSpeed = this.gameConfig.runSpeed;
+      this.runSpeed = this.baseSpeed;
+
+      if (this.player && this.player.body) {
+        this.player.body.setGravityY(this.gameConfig.gravity);
+      }
+
+      if (this.obstacles && this.obstacles.children) {
+        this.obstacles.children.iterate((obstacle) => {
+          if (obstacle && obstacle.body) {
+            obstacle.body.setGravityY(this.gameConfig.gravity);
+            obstacle.body.setVelocityX(-this.runSpeed);
+          }
+        });
+      }
+    };
+    window.addEventListener('update-game-config', this.updateConfigListener);
+
+    this.events.on('shutdown', () => {
+      window.removeEventListener('update-game-config', this.updateConfigListener);
+    });
   }
 
   handleResize(gameSize) {
@@ -208,7 +245,8 @@ class RunnerScene extends Phaser.Scene {
       }
     });
 
-    // Optional MVP expansion: slightly increase run speed over time
+    // Progressive speed: scales up from the current baseSpeed over time.
+    // baseSpeed is the slider-controlled value; runSpeed floats above it.
     this.runSpeed += this.gameConfig.speedIncrement;
   }
 }
@@ -231,9 +269,9 @@ const config = {
   }
 };
 
-const startGame = (parent, gameOptions) => {
+const startGame = (parent) => {
   const game = new Phaser.Game({ ...config, parent });
-  game.scene.add('RunnerScene', RunnerScene, true, gameOptions);
+  game.scene.add('RunnerScene', RunnerScene, true);
   return game;
 };
 
