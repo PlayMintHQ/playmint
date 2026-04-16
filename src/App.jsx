@@ -2,9 +2,29 @@ import React, { useState, useRef, useEffect } from 'react';
 import GameComponent from './GameComponent';
 import { GAME_PRESETS } from './gameConfig';
 
+const getInitialState = () => {
+  if (typeof window !== 'undefined') {
+    const hash = window.location.hash;
+    if (hash && hash.startsWith('#config=')) {
+      try {
+        const encodedConfig = hash.replace('#config=', '');
+        const decodedConfigString = atob(encodedConfig);
+        const importedConfig = JSON.parse(decodedConfigString);
+        if (typeof importedConfig === 'object' && importedConfig !== null && Object.keys(importedConfig).length > 0) {
+          return { presetKey: 'custom', liveParams: importedConfig };
+        }
+      } catch (error) {
+        console.error('Failed to parse config from URL:', error);
+      }
+    }
+  }
+  return { presetKey: 'standard', liveParams: { ...GAME_PRESETS['standard'] } };
+};
+
 function App() {
-  const [presetKey, setPresetKey] = useState('standard');
-  const [liveParams, setLiveParams] = useState({ ...GAME_PRESETS['standard'] });
+  const [initialConfig] = useState(getInitialState);
+  const [presetKey, setPresetKey] = useState(initialConfig.presetKey);
+  const [liveParams, setLiveParams] = useState(initialConfig.liveParams);
   const fullscreenContainerRef = useRef(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
@@ -13,6 +33,13 @@ function App() {
   const [isImporting, setIsImporting] = useState(false);
   const [importText, setImportText] = useState('');
   const [importError, setImportError] = useState('');
+
+  useEffect(() => {
+    const hash = window.location.hash;
+    if (hash && hash.startsWith('#config=')) {
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+  }, []);
 
   useEffect(() => {
     const onFullscreenChange = () => {
@@ -36,9 +63,13 @@ function App() {
     }
   };
 
-  // Sync to window for live tuning
-  useEffect(() => {
+  // Sync synchronously to window so Phaser picks it up correctly on initial mount
+  if (typeof window !== 'undefined') {
     window.__GAME_LIVE_CONFIG = liveParams;
+  }
+
+  // Emit event to update already running game instance
+  useEffect(() => {
     window.dispatchEvent(new CustomEvent('update-game-config', { detail: liveParams }));
   }, [liveParams]);
 
@@ -72,6 +103,19 @@ function App() {
       setTimeout(() => setExportStatus('idle'), 2000); // Reset text after 2 seconds
     } catch (error) {
       console.error('Failed to copy config to clipboard:', error);
+    }
+  };
+
+  const handleShareLink = () => {
+    try {
+      const configString = JSON.stringify(liveParams);
+      const encodedConfig = btoa(configString);
+      const shareUrl = `${window.location.origin}${window.location.pathname}${window.location.search}#config=${encodedConfig}`;
+      navigator.clipboard.writeText(shareUrl);
+      setExportStatus('linkCopied');
+      setTimeout(() => setExportStatus('idle'), 2000);
+    } catch (error) {
+      console.error('Failed to copy link to clipboard:', error);
     }
   };
 
@@ -295,8 +339,14 @@ function App() {
                   ) : (
                     <>
                       <button
+                        onClick={handleShareLink}
+                        style={{ width: '100%', padding: '8px 0', background: exportStatus === 'linkCopied' ? '#2f855a' : '#805ad5', color: '#ffffff', border: 'none', borderRadius: '0', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)', transition: 'background 0.2s ease', marginBottom: '8px' }}
+                      >
+                        {exportStatus === 'linkCopied' ? 'Link Copied!' : 'Copy Share Link'}
+                      </button>
+                      <button
                         onClick={handleExport}
-                        style={{ width: '100%', padding: '8px 0', background: exportStatus === 'copied' ? '#2f855a' : '#48bb78', color: '#ffffff', border: 'none', borderRadius: '0', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)', transition: 'background 0.2s ease' }}
+                        style={{ width: '100%', padding: '8px 0', background: exportStatus === 'copied' ? '#2f855a' : '#48bb78', color: '#ffffff', border: 'none', borderRadius: '0', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)', transition: 'background 0.2s ease', marginBottom: '8px' }}
                       >
                         {exportStatus === 'copied' ? 'Copied to Clipboard!' : 'Export Config (JSON)'}
                       </button>
