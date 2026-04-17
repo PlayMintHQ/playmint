@@ -150,21 +150,24 @@ function App() {
   const isCustom = presetKey === 'custom';
 
   return (
-    <div style={{ textAlign: 'center', fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: '#e2e8f0', minHeight: '100vh', padding: '40px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', boxSizing: 'border-box' }}>
-      <h1 style={{ margin: '0 0 20px 0', color: '#1a202c', fontFamily: '"Arial Black", Impact, sans-serif', fontSize: '3.5rem', fontWeight: '900', letterSpacing: '2px', textTransform: 'uppercase', textShadow: '2px 4px 6px rgba(0,0,0,0.1)' }}>Runner MVP</h1>
+    <div style={{ textAlign: 'center', fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: '#111827', minHeight: '100vh', padding: '40px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', boxSizing: 'border-box' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', marginBottom: '30px' }}>
+        <img src="/assets/Logo_PlayMint_(transparent).png" alt="PlayMint" style={{ height: '160px', marginBottom: '5px' }} />
+        <h1 style={{ margin: '0', color: '#ffffff', fontFamily: '"Arial Black", Impact, sans-serif', fontSize: '2.5rem', fontWeight: '900', letterSpacing: '2px', textTransform: 'uppercase', textShadow: '2px 4px 6px rgba(0,0,0,0.5)' }}>PlayMint</h1>
+      </div>
 
       <div style={{ position: 'relative', marginBottom: '20px', zIndex: 10 }}>
         <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'center', gap: '6px' }}>
-          <span style={{ marginRight: '4px', fontWeight: 'bold', color: '#4a5568', fontSize: '14px' }}>Play:</span>
+          <span style={{ marginRight: '4px', fontWeight: 'bold', color: '#9ca3af', fontSize: '14px' }}>Play:</span>
           {Object.keys(GAME_PRESETS).map((key) => (
             <button
               key={key}
               onClick={() => applyPreset(key)}
               style={{
                 padding: '10px 20px',
-                backgroundColor: presetKey === key ? '#3182ce' : '#ffffff',
-                color: presetKey === key ? '#ffffff' : '#2d3748',
-                border: presetKey === key ? '2px solid #3182ce' : '2px solid #e2e8f0',
+                backgroundColor: presetKey === key ? '#3182ce' : '#1f2937',
+                color: presetKey === key ? '#ffffff' : '#d1d5db',
+                border: presetKey === key ? '2px solid #3182ce' : '2px solid #374151',
                 borderRadius: '8px',
                 cursor: 'pointer',
                 fontWeight: '600',
@@ -176,15 +179,15 @@ function App() {
             </button>
           ))}
 
-          <span style={{ margin: '0 6px', color: '#cbd5e0', fontWeight: 'bold', fontSize: '18px' }}>|</span>
-          <span style={{ marginRight: '4px', fontWeight: 'bold', color: '#4a5568', fontSize: '14px' }}>Create:</span>
+          <span style={{ margin: '0 6px', color: '#4b5563', fontWeight: 'bold', fontSize: '18px' }}>|</span>
+          <span style={{ marginRight: '4px', fontWeight: 'bold', color: '#9ca3af', fontSize: '14px' }}>Create:</span>
           <button
             onClick={handleCustomSelect}
             style={{
               padding: '10px 20px',
-              backgroundColor: isCustom ? '#dd6b20' : '#ffffff',
-              color: isCustom ? '#ffffff' : '#2d3748',
-              border: isCustom ? '2px solid #dd6b20' : '2px solid #e2e8f0',
+              backgroundColor: isCustom ? '#dd6b20' : '#1f2937',
+              color: isCustom ? '#ffffff' : '#d1d5db',
+              border: isCustom ? '2px solid #dd6b20' : '2px solid #374151',
               borderRadius: '8px',
               cursor: 'pointer',
               fontWeight: '600',
@@ -374,8 +377,8 @@ function App() {
         )}
       </div>
 
-      <p style={{ color: '#4a5568', marginTop: '12px', fontSize: '1rem', fontWeight: '500' }}>
-        Click or press <kbd style={{ background: '#edf2f7', padding: '4px 8px', borderRadius: '6px', border: '1px solid #cbd5e0', boxShadow: '0 2px 0 #cbd5e0', color: '#1a202c', fontFamily: 'monospace', fontWeight: 'bold' }}>SPACE</kbd> to jump
+      <p style={{ color: '#9ca3af', marginTop: '12px', fontSize: '1rem', fontWeight: '500' }}>
+        Click or press <kbd style={{ background: '#374151', padding: '4px 8px', borderRadius: '6px', border: '1px solid #4b5563', boxShadow: '0 2px 0 #111827', color: '#f3f4f6', fontFamily: 'monospace', fontWeight: 'bold' }}>SPACE</kbd> to jump
       </p>
     </div>
   );
