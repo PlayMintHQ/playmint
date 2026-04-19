@@ -162,49 +162,84 @@ function App() {
   return (
     <div style={{ textAlign: 'center', fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: '#111827', minHeight: '100vh', padding: '0', display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', boxSizing: 'border-box', overflow: 'hidden' }}>
       
-      {/* Top Right Controls: Score & Menu Button */}
+      {/* Unified HUD Header */}
       <div style={{
         position: 'fixed',
-        top: '20px',
-        right: '20px',
-        zIndex: 900,
+        top: 0,
+        left: 0,
+        width: '100%',
+        padding: '10px 15px',
         display: 'flex',
-        alignItems: 'center',
-        gap: '20px'
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
+        zIndex: 900,
+        boxSizing: 'border-box',
+        pointerEvents: 'none'
       }}>
-        {/* Score Display */}
-        <div style={{
-          fontSize: 'clamp(20px, 4vw, 28px)',
-          fontWeight: '900',
-          color: '#ffffff',
-          textShadow: '2px 2px 0 #000, 4px 4px 0 rgba(0,0,0,0.5)',
-          fontFamily: '"Impact", "Arial Black", sans-serif',
-          fontStyle: 'italic',
-          letterSpacing: '1px',
-          WebkitTextStroke: '1px #000'
-        }}>
-          SCORE: {score}
+        {/* LEFT COLUMN: Logo */}
+        <div style={{ flex: '1 1 0', display: 'flex', justifyContent: 'flex-start', pointerEvents: 'auto' }}>
+          <img src="/assets/Logo_PlayMint_(transparent).png" alt="PlayMint" style={{ height: 'clamp(35px, 8vw, 80px)' }} />
         </div>
 
-        {/* Menu Toggle Button */}
-        <button
-          onClick={() => setIsMenuOpen(true)}
-          style={{
-            padding: '10px 15px',
-            backgroundColor: '#374151',
+        {/* CENTER COLUMN: Title */}
+        {liveParams.gameName && (
+          <div style={{ flex: '2 1 auto', display: 'flex', justifyContent: 'center', textAlign: 'center' }}>
+            <h1 style={{
+              margin: '0',
+              color: '#ffffff',
+              fontFamily: '"Impact", "Arial Black", sans-serif',
+              fontStyle: 'italic',
+              fontSize: 'clamp(20px, 5vw, 64px)', 
+              fontWeight: '900',
+              letterSpacing: '2px',
+              textTransform: 'uppercase',
+              textShadow: '2px 2px 0 #000, 4px 4px 0 rgba(0,0,0,0.5)',
+              WebkitTextStroke: '1px #000',
+              lineHeight: 1.1,
+              whiteSpace: 'normal',
+              wordBreak: 'break-word',
+              pointerEvents: 'none'
+            }}>
+              {liveParams.gameName}
+            </h1>
+          </div>
+        )}
+
+        {/* RIGHT COLUMN: Score & Menu */}
+        <div style={{ flex: '1 1 0', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '10px', pointerEvents: 'auto' }}>
+          <div style={{
+            fontSize: 'clamp(18px, 4vw, 28px)',
+            fontWeight: '900',
             color: '#ffffff',
-            border: 'none',
-            borderRadius: '8px',
-            cursor: 'pointer',
-            fontWeight: 'bold',
-            boxShadow: '0 4px 6px rgba(0,0,0,0.3)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px'
-          }}
-        >
-          <span style={{ fontSize: '20px', lineHeight: 1 }}>☰</span> Menu
-        </button>
+            textShadow: '2px 2px 0 #000, 4px 4px 0 rgba(0,0,0,0.5)',
+            fontFamily: '"Impact", "Arial Black", sans-serif',
+            fontStyle: 'italic',
+            letterSpacing: '1px',
+            WebkitTextStroke: '1px #000',
+            lineHeight: 1
+          }}>
+            SCORE: {score}
+          </div>
+
+          <button
+            onClick={() => setIsMenuOpen(true)}
+            style={{
+              padding: '8px 12px',
+              backgroundColor: '#374151',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontWeight: 'bold',
+              boxShadow: '0 4px 6px rgba(0,0,0,0.3)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+          >
+            <span style={{ fontSize: '18px', lineHeight: 1 }}>☰</span> Menu
+          </button>
+        </div>
       </div>
 
       {/* Side Menu Panel */}
@@ -437,34 +472,7 @@ function App() {
         </div>
       </div>
 
-      <div style={{ position: 'fixed', top: '0px', left: '20px', display: 'flex', alignItems: 'center', zIndex: 1000, pointerEvents: 'none' }}>
-        <img src="/assets/Logo_PlayMint_(transparent).png" alt="PlayMint" style={{ height: 'clamp(50px, 10vw, 100px)' }} />
-      </div>
 
-      {/* Game Name Overlay */}
-      {liveParams.gameName && (
-        <h1 style={{
-          position: 'fixed',
-          top: '20px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          zIndex: 1000,
-          pointerEvents: 'none',
-          margin: 0,
-          color: '#ffffff',
-          fontFamily: '"Impact", "Arial Black", sans-serif',
-          fontStyle: 'italic',
-          fontSize: 'clamp(32px, 6vw, 64px)',
-          fontWeight: '900',
-          letterSpacing: '3px',
-          textTransform: 'uppercase',
-          textShadow: '2px 2px 0 #000, 4px 4px 0 rgba(0,0,0,0.5)',
-          WebkitTextStroke: '1px #000',
-          whiteSpace: 'nowrap'
-        }}>
-          {liveParams.gameName}
-        </h1>
-      )}
 
       {/* Main Game Container */}
       <div style={{

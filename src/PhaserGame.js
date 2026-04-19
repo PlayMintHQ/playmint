@@ -84,11 +84,25 @@ class RunnerScene extends Phaser.Scene {
     this.physics.add.collider(this.player, this.obstacles, this.hitObstacle, null, this);
 
     // Input to jump or restart
-    this.input.keyboard.on('keydown-SPACE', this.jump, this);
+    this.input.keyboard.on('keydown-SPACE', (e) => {
+      if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) {
+        return;
+      }
+      this.jump();
+    });
     this.input.on('pointerdown', this.jump, this);
 
-    // Prevent Space from triggering the browser's default page-scroll behaviour
-    this.input.keyboard.addCapture('SPACE');
+    // Prevent Space from triggering the browser's default page-scroll behaviour,
+    // EXCEPT when typing inside an input field.
+    this.spaceCaptureListener = (e) => {
+      if (e.code === 'Space') {
+        const activeTag = document.activeElement ? document.activeElement.tagName : '';
+        if (activeTag !== 'INPUT' && activeTag !== 'TEXTAREA') {
+          e.preventDefault();
+        }
+      }
+    };
+    window.addEventListener('keydown', this.spaceCaptureListener, { passive: false });
 
     // Dynamic resize handler
     this.scale.on('resize', this.handleResize, this);
@@ -137,6 +151,7 @@ class RunnerScene extends Phaser.Scene {
 
     this.events.on('shutdown', () => {
       window.removeEventListener('update-game-config', this.updateConfigListener);
+      window.removeEventListener('keydown', this.spaceCaptureListener);
     });
   }
 
