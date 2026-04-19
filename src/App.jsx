@@ -27,6 +27,7 @@ function App() {
   const [liveParams, setLiveParams] = useState(initialConfig.liveParams);
   const fullscreenContainerRef = useRef(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   // New states for inline Import/Export UI
   const [exportStatus, setExportStatus] = useState('idle');
@@ -150,58 +151,67 @@ function App() {
   const isCustom = presetKey === 'custom';
 
   return (
-    <div style={{ textAlign: 'center', fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: '#111827', minHeight: '100vh', padding: '40px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', boxSizing: 'border-box' }}>
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', marginBottom: '30px' }}>
-        <img src="/assets/Logo_PlayMint_(transparent).png" alt="PlayMint" style={{ height: '160px', marginBottom: '5px' }} />
-        <h1 style={{ margin: '0', color: '#ffffff', fontFamily: '"Arial Black", Impact, sans-serif', fontSize: '2.5rem', fontWeight: '900', letterSpacing: '2px', textTransform: 'uppercase', textShadow: '2px 4px 6px rgba(0,0,0,0.5)' }}>PlayMint</h1>
-      </div>
+    <div style={{ textAlign: 'center', fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: '#111827', minHeight: '100vh', padding: '0', display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', boxSizing: 'border-box', overflowX: 'hidden', overflowY: 'hidden', userSelect: 'none', WebkitUserSelect: 'none', touchAction: 'none' }}>
+      
+      {/* Menu Toggle Button */}
+      <button
+        onClick={() => setIsMenuOpen(true)}
+        style={{
+          position: 'fixed',
+          top: '20px',
+          right: '20px',
+          zIndex: 900,
+          padding: '10px 15px',
+          backgroundColor: '#374151',
+          color: '#ffffff',
+          border: 'none',
+          borderRadius: '8px',
+          cursor: 'pointer',
+          fontWeight: 'bold',
+          boxShadow: '0 4px 6px rgba(0,0,0,0.3)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px'
+        }}
+      >
+        <span style={{ fontSize: '20px', lineHeight: 1 }}>☰</span> Menu
+      </button>
 
-      <div style={{ position: 'relative', marginBottom: '20px', zIndex: 10 }}>
-        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'center', gap: '6px' }}>
-          <span style={{ marginRight: '4px', fontWeight: 'bold', color: '#9ca3af', fontSize: '14px' }}>Play:</span>
-          {Object.keys(GAME_PRESETS).map((key) => (
-            <button
-              key={key}
-              onClick={() => applyPreset(key)}
-              style={{
-                padding: '10px 20px',
-                backgroundColor: presetKey === key ? '#3182ce' : '#1f2937',
-                color: presetKey === key ? '#ffffff' : '#d1d5db',
-                border: presetKey === key ? '2px solid #3182ce' : '2px solid #374151',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                fontWeight: '600',
-                boxShadow: presetKey === key ? '0 4px 6px rgba(49, 130, 206, 0.2)' : 'none',
-                transition: 'all 0.2s ease'
-              }}
-            >
-              {GAME_PRESETS[key].name}
-            </button>
-          ))}
-
-          <span style={{ margin: '0 6px', color: '#4b5563', fontWeight: 'bold', fontSize: '18px' }}>|</span>
-          <span style={{ marginRight: '4px', fontWeight: 'bold', color: '#9ca3af', fontSize: '14px' }}>Create:</span>
+      {/* Side Menu Panel */}
+      <div style={{
+        position: 'fixed',
+        top: 0,
+        right: 0,
+        height: '100vh',
+        width: '100vw',
+        maxWidth: '340px',
+        backgroundColor: '#1f2937',
+        boxShadow: '-4px 0 15px rgba(0,0,0,0.5)',
+        transform: isMenuOpen ? 'translateX(0)' : 'translateX(100%)',
+        transition: 'transform 0.3s ease-in-out',
+        zIndex: 1000,
+        overflowY: 'auto',
+        display: 'flex',
+        flexDirection: 'column',
+        boxSizing: 'border-box'
+      }}>
+        {/* Menu Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px', borderBottom: '1px solid #374151' }}>
+          <h2 style={{ margin: 0, color: '#ffffff', fontSize: '18px' }}>Settings</h2>
           <button
-            onClick={handleCustomSelect}
-            style={{
-              padding: '10px 20px',
-              backgroundColor: isCustom ? '#dd6b20' : '#1f2937',
-              color: isCustom ? '#ffffff' : '#d1d5db',
-              border: isCustom ? '2px solid #dd6b20' : '2px solid #374151',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              fontWeight: '600',
-              boxShadow: isCustom ? '0 4px 6px rgba(221, 107, 32, 0.2)' : 'none',
-              transition: 'all 0.2s ease'
-            }}
+            onClick={() => setIsMenuOpen(false)}
+            style={{ background: 'transparent', border: 'none', color: '#9ca3af', fontSize: '24px', cursor: 'pointer' }}
           >
-            Custom
+            ✕
           </button>
+        </div>
 
+        {/* Menu Content */}
+        <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          
           <button
             onClick={handleFullscreen}
             style={{
-              marginLeft: '6px',
               padding: '10px 20px',
               backgroundColor: '#48bb78',
               color: '#ffffff',
@@ -210,37 +220,187 @@ function App() {
               cursor: 'pointer',
               fontWeight: '600',
               boxShadow: '0 4px 6px rgba(72, 187, 120, 0.2)',
-              transition: 'all 0.2s ease'
+              transition: 'all 0.2s ease',
+              width: '100%'
             }}
           >
             Go Fullscreen ⛶
           </button>
+
+          <div>
+            <span style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold', color: '#9ca3af', fontSize: '14px', textAlign: 'left' }}>Play Preset:</span>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+              {Object.keys(GAME_PRESETS).map((key) => (
+                <button
+                  key={key}
+                  onClick={() => applyPreset(key)}
+                  style={{
+                    flex: '1 1 45%',
+                    padding: '8px 10px',
+                    backgroundColor: presetKey === key ? '#3182ce' : '#2d3748',
+                    color: presetKey === key ? '#ffffff' : '#d1d5db',
+                    border: presetKey === key ? '2px solid #3182ce' : '2px solid #4a5568',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontWeight: '600',
+                    fontSize: '13px',
+                    boxShadow: presetKey === key ? '0 4px 6px rgba(49, 130, 206, 0.2)' : 'none',
+                    transition: 'all 0.2s ease'
+                  }}
+                >
+                  {GAME_PRESETS[key].name}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <span style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold', color: '#9ca3af', fontSize: '14px', textAlign: 'left' }}>Mode:</span>
+            <button
+              onClick={handleCustomSelect}
+              style={{
+                width: '100%',
+                padding: '10px 20px',
+                backgroundColor: isCustom ? '#dd6b20' : '#2d3748',
+                color: isCustom ? '#ffffff' : '#d1d5db',
+                border: isCustom ? '2px solid #dd6b20' : '2px solid #4a5568',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontWeight: '600',
+                boxShadow: isCustom ? '0 4px 6px rgba(221, 107, 32, 0.2)' : 'none',
+                transition: 'all 0.2s ease'
+              }}
+            >
+              Custom Tuning
+            </button>
+          </div>
+
+          {isCustom && (
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              backgroundColor: '#fff',
+              padding: '15px',
+              borderRadius: '8px',
+              boxShadow: '0 4px 6px rgba(0,0,0,0.05)',
+              boxSizing: 'border-box'
+            }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', marginBottom: '20px' }}>
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                    <label style={{ fontWeight: 'bold', fontSize: '13px', color: '#4a5568' }}>Speed</label>
+                    <span style={{ fontWeight: 'bold', fontSize: '13px', color: '#dd6b20' }}>{Math.round(liveParams.runSpeed)}</span>
+                  </div>
+                  <input type="range" name="runSpeed" min="100" max="1000" step="10" value={liveParams.runSpeed} onChange={handleSliderChange} style={{ width: '100%', accentColor: '#dd6b20' }} />
+                </div>
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                    <label style={{ fontWeight: 'bold', fontSize: '13px', color: '#4a5568' }}>Jump Force</label>
+                    <span style={{ fontWeight: 'bold', fontSize: '13px', color: '#dd6b20' }}>{Math.round(liveParams.jumpForce)}</span>
+                  </div>
+                  <input type="range" name="jumpForce" min="200" max="1500" step="10" value={liveParams.jumpForce} onChange={handleSliderChange} style={{ width: '100%', accentColor: '#dd6b20' }} />
+                </div>
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                    <label style={{ fontWeight: 'bold', fontSize: '13px', color: '#4a5568' }}>Gravity</label>
+                    <span style={{ fontWeight: 'bold', fontSize: '13px', color: '#dd6b20' }}>{Math.round(liveParams.gravity)}</span>
+                  </div>
+                  <input type="range" name="gravity" min="500" max="3500" step="50" value={liveParams.gravity} onChange={handleSliderChange} style={{ width: '100%', accentColor: '#dd6b20' }} />
+                </div>
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                    <label style={{ fontWeight: 'bold', fontSize: '13px', color: '#4a5568' }}>Spawn Delay (ms)</label>
+                    <span style={{ fontWeight: 'bold', fontSize: '13px', color: '#dd6b20' }}>{Math.round(liveParams.obstacleDelay)}</span>
+                  </div>
+                  <input type="range" name="obstacleDelay" min="400" max="2500" step="100" value={liveParams.obstacleDelay} onChange={handleSliderChange} style={{ width: '100%', accentColor: '#dd6b20' }} />
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {isImporting ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '10px', backgroundColor: '#f7fafc', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
+                    <textarea
+                      value={importText}
+                      onChange={(e) => setImportText(e.target.value)}
+                      placeholder="Paste JSON here..."
+                      style={{ width: '100%', height: '80px', fontSize: '11px', padding: '6px', border: '1px solid #cbd5e0', borderRadius: '4px', boxSizing: 'border-box', fontFamily: 'monospace' }}
+                    />
+                    {importError && <span style={{ color: '#e53e3e', fontSize: '11px', fontWeight: 'bold' }}>{importError}</span>}
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <button
+                        onClick={handleImportApply}
+                        style={{ flex: 1, padding: '6px 0', background: '#3182ce', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}
+                      >
+                        Apply
+                      </button>
+                      <button
+                        onClick={handleImportCancel}
+                        style={{ flex: 1, padding: '6px 0', background: '#e2e8f0', color: '#4a5568', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <button
+                      onClick={handleShareLink}
+                      style={{ width: '100%', padding: '8px 0', background: exportStatus === 'linkCopied' ? '#2f855a' : '#805ad5', color: '#ffffff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)', transition: 'background 0.2s ease' }}
+                    >
+                      {exportStatus === 'linkCopied' ? 'Link Copied!' : 'Copy Share Link'}
+                    </button>
+                    <button
+                      onClick={handleExport}
+                      style={{ width: '100%', padding: '8px 0', background: exportStatus === 'copied' ? '#2f855a' : '#48bb78', color: '#ffffff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)', transition: 'background 0.2s ease' }}
+                    >
+                      {exportStatus === 'copied' ? 'Copied to Clipboard!' : 'Export Config (JSON)'}
+                    </button>
+                    <button
+                      onClick={handleImportToggle}
+                      style={{ width: '100%', padding: '8px 0', background: '#3182ce', color: '#ffffff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}
+                    >
+                      Import Config (JSON)
+                    </button>
+                  </>
+                )}
+                <button
+                  onClick={() => {
+                    setLiveParams({ ...GAME_PRESETS['standard'] });
+                    setIsImporting(false);
+                  }}
+                  style={{ width: '100%', padding: '8px 0', background: '#edf2f7', color: '#4a5568', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)', marginTop: '4px' }}
+                >
+                  Reset to Default
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
+      <div style={{ position: 'fixed', top: '20px', left: '20px', display: 'flex', alignItems: 'center', zIndex: 1000, pointerEvents: 'none' }}>
+        <img src="/assets/Logo_PlayMint_(transparent).png" alt="PlayMint" style={{ height: 'clamp(40px, 8vw, 80px)' }} />
+      </div>
+
+      {/* Main Game Container */}
       <div style={{
         display: 'flex',
         justifyContent: 'center',
-        alignItems: 'stretch',
-        width: '100%',
-        margin: '0 auto',
+        alignItems: 'center',
+        width: '100vw',
+        height: '100vh',
+        position: 'relative'
       }}>
-
-        {!isFullscreen && (
-          <div style={{ width: '260px', flexShrink: 0, marginRight: '20px' }}></div>
-        )}
-
         <div
           ref={fullscreenContainerRef}
           style={{
-            width: isFullscreen ? '100vw' : '800px',
-            flexShrink: 0,
+            width: '100%',
+            height: '100%',
             position: 'relative',
-            backgroundColor: isFullscreen ? '#000' : 'transparent',
+            backgroundColor: 'transparent',
             display: 'flex',
             justifyContent: 'center',
             alignItems: 'center',
-            height: isFullscreen ? '100vh' : '480px',
           }}
         >
           <GameComponent isFullscreen={isFullscreen} />
@@ -265,120 +425,10 @@ function App() {
             </button>
           )}
         </div>
-
-        {!isFullscreen && (
-          <div style={{ width: '260px', flexShrink: 0, marginLeft: '20px' }}>
-            {isCustom && (
-              <div style={{
-                width: '100%',
-                height: '100%',
-                display: 'flex',
-                flexDirection: 'column',
-                backgroundColor: '#fff',
-                padding: '20px',
-                borderRadius: '0',
-                boxShadow: '0 4px 6px rgba(0,0,0,0.05)',
-                boxSizing: 'border-box'
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                  <h3 style={{ margin: 0, fontSize: '15px', color: '#2d3748' }}>Custom Mode</h3>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                      <label style={{ fontWeight: 'bold', fontSize: '13px', color: '#4a5568' }}>Speed</label>
-                      <span style={{ fontWeight: 'bold', fontSize: '13px', color: '#dd6b20' }}>{Math.round(liveParams.runSpeed)}</span>
-                    </div>
-                    <input type="range" name="runSpeed" min="100" max="1000" step="10" value={liveParams.runSpeed} onChange={handleSliderChange} style={{ width: '100%', accentColor: '#dd6b20' }} />
-                  </div>
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                      <label style={{ fontWeight: 'bold', fontSize: '13px', color: '#4a5568' }}>Jump Force</label>
-                      <span style={{ fontWeight: 'bold', fontSize: '13px', color: '#dd6b20' }}>{Math.round(liveParams.jumpForce)}</span>
-                    </div>
-                    <input type="range" name="jumpForce" min="200" max="1500" step="10" value={liveParams.jumpForce} onChange={handleSliderChange} style={{ width: '100%', accentColor: '#dd6b20' }} />
-                  </div>
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                      <label style={{ fontWeight: 'bold', fontSize: '13px', color: '#4a5568' }}>Gravity</label>
-                      <span style={{ fontWeight: 'bold', fontSize: '13px', color: '#dd6b20' }}>{Math.round(liveParams.gravity)}</span>
-                    </div>
-                    <input type="range" name="gravity" min="500" max="3500" step="50" value={liveParams.gravity} onChange={handleSliderChange} style={{ width: '100%', accentColor: '#dd6b20' }} />
-                  </div>
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                      <label style={{ fontWeight: 'bold', fontSize: '13px', color: '#4a5568' }}>Spawn Delay (ms)</label>
-                      <span style={{ fontWeight: 'bold', fontSize: '13px', color: '#dd6b20' }}>{Math.round(liveParams.obstacleDelay)}</span>
-                    </div>
-                    <input type="range" name="obstacleDelay" min="400" max="2500" step="100" value={liveParams.obstacleDelay} onChange={handleSliderChange} style={{ width: '100%', accentColor: '#dd6b20' }} />
-                  </div>
-                </div>
-
-                <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  {isImporting ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '10px', backgroundColor: '#f7fafc', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
-                      <textarea
-                        value={importText}
-                        onChange={(e) => setImportText(e.target.value)}
-                        placeholder="Paste JSON here..."
-                        style={{ width: '100%', height: '80px', fontSize: '11px', padding: '6px', border: '1px solid #cbd5e0', borderRadius: '4px', boxSizing: 'border-box', fontFamily: 'monospace' }}
-                      />
-                      {importError && <span style={{ color: '#e53e3e', fontSize: '11px', fontWeight: 'bold' }}>{importError}</span>}
-                      <div style={{ display: 'flex', gap: '6px' }}>
-                        <button
-                          onClick={handleImportApply}
-                          style={{ flex: 1, padding: '6px 0', background: '#3182ce', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}
-                        >
-                          Apply
-                        </button>
-                        <button
-                          onClick={handleImportCancel}
-                          style={{ flex: 1, padding: '6px 0', background: '#e2e8f0', color: '#4a5568', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      <button
-                        onClick={handleShareLink}
-                        style={{ width: '100%', padding: '8px 0', background: exportStatus === 'linkCopied' ? '#2f855a' : '#805ad5', color: '#ffffff', border: 'none', borderRadius: '0', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)', transition: 'background 0.2s ease', marginBottom: '8px' }}
-                      >
-                        {exportStatus === 'linkCopied' ? 'Link Copied!' : 'Copy Share Link'}
-                      </button>
-                      <button
-                        onClick={handleExport}
-                        style={{ width: '100%', padding: '8px 0', background: exportStatus === 'copied' ? '#2f855a' : '#48bb78', color: '#ffffff', border: 'none', borderRadius: '0', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)', transition: 'background 0.2s ease', marginBottom: '8px' }}
-                      >
-                        {exportStatus === 'copied' ? 'Copied to Clipboard!' : 'Export Config (JSON)'}
-                      </button>
-                      <button
-                        onClick={handleImportToggle}
-                        style={{ width: '100%', padding: '8px 0', background: '#3182ce', color: '#ffffff', border: 'none', borderRadius: '0', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}
-                      >
-                        Import Config (JSON)
-                      </button>
-                    </>
-                  )}
-                  <button
-                    onClick={() => {
-                      setLiveParams({ ...GAME_PRESETS['standard'] });
-                      setIsImporting(false); // Reset import view on reset
-                    }}
-                    style={{ width: '100%', padding: '8px 0', background: '#edf2f7', color: '#4a5568', border: 'none', borderRadius: '0', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}
-                  >
-                    Reset to Default
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
       </div>
 
-      <p style={{ color: '#9ca3af', marginTop: '12px', fontSize: '1rem', fontWeight: '500' }}>
-        Click or press <kbd style={{ background: '#374151', padding: '4px 8px', borderRadius: '6px', border: '1px solid #4b5563', boxShadow: '0 2px 0 #111827', color: '#f3f4f6', fontFamily: 'monospace', fontWeight: 'bold' }}>SPACE</kbd> to jump
+      <p style={{ position: 'fixed', bottom: '20px', left: '50%', transform: 'translateX(-50%)', margin: 0, color: '#9ca3af', fontSize: 'clamp(0.8rem, 4vw, 1rem)', fontWeight: '500', zIndex: 10, pointerEvents: 'none', textShadow: '1px 1px 2px #000', whiteSpace: 'nowrap' }}>
+        Tap or press <kbd style={{ background: '#374151', padding: '4px 8px', borderRadius: '6px', border: '1px solid #4b5563', boxShadow: '0 2px 0 #111827', color: '#f3f4f6', fontFamily: 'monospace', fontWeight: 'bold' }}>SPACE</kbd> to jump
       </p>
     </div>
   );

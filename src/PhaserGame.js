@@ -223,9 +223,10 @@ class RunnerScene extends Phaser.Scene {
     this.overlay = this.add.rectangle(this.scale.width / 2, this.scale.height / 2, this.scale.width, this.scale.height, 0x000000, 0.6);
     this.overlay.setDepth(10); // ensure it's on top of everything except text
 
+    const gameOverFontSize = Math.min(56, this.scale.width / 6) + 'px';
     this.gameOverText = this.add.text(this.scale.width / 2, this.scale.height / 2 - 40, 'GAME OVER', {
       fontFamily: 'system-ui, sans-serif',
-      fontSize: '56px',
+      fontSize: gameOverFontSize,
       fill: '#FF4136',
       fontStyle: '900'
     });
@@ -233,9 +234,10 @@ class RunnerScene extends Phaser.Scene {
     this.gameOverText.setShadow(2, 2, 'rgba(0,0,0,0.5)', 4);
     this.gameOverText.setDepth(11);
 
-    this.subText = this.add.text(this.scale.width / 2, this.scale.height / 2 + 20, 'Press Space or Click to Restart', {
+    const subTextFontSize = Math.min(24, this.scale.width / 15) + 'px';
+    this.subText = this.add.text(this.scale.width / 2, this.scale.height / 2 + 20, 'Tap or Press Space to Restart', {
       fontFamily: 'system-ui, sans-serif',
-      fontSize: '24px',
+      fontSize: subTextFontSize,
       fill: '#FFFFFF',
       fontStyle: 'bold'
     });
