@@ -160,7 +160,7 @@ function App() {
   const isCustom = presetKey === 'custom';
 
   return (
-    <div style={{ textAlign: 'center', fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: '#111827', minHeight: '100vh', padding: '0', display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', boxSizing: 'border-box', overflowX: 'hidden', overflowY: 'hidden', userSelect: 'none', WebkitUserSelect: 'none', touchAction: 'none' }}>
+    <div style={{ textAlign: 'center', fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: '#111827', minHeight: '100vh', padding: '0', display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', boxSizing: 'border-box', overflow: 'hidden' }}>
       
       {/* Top Right Controls: Score & Menu Button */}
       <div style={{
@@ -208,23 +208,30 @@ function App() {
       </div>
 
       {/* Side Menu Panel */}
-      <div style={{
-        position: 'fixed',
-        top: 0,
-        right: 0,
-        height: '100vh',
-        width: '100vw',
-        maxWidth: '340px',
-        backgroundColor: '#1f2937',
-        boxShadow: '-4px 0 15px rgba(0,0,0,0.5)',
-        transform: isMenuOpen ? 'translateX(0)' : 'translateX(100%)',
-        transition: 'transform 0.3s ease-in-out',
-        zIndex: 1000,
-        overflowY: 'auto',
-        display: 'flex',
-        flexDirection: 'column',
-        boxSizing: 'border-box'
-      }}>
+      <div 
+        onPointerDown={(e) => e.stopPropagation()}
+        onTouchStart={(e) => e.stopPropagation()}
+        style={{
+          position: 'fixed',
+          top: 0,
+          right: 0,
+          height: '100vh',
+          width: '100vw',
+          maxWidth: '340px',
+          backgroundColor: '#1f2937',
+          boxShadow: '-4px 0 15px rgba(0,0,0,0.5)',
+          transform: isMenuOpen ? 'translateX(0)' : 'translateX(100%)',
+          transition: 'transform 0.3s ease-in-out',
+          zIndex: 1000,
+          overflowY: 'auto',
+          WebkitOverflowScrolling: 'touch',
+          overscrollBehavior: 'contain',
+          touchAction: 'auto',
+          display: 'flex',
+          flexDirection: 'column',
+          boxSizing: 'border-box'
+        }}
+      >
         {/* Menu Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px', borderBottom: '1px solid #374151' }}>
           <h2 style={{ margin: 0, color: '#ffffff', fontSize: '18px' }}>Settings</h2>
@@ -478,6 +485,9 @@ function App() {
             display: 'flex',
             justifyContent: 'center',
             alignItems: 'center',
+            userSelect: 'none',
+            WebkitUserSelect: 'none',
+            touchAction: 'none'
           }}
         >
           <GameComponent isFullscreen={isFullscreen} />
