@@ -11,6 +11,7 @@ const getInitialState = () => {
         const decodedConfigString = atob(encodedConfig);
         const importedConfig = JSON.parse(decodedConfigString);
         if (typeof importedConfig === 'object' && importedConfig !== null && Object.keys(importedConfig).length > 0) {
+          if (!importedConfig.gameName) importedConfig.gameName = 'My Runner Game';
           return { presetKey: 'custom', liveParams: importedConfig };
         }
       } catch (error) {
@@ -18,7 +19,7 @@ const getInitialState = () => {
       }
     }
   }
-  return { presetKey: 'standard', liveParams: { ...GAME_PRESETS['standard'] } };
+  return { presetKey: 'standard', liveParams: { ...GAME_PRESETS['standard'], gameName: 'My Runner Game' } };
 };
 
 function App() {
@@ -28,6 +29,7 @@ function App() {
   const fullscreenContainerRef = useRef(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [score, setScore] = useState(0);
 
   // New states for inline Import/Export UI
   const [exportStatus, setExportStatus] = useState('idle');
@@ -48,6 +50,12 @@ function App() {
     };
     document.addEventListener('fullscreenchange', onFullscreenChange);
     return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
+  }, []);
+
+  useEffect(() => {
+    const handleScoreUpdate = (e) => setScore(e.detail);
+    window.addEventListener('update-score', handleScoreUpdate);
+    return () => window.removeEventListener('update-score', handleScoreUpdate);
   }, []);
 
   const handleFullscreen = () => {
@@ -87,7 +95,8 @@ function App() {
     // Switching to a preset snaps liveParams to that preset's values,
     // so the game updates live and sliders reflect where you left off if
     // you switch back to Custom.
-    setLiveParams({ ...GAME_PRESETS[key] });
+    // Preserve the custom name.
+    setLiveParams(prev => ({ ...GAME_PRESETS[key], gameName: prev.gameName }));
   };
 
   const handleCustomSelect = () => {
@@ -130,7 +139,7 @@ function App() {
     try {
       const importedConfig = JSON.parse(importText);
       if (typeof importedConfig === 'object' && importedConfig !== null && Object.keys(importedConfig).length > 0) {
-        setLiveParams(importedConfig);
+        setLiveParams({ gameName: 'My Runner Game', ...importedConfig });
         setPresetKey('custom');
         setIsImporting(false);
         setImportError('');
@@ -153,29 +162,50 @@ function App() {
   return (
     <div style={{ textAlign: 'center', fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: '#111827', minHeight: '100vh', padding: '0', display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', boxSizing: 'border-box', overflowX: 'hidden', overflowY: 'hidden', userSelect: 'none', WebkitUserSelect: 'none', touchAction: 'none' }}>
       
-      {/* Menu Toggle Button */}
-      <button
-        onClick={() => setIsMenuOpen(true)}
-        style={{
-          position: 'fixed',
-          top: '20px',
-          right: '20px',
-          zIndex: 900,
-          padding: '10px 15px',
-          backgroundColor: '#374151',
+      {/* Top Right Controls: Score & Menu Button */}
+      <div style={{
+        position: 'fixed',
+        top: '20px',
+        right: '20px',
+        zIndex: 900,
+        display: 'flex',
+        alignItems: 'center',
+        gap: '20px'
+      }}>
+        {/* Score Display */}
+        <div style={{
+          fontSize: 'clamp(20px, 4vw, 28px)',
+          fontWeight: '900',
           color: '#ffffff',
-          border: 'none',
-          borderRadius: '8px',
-          cursor: 'pointer',
-          fontWeight: 'bold',
-          boxShadow: '0 4px 6px rgba(0,0,0,0.3)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px'
-        }}
-      >
-        <span style={{ fontSize: '20px', lineHeight: 1 }}>☰</span> Menu
-      </button>
+          textShadow: '2px 2px 0 #000, 4px 4px 0 rgba(0,0,0,0.5)',
+          fontFamily: '"Impact", "Arial Black", sans-serif',
+          fontStyle: 'italic',
+          letterSpacing: '1px',
+          WebkitTextStroke: '1px #000'
+        }}>
+          SCORE: {score}
+        </div>
+
+        {/* Menu Toggle Button */}
+        <button
+          onClick={() => setIsMenuOpen(true)}
+          style={{
+            padding: '10px 15px',
+            backgroundColor: '#374151',
+            color: '#ffffff',
+            border: 'none',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            fontWeight: 'bold',
+            boxShadow: '0 4px 6px rgba(0,0,0,0.3)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px'
+          }}
+        >
+          <span style={{ fontSize: '20px', lineHeight: 1 }}>☰</span> Menu
+        </button>
+      </div>
 
       {/* Side Menu Panel */}
       <div style={{
@@ -209,6 +239,28 @@ function App() {
         {/* Menu Content */}
         <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
           
+          <div>
+            <span style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold', color: '#9ca3af', fontSize: '14px', textAlign: 'left' }}>Game Name:</span>
+            <input
+              type="text"
+              name="gameName"
+              value={liveParams.gameName || ''}
+              onChange={(e) => setLiveParams(prev => ({ ...prev, gameName: e.target.value }))}
+              placeholder="Enter Game Name"
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                backgroundColor: '#2d3748',
+                color: '#ffffff',
+                border: '1px solid #4a5568',
+                borderRadius: '8px',
+                fontSize: '14px',
+                boxSizing: 'border-box',
+                outline: 'none',
+              }}
+            />
+          </div>
+
           <button
             onClick={handleFullscreen}
             style={{
@@ -365,7 +417,7 @@ function App() {
                 )}
                 <button
                   onClick={() => {
-                    setLiveParams({ ...GAME_PRESETS['standard'] });
+                    setLiveParams(prev => ({ ...GAME_PRESETS['standard'], gameName: prev.gameName }));
                     setIsImporting(false);
                   }}
                   style={{ width: '100%', padding: '8px 0', background: '#edf2f7', color: '#4a5568', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)', marginTop: '4px' }}
@@ -378,9 +430,34 @@ function App() {
         </div>
       </div>
 
-      <div style={{ position: 'fixed', top: '20px', left: '20px', display: 'flex', alignItems: 'center', zIndex: 1000, pointerEvents: 'none' }}>
-        <img src="/assets/Logo_PlayMint_(transparent).png" alt="PlayMint" style={{ height: 'clamp(40px, 8vw, 80px)' }} />
+      <div style={{ position: 'fixed', top: '0px', left: '20px', display: 'flex', alignItems: 'center', zIndex: 1000, pointerEvents: 'none' }}>
+        <img src="/assets/Logo_PlayMint_(transparent).png" alt="PlayMint" style={{ height: 'clamp(50px, 10vw, 100px)' }} />
       </div>
+
+      {/* Game Name Overlay */}
+      {liveParams.gameName && (
+        <h1 style={{
+          position: 'fixed',
+          top: '20px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 1000,
+          pointerEvents: 'none',
+          margin: 0,
+          color: '#ffffff',
+          fontFamily: '"Impact", "Arial Black", sans-serif',
+          fontStyle: 'italic',
+          fontSize: 'clamp(32px, 6vw, 64px)',
+          fontWeight: '900',
+          letterSpacing: '3px',
+          textTransform: 'uppercase',
+          textShadow: '2px 2px 0 #000, 4px 4px 0 rgba(0,0,0,0.5)',
+          WebkitTextStroke: '1px #000',
+          whiteSpace: 'nowrap'
+        }}>
+          {liveParams.gameName}
+        </h1>
+      )}
 
       {/* Main Game Container */}
       <div style={{

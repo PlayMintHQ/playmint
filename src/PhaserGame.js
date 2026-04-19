@@ -27,27 +27,20 @@ class RunnerScene extends Phaser.Scene {
   create() {
     this.isGameOver = false;
     this.score = 0;
+    window.dispatchEvent(new CustomEvent('update-score', { detail: this.score }));
 
     // Create a smooth background gradient
     this.bgGraphics = this.add.graphics();
     this.bgGraphics.fillGradientStyle(0x87CEEB, 0x87CEEB, 0xe0f7fa, 0xe0f7fa, 1);
     this.bgGraphics.fillRect(0, 0, this.scale.width, this.scale.height);
 
-    // Score UI
-    this.scoreText = this.add.text(16, 16, 'Score: 0', {
-      fontFamily: 'system-ui, sans-serif',
-      fontSize: '32px',
-      fill: '#333',
-      fontStyle: 'bold'
-    });
-    this.scoreText.setShadow(2, 2, 'rgba(0,0,0,0.3)', 2);
-    // Increase score based on survival time
+    // Score state is managed in React. Update via DOM event.
     this.scoreTimer = this.time.addEvent({
       delay: this.gameConfig.scoreTimerDelay, // every 100ms
       callback: () => {
         if (!this.isGameOver) {
           this.score += 1;
-          this.scoreText.setText('Score: ' + this.score);
+          window.dispatchEvent(new CustomEvent('update-score', { detail: this.score }));
         }
       },
       loop: true
