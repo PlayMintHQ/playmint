@@ -171,36 +171,46 @@ function App() {
         top: 0,
         left: 0,
         width: '100%',
-        padding: '10px 15px',
+        padding: 'clamp(10px, 2vw, 20px) clamp(15px, 3vw, 30px)',
         display: 'flex',
         justifyContent: 'space-between',
-        alignItems: 'flex-start',
+        alignItems: 'center',
         zIndex: 900,
         boxSizing: 'border-box',
         pointerEvents: 'none'
       }}>
         {/* LEFT COLUMN: Logo */}
-        <div style={{ flex: '1 1 0', display: 'flex', justifyContent: 'flex-start', pointerEvents: 'auto' }}>
-          <img src="/assets/Logo_PlayMint_(transparent).png" alt="PlayMint" style={{ height: 'clamp(35px, 8vw, 80px)' }} />
+        <div style={{ flex: '0 1 auto', display: 'flex', justifyContent: 'flex-start', alignItems: 'center', pointerEvents: 'auto', zIndex: 2 }}>
+          <img src="/assets/Logo_PlayMint_(transparent).png" alt="PlayMint" style={{ height: 'clamp(20px, 4vw, 36px)', objectFit: 'contain' }} />
         </div>
 
         {/* CENTER COLUMN: Title */}
         {liveParams.gameName && (
-          <div style={{ flex: '2 1 auto', display: 'flex', justifyContent: 'center', textAlign: 'center' }}>
+          <div style={{ 
+            position: 'absolute', 
+            left: '50%', 
+            transform: 'translateX(-50%)', 
+            display: 'flex', 
+            justifyContent: 'center', 
+            textAlign: 'center',
+            maxWidth: 'calc(100vw - 240px)',
+            zIndex: 1,
+            pointerEvents: 'none'
+          }}>
             <h1 style={{
               margin: '0',
               color: '#ffffff',
               fontFamily: '"Impact", "Arial Black", sans-serif',
               fontStyle: 'italic',
-              fontSize: 'clamp(18px, 5vw, 48px)',
+              fontSize: 'clamp(20px, 4vw, 36px)',
               fontWeight: '900',
               letterSpacing: '1px',
               textTransform: 'uppercase',
               textShadow: '2px 2px 0 #000, 3px 3px 0 rgba(0,0,0,0.5)',
               lineHeight: 1.1,
-              whiteSpace: 'normal',
-              wordBreak: 'break-word',
-              pointerEvents: 'none'
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis'
             }}>
               {liveParams.gameName}
             </h1>
@@ -208,11 +218,11 @@ function App() {
         )}
 
         {/* RIGHT COLUMN: Score & Controls */}
-        <div style={{ flex: '1 1 0', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px', pointerEvents: 'auto' }}>
+        <div style={{ flex: '0 1 auto', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', justifyContent: 'center', gap: '6px', pointerEvents: 'auto', zIndex: 2 }}>
           
           {/* Score */}
           <div style={{
-            fontSize: 'clamp(16px, 4vw, 24px)',
+            fontSize: 'clamp(16px, 3vw, 24px)',
             fontWeight: '900',
             color: '#ffffff',
             textShadow: '2px 2px 0 #000, 3px 3px 0 rgba(0,0,0,0.5)',
@@ -226,12 +236,12 @@ function App() {
           </div>
 
           {/* Action Row */}
-          <div style={{ display: 'flex', gap: '6px' }}>
+          <div style={{ display: 'flex', gap: '8px' }}>
             {!isFullscreen && (
               <button
                 onClick={handleFullscreen}
                 style={{
-                  padding: '8px 12px',
+                  padding: 'clamp(6px, 1.5vw, 10px) clamp(10px, 2vw, 14px)',
                   backgroundColor: '#48bb78',
                   color: '#ffffff',
                   border: 'none',
@@ -241,7 +251,8 @@ function App() {
                   boxShadow: '0 4px 6px rgba(0,0,0,0.3)',
                   display: 'flex',
                   alignItems: 'center',
-                  fontSize: '18px',
+                  justifyContent: 'center',
+                  fontSize: 'clamp(14px, 3.5vw, 18px)',
                   lineHeight: 1
                 }}
                 title="Go Fullscreen"
@@ -252,7 +263,7 @@ function App() {
             <button
               onClick={() => setIsMenuOpen(true)}
               style={{
-                padding: '8px 12px',
+                padding: 'clamp(6px, 1.5vw, 10px) clamp(10px, 2vw, 14px)',
                 backgroundColor: '#374151',
                 color: '#ffffff',
                 border: 'none',
@@ -262,10 +273,11 @@ function App() {
                 boxShadow: '0 4px 6px rgba(0,0,0,0.3)',
                 display: 'flex',
                 alignItems: 'center',
+                justifyContent: 'center',
                 gap: '6px'
               }}
             >
-              <span style={{ fontSize: '18px', lineHeight: 1 }}>☰</span>
+              <span style={{ fontSize: 'clamp(14px, 3.5vw, 18px)', lineHeight: 1 }}>☰</span>
             </button>
           </div>
         </div>
