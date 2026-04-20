@@ -167,8 +167,10 @@ class RunnerScene extends Phaser.Scene {
     this.physics.world.setBounds(0, 0, width, height);
 
     this.floor.setPosition(0, height - this.gameConfig.floorHeight);
-    this.floor.setSize(width, this.gameConfig.floorHeight);
+    this.floor.width = width;
+    this.floor.height = this.gameConfig.floorHeight;
     if (this.floor.body) {
+      this.floor.body.setSize(width, this.gameConfig.floorHeight);
       this.floor.body.updateFromGameObject();
     }
 

@@ -160,7 +160,7 @@ function App() {
   const isCustom = presetKey === 'custom';
 
   return (
-    <div style={{ textAlign: 'center', fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: '#111827', minHeight: '100vh', padding: '0', display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', boxSizing: 'border-box', overflow: 'hidden' }}>
+    <div style={{ textAlign: 'center', fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: '#111827', minHeight: '100dvh', padding: '0', display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', boxSizing: 'border-box', overflow: 'hidden' }}>
       
       {/* Unified HUD Header */}
       <div style={{
@@ -489,7 +489,7 @@ function App() {
         justifyContent: 'center',
         alignItems: 'center',
         width: '100vw',
-        height: '100vh',
+        height: '100dvh',
         position: 'relative'
       }}>
         <div

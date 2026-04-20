@@ -18,8 +18,16 @@ const GameComponent = ({ isFullscreen }) => {
   }, []);
 
   return (
-    <div style={{ display: 'flex', justifyContent: 'center', width: '100%', height: '100%' }}>
-      <div ref={gameContainerRef} style={{ boxShadow: isFullscreen ? 'none' : '0 4px 8px rgba(0,0,0,0.1)', width: '100%', height: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center' }} />
+    <div style={{ position: 'relative', width: '100%', height: '100%', display: 'block' }}>
+      <div
+        ref={gameContainerRef}
+        style={{
+          position: 'absolute',
+          top: 0, left: 0, right: 0, bottom: 0,
+          boxShadow: isFullscreen ? 'none' : '0 4px 8px rgba(0,0,0,0.1)',
+          overflow: 'hidden'
+        }}
+      />
     </div>
   );
 };
