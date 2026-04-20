@@ -36,6 +36,7 @@ function App() {
   const [isImporting, setIsImporting] = useState(false);
   const [importText, setImportText] = useState('');
   const [importError, setImportError] = useState('');
+  const [showIOSPrompt, setShowIOSPrompt] = useState(false);
 
   useEffect(() => {
     const hash = window.location.hash;
@@ -59,10 +60,23 @@ function App() {
   }, []);
 
   const handleFullscreen = () => {
+    // Detect iOS devices (iPhone, iPad, iPod)
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    
+    // Check if we are already in the PWA Standalone environment
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+
+    if (isIOS && !isStandalone) {
+      setShowIOSPrompt(true);
+      return;
+    }
+
     if (fullscreenContainerRef.current && !document.fullscreenElement) {
-      fullscreenContainerRef.current.requestFullscreen().catch(err => {
-        console.error(`Error attempting to enable fullscreen: ${err.message}`);
-      });
+      if (fullscreenContainerRef.current.requestFullscreen) {
+        fullscreenContainerRef.current.requestFullscreen().catch(err => {
+          console.error(`Error attempting to enable fullscreen: ${err.message}`);
+        });
+      }
     }
   };
 
@@ -534,6 +548,58 @@ function App() {
       <p style={{ position: 'fixed', bottom: '20px', left: '50%', transform: 'translateX(-50%)', margin: 0, color: '#9ca3af', fontSize: 'clamp(0.8rem, 4vw, 1rem)', fontWeight: '500', zIndex: 10, pointerEvents: 'none', textShadow: '1px 1px 2px #000', whiteSpace: 'nowrap' }}>
         Tap or press <kbd style={{ background: '#374151', padding: '4px 8px', borderRadius: '6px', border: '1px solid #4b5563', boxShadow: '0 2px 0 #111827', color: '#f3f4f6', fontFamily: 'monospace', fontWeight: 'bold' }}>SPACE</kbd> to jump
       </p>
+
+      {/* iOS Fullscreen Prompt Modal */}
+      {showIOSPrompt && (
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.85)',
+          zIndex: 9999,
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          padding: '20px'
+        }}>
+          <div style={{
+            backgroundColor: '#1f2937',
+            borderRadius: '16px',
+            padding: '24px',
+            maxWidth: '380px',
+            width: '100%',
+            boxShadow: '0 10px 25px rgba(0,0,0,0.5)',
+            border: '2px solid #374151',
+            textAlign: 'center',
+            color: '#f3f4f6'
+          }}>
+            <h2 style={{ margin: '0 0 16px 0', color: '#fff', fontSize: '22px' }}>Enable iOS Fullscreen</h2>
+            <p style={{ fontSize: '15px', lineHeight: '1.5', color: '#d1d5db', marginBottom: '20px' }}>
+              Apple explicitly blocks standard browser Fullscreen on iPhones. To play without the Safari navigation bars:
+            </p>
+            <div style={{ backgroundColor: '#111827', padding: '16px', borderRadius: '8px', marginBottom: '24px', fontSize: '14px', border: '1px solid #374151', textAlign: 'left' }}>
+              <strong>1.</strong> Tap the <b>Share</b> icon at the bottom of Safari.<br/><br/>
+              <strong>2.</strong> Scroll down and select <b>"Add to Home Screen"</b>.<br/><br/>
+              <strong>3.</strong> Launch the game directly from your Home Screen!
+            </div>
+            <button
+              onClick={() => setShowIOSPrompt(false)}
+              style={{
+                width: '100%',
+                padding: '12px',
+                backgroundColor: '#3b82f6',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '8px',
+                fontWeight: 'bold',
+                fontSize: '16px',
+                cursor: 'pointer'
+              }}
+            >
+              Got it!
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
