@@ -268,6 +268,29 @@ function App() {
                 ⛶
               </button>
             )}
+            {isFullscreen && (
+              <button
+                onClick={handleExitFullscreen}
+                style={{
+                  padding: 'clamp(6px, 1.5vw, 10px) clamp(10px, 2vw, 14px)',
+                  backgroundColor: '#e53e3e',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontWeight: 'bold',
+                  boxShadow: '0 4px 6px rgba(0,0,0,0.3)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 'clamp(14px, 3.5vw, 18px)',
+                  lineHeight: 1
+                }}
+                title="Exit Fullscreen"
+              >
+                ✖
+              </button>
+            )}
             <button
               onClick={() => setIsMenuOpen(true)}
               style={{
@@ -530,26 +553,6 @@ function App() {
           }}
         >
           <GameComponent isFullscreen={isFullscreen} />
-          {isFullscreen && (
-            <button
-              onClick={handleExitFullscreen}
-              style={{
-                position: 'absolute',
-                top: '20px',
-                right: '20px',
-                padding: '10px 15px',
-                backgroundColor: 'rgba(0,0,0,0.6)',
-                color: '#fff',
-                border: '1px solid rgba(255,255,255,0.3)',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                fontWeight: 'bold',
-                zIndex: 100
-              }}
-            >
-              ✖ Exit Fullscreen
-            </button>
-          )}
         </div>
       </div>
 
