@@ -167,8 +167,7 @@ class RunnerScene extends Phaser.Scene {
     this.physics.world.setBounds(0, 0, width, height);
 
     this.floor.setPosition(0, height - this.gameConfig.floorHeight);
-    this.floor.width = width;
-    this.floor.height = this.gameConfig.floorHeight;
+    this.floor.setSize(width, this.gameConfig.floorHeight);
     if (this.floor.body) {
       this.floor.body.setSize(width, this.gameConfig.floorHeight);
       this.floor.body.updateFromGameObject();
@@ -177,7 +176,17 @@ class RunnerScene extends Phaser.Scene {
     // Ensure player drops freely into expanded bounds or doesn't get buried when shrinking
     if (this.player && this.player.y > this.floor.y - 30) {
       this.player.y = this.floor.y - 50;
-      this.player.body.setVelocityY(0); // Reset velocity to avoid popping up wildly
+      if (this.player.body) this.player.body.setVelocityY(0);
+    }
+    
+    // Auto-adjust all obstacles to the new floor height so they aren't abandoned if game over / paused
+    if (this.obstacles && this.obstacles.getChildren) {
+      this.obstacles.getChildren().forEach(obs => {
+        if (obs.y > this.floor.y - 10 || obs.y < this.floor.y - 100) {
+           obs.y = this.floor.y - 25; // drop onto grass line
+           if (obs.body) obs.body.updateFromGameObject();
+        }
+      });
     }
 
     if (this.isGameOver) {
