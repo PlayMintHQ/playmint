@@ -28,6 +28,7 @@ function App() {
   const [liveParams, setLiveParams] = useState(initialConfig.liveParams);
   const fullscreenContainerRef = useRef(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isFullscreenSupported, setIsFullscreenSupported] = useState(true);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [score, setScore] = useState(0);
 
@@ -46,6 +47,13 @@ function App() {
   }, []);
 
   useEffect(() => {
+    // Check if the browser actually supports the Fullscreen API
+    const isSupported = document.fullscreenEnabled || 
+                       document.webkitFullscreenEnabled || 
+                       document.mozFullScreenEnabled || 
+                       document.msFullscreenEnabled;
+    setIsFullscreenSupported(!!isSupported);
+
     const onFullscreenChange = () => {
       setIsFullscreen(!!document.fullscreenElement);
     };
@@ -237,7 +245,7 @@ function App() {
 
           {/* Action Row */}
           <div style={{ display: 'flex', gap: '8px' }}>
-            {!isFullscreen && (
+            {!isFullscreen && isFullscreenSupported && (
               <button
                 onClick={handleFullscreen}
                 style={{
