@@ -189,12 +189,11 @@ function App() {
               color: '#ffffff',
               fontFamily: '"Impact", "Arial Black", sans-serif',
               fontStyle: 'italic',
-              fontSize: 'clamp(20px, 5vw, 64px)', 
+              fontSize: 'clamp(18px, 5vw, 48px)',
               fontWeight: '900',
-              letterSpacing: '2px',
+              letterSpacing: '1px',
               textTransform: 'uppercase',
-              textShadow: '2px 2px 0 #000, 4px 4px 0 rgba(0,0,0,0.5)',
-              WebkitTextStroke: '1px #000',
+              textShadow: '2px 2px 0 #000, 3px 3px 0 rgba(0,0,0,0.5)',
               lineHeight: 1.1,
               whiteSpace: 'normal',
               wordBreak: 'break-word',
@@ -205,40 +204,67 @@ function App() {
           </div>
         )}
 
-        {/* RIGHT COLUMN: Score & Menu */}
-        <div style={{ flex: '1 1 0', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '10px', pointerEvents: 'auto' }}>
+        {/* RIGHT COLUMN: Score & Controls */}
+        <div style={{ flex: '1 1 0', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px', pointerEvents: 'auto' }}>
+          
+          {/* Score */}
           <div style={{
-            fontSize: 'clamp(18px, 4vw, 28px)',
+            fontSize: 'clamp(16px, 4vw, 24px)',
             fontWeight: '900',
             color: '#ffffff',
-            textShadow: '2px 2px 0 #000, 4px 4px 0 rgba(0,0,0,0.5)',
+            textShadow: '2px 2px 0 #000, 3px 3px 0 rgba(0,0,0,0.5)',
             fontFamily: '"Impact", "Arial Black", sans-serif',
             fontStyle: 'italic',
             letterSpacing: '1px',
-            WebkitTextStroke: '1px #000',
-            lineHeight: 1
+            lineHeight: 1,
+            whiteSpace: 'nowrap'
           }}>
             SCORE: {score}
           </div>
 
-          <button
-            onClick={() => setIsMenuOpen(true)}
-            style={{
-              padding: '8px 12px',
-              backgroundColor: '#374151',
-              color: '#ffffff',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              fontWeight: 'bold',
-              boxShadow: '0 4px 6px rgba(0,0,0,0.3)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px'
-            }}
-          >
-            <span style={{ fontSize: '18px', lineHeight: 1 }}>☰</span> Menu
-          </button>
+          {/* Action Row */}
+          <div style={{ display: 'flex', gap: '6px' }}>
+            {!isFullscreen && (
+              <button
+                onClick={handleFullscreen}
+                style={{
+                  padding: '8px 12px',
+                  backgroundColor: '#48bb78',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontWeight: 'bold',
+                  boxShadow: '0 4px 6px rgba(0,0,0,0.3)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  fontSize: '18px',
+                  lineHeight: 1
+                }}
+                title="Go Fullscreen"
+              >
+                ⛶
+              </button>
+            )}
+            <button
+              onClick={() => setIsMenuOpen(true)}
+              style={{
+                padding: '8px 12px',
+                backgroundColor: '#374151',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontWeight: 'bold',
+                boxShadow: '0 4px 6px rgba(0,0,0,0.3)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              <span style={{ fontSize: '18px', lineHeight: 1 }}>☰</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -250,7 +276,8 @@ function App() {
           position: 'fixed',
           top: 0,
           right: 0,
-          height: '100vh',
+          height: '100dvh',
+          maxHeight: '-webkit-fill-available',
           width: '100vw',
           maxWidth: '340px',
           backgroundColor: '#1f2937',
@@ -279,7 +306,7 @@ function App() {
         </div>
 
         {/* Menu Content */}
-        <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+        <div style={{ padding: '20px', paddingBottom: '80px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
           
           <div>
             <span style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold', color: '#9ca3af', fontSize: '14px', textAlign: 'left' }}>Game Name:</span>
@@ -302,24 +329,6 @@ function App() {
               }}
             />
           </div>
-
-          <button
-            onClick={handleFullscreen}
-            style={{
-              padding: '10px 20px',
-              backgroundColor: '#48bb78',
-              color: '#ffffff',
-              border: '2px solid #48bb78',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              fontWeight: '600',
-              boxShadow: '0 4px 6px rgba(72, 187, 120, 0.2)',
-              transition: 'all 0.2s ease',
-              width: '100%'
-            }}
-          >
-            Go Fullscreen ⛶
-          </button>
 
           <div>
             <span style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold', color: '#9ca3af', fontSize: '14px', textAlign: 'left' }}>Play Preset:</span>
