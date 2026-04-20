@@ -169,7 +169,8 @@ class RunnerScene extends Phaser.Scene {
     this.floor.setPosition(0, height - this.gameConfig.floorHeight);
     this.floor.setSize(width, this.gameConfig.floorHeight);
     if (this.floor.body) {
-      this.floor.refreshBody(); // Essential for Static bodies in Phaser 3 to update their collision bounds
+      this.floor.body.setSize(width, this.gameConfig.floorHeight);
+      this.floor.body.updateFromGameObject();
     }
 
     // Ensure player drops freely into expanded bounds or doesn't get buried when shrinking

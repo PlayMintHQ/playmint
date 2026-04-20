@@ -46,14 +46,10 @@ function App() {
 
   useEffect(() => {
     const onFullscreenChange = () => {
-      setIsFullscreen(!!(document.fullscreenElement || document.webkitFullscreenElement));
+      setIsFullscreen(!!document.fullscreenElement);
     };
     document.addEventListener('fullscreenchange', onFullscreenChange);
-    document.addEventListener('webkitfullscreenchange', onFullscreenChange);
-    return () => {
-      document.removeEventListener('fullscreenchange', onFullscreenChange);
-      document.removeEventListener('webkitfullscreenchange', onFullscreenChange);
-    };
+    return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
   }, []);
 
   useEffect(() => {
@@ -63,25 +59,16 @@ function App() {
   }, []);
 
   const handleFullscreen = () => {
-    const el = fullscreenContainerRef.current;
-    if (el && !(document.fullscreenElement || document.webkitFullscreenElement)) {
-      if (el.requestFullscreen) {
-        el.requestFullscreen().catch(err => {
-          console.error(`Error attempting to enable fullscreen: ${err.message}`);
-        });
-      } else if (el.webkitRequestFullscreen) {
-        el.webkitRequestFullscreen();
-      } else {
-        alert("Native fullscreen is not supported by your mobile browser (Apple actively restricts this API on iPhones). To play in true fullscreen, tap 'Share' then 'Add to Home Screen'!");
-      }
+    if (fullscreenContainerRef.current && !document.fullscreenElement) {
+      fullscreenContainerRef.current.requestFullscreen().catch(err => {
+        console.error(`Error attempting to enable fullscreen: ${err.message}`);
+      });
     }
   };
 
   const handleExitFullscreen = () => {
-    if (document.exitFullscreen) {
+    if (document.fullscreenElement) {
       document.exitFullscreen();
-    } else if (document.webkitExitFullscreen) {
-      document.webkitExitFullscreen();
     }
   };
 
