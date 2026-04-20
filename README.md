@@ -1,13 +1,23 @@
-# Basic Instructions to Run the Project Locally
+# PlayMint
 
-1. **Ensure you have Node.js installed** on your system.
-2. **Open a terminal** and navigate to this project folder (`simple-runner`).
-3. **Install dependencies** by running:
-   ```bash
-   npm install
-   ```
-4. **Start the development server** by running:
-   ```bash
-   npm run dev
-   ```
-5. **Open your browser** and visit the local link provided in your terminal (typically `http://localhost:5173`).
+Create Games. Play Instantly.
+
+PlayMint is an AI-powered platform where anyone can create playable games from simple ideas.
+
+## Vision
+Democratize game creation.
+
+## Current Version
+- Runner Engine
+- Creator Parameters
+- Browser Playable
+- Fast Iteration
+
+## Coming Soon
+- Platformer Creator
+- Dodge Creator
+- AI Prompt Creation
+- Share & Remix Games
+
+## Live Demo
+https://playmintai.vercel.app
