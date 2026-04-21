@@ -1,5 +1,5 @@
 # PlayMint
-
+TEST
 Create Games. Play Instantly.
 
 PlayMint is an AI-powered platform where anyone can create playable games from simple ideas.
