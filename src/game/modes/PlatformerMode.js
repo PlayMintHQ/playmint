@@ -21,6 +21,7 @@ export default class PlatformerMode extends BaseMode {
     this.movingRight = false;
     
     this.platforms = null;
+    this.enemies = null;
     
     // Mobile controls container
     this.mobileControls = [];
@@ -44,15 +45,21 @@ export default class PlatformerMode extends BaseMode {
     this.scene.player.setPosition(150, this.scene.LOGICAL_FLOOR_Y - 250);
 
     // Camera follow
-    this.scene.cameras.main.setBounds(0, 0, this.worldWidth, this.scene.LOGICAL_FLOOR_Y + 100);
+    this.updateCameraBounds(this.scene.scale);
     this.scene.cameras.main.startFollow(this.scene.player, true, 0.08, 0.08);
 
     // Create fixed platforms for Level 1
     this.platforms = this.scene.physics.add.staticGroup();
+    this.enemies = this.scene.physics.add.group();
     this.buildLevel1(height);
     
     // Enable collision
     this.scene.physics.add.collider(this.scene.player, this.platforms);
+    this.scene.physics.add.collider(this.enemies, this.platforms);
+    this.scene.physics.add.collider(this.enemies, this.scene.floor);
+    
+    // Player hits enemy -> Game Over
+    this.scene.physics.add.collider(this.scene.player, this.enemies, this.scene.hitObstacle, null, this.scene);
 
     // Keyboard inputs
     this.cursors = this.scene.input.keyboard.createCursorKeys();
@@ -69,9 +76,34 @@ export default class PlatformerMode extends BaseMode {
     this.createMobileControls();
 
     this.resizeListener = (gameSize) => {
-      this.repositionMobileControls(gameSize.width, gameSize.height);
+      if (this.resizeTimeout) clearTimeout(this.resizeTimeout);
+      this.resizeTimeout = setTimeout(() => {
+        if (!this.scene || !this.scene.cameras || !this.scene.cameras.main) return;
+        const safeWidth = Math.max(1, gameSize.width);
+        const safeHeight = Math.max(1, gameSize.height);
+        
+        this.repositionMobileControls(safeWidth, safeHeight);
+        this.updateCameraBounds({ width: safeWidth, height: safeHeight });
+      }, 150);
     };
     this.scene.scale.on('resize', this.resizeListener, this);
+  }
+
+  updateCameraBounds(gameSize) {
+    if (!this.scene || !this.scene.cameras || !this.scene.cameras.main) return;
+    
+    // The camera bounds must be at least as tall as the screen, otherwise the camera breaks
+    const minHeight = this.scene.LOGICAL_FLOOR_Y + 100;
+    const boundsHeight = Math.max(minHeight, gameSize.height);
+    
+    this.scene.cameras.main.setBounds(0, 0, this.worldWidth, boundsHeight);
+    
+    // Nudge the follow target to ensure the camera re-centers after a bounds update
+    if (this.scene.player) {
+      this.scene.cameras.main.startFollow(this.scene.player, true, 0.08, 0.08);
+      // Force an immediate snap to prevent the camera from "flying" or being stuck if it lost focus during rotation
+      this.scene.cameras.main.centerOn(this.scene.player.x, this.scene.player.y);
+    }
   }
 
   buildLevel1(sceneHeight) {
@@ -79,22 +111,40 @@ export default class PlatformerMode extends BaseMode {
     
     // Very simple hand-placed static map
     const layout = [
-      { x: 400, y: floorY - 80, scaleX: 1.5 },
-      { x: 800, y: floorY - 150, scaleX: 2.0 },
-      { x: 1200, y: floorY - 80, scaleX: 1.0 },
-      { x: 1500, y: floorY - 180, scaleX: 1.5 },
-      { x: 1900, y: floorY - 250, scaleX: 1.5 },
-      { x: 2300, y: floorY - 150, scaleX: 1.0 },
-      { x: 2600, y: floorY - 80, scaleX: 1.5 },
-      { x: 3000, y: floorY - 120, scaleX: 1.0 },
-      { x: 3400, y: floorY - 200, scaleX: 3.0 }, // Big finish block
+      { x: 400, y: floorY - 80, scaleX: 1.5, hasEnemy: false },
+      { x: 800, y: floorY - 150, scaleX: 2.0, hasEnemy: true },
+      { x: 1200, y: floorY - 80, scaleX: 1.0, hasEnemy: false },
+      { x: 1500, y: floorY - 180, scaleX: 1.5, hasEnemy: true },
+      { x: 1900, y: floorY - 250, scaleX: 1.5, hasEnemy: false },
+      { x: 2300, y: floorY - 150, scaleX: 1.0, hasEnemy: true },
+      { x: 2600, y: floorY - 80, scaleX: 1.5, hasEnemy: false },
+      { x: 3000, y: floorY - 120, scaleX: 1.0, hasEnemy: true },
+      { x: 3400, y: floorY - 200, scaleX: 3.0, hasEnemy: false }, // Big finish block
     ];
+
+    let enemiesCreated = 0;
+    const maxEnemies = this.enemyCount;
 
     layout.forEach(p => {
       // Use crate asset as building blocks for now
       const block = this.platforms.create(p.x, p.y, 'crate');
       block.setScale(p.scaleX, 0.5); // make them look like wide flat platforms
       block.refreshBody(); // important for static physics bodies after scale
+      
+      if (p.hasEnemy && enemiesCreated < maxEnemies) {
+        // Spawn an enemy slightly above the platform
+        const enemy = this.enemies.create(p.x, p.y - 40, 'dude');
+        enemy.setTint(0xff0000); // Red tint to distinguish from player
+        enemy.setGravityY(this.gravity);
+        enemy.setFrame(5); // standing frame
+        
+        // Simple back and forth movement
+        enemy.setVelocityX(50);
+        enemy.setBounceX(1);
+        enemy.setCollideWorldBounds(true);
+        
+        enemiesCreated++;
+      }
     });
   }
 
@@ -237,6 +287,9 @@ export default class PlatformerMode extends BaseMode {
   }
 
   cleanup() {
+    if (this.resizeTimeout) {
+      clearTimeout(this.resizeTimeout);
+    }
     if (this.resizeListener) {
       this.scene.scale.off('resize', this.resizeListener, this);
     }
@@ -250,6 +303,10 @@ export default class PlatformerMode extends BaseMode {
     
     if (this.platforms && this.platforms.scene) {
       try { this.platforms.clear(true, true); } catch (e) {}
+    }
+    
+    if (this.enemies && this.enemies.scene) {
+      try { this.enemies.clear(true, true); } catch (e) {}
     }
     
     this.mobileControls.forEach(ctrl => {

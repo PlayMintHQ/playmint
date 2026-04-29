@@ -28,6 +28,9 @@ export default class GameManagerScene extends Phaser.Scene {
     this.score = 0;
     window.dispatchEvent(new CustomEvent('update-score', { detail: this.score }));
 
+    // Enable multitouch for mobile controls (movement + jumping)
+    this.input.addPointer(2);
+
     const width = this.scale.width;
     const height = this.scale.height;
 
@@ -147,25 +150,35 @@ export default class GameManagerScene extends Phaser.Scene {
   }
 
   handleResize(gameSize) {
-    const width = gameSize.width;
-    const height = gameSize.height;
+    // Delay slightly to allow the DOM/browser to settle after a mobile rotation
+    if (this.resizeTimeout) clearTimeout(this.resizeTimeout);
+    this.resizeTimeout = setTimeout(() => {
+      if (!this.cameras || !this.cameras.main) return;
+      
+      // Sanitize dimensions to prevent NaN/Matrix errors during mobile rotation
+      const width = Math.max(1, this.scale.width);
+      const height = Math.max(1, this.scale.height);
 
-    this.drawBackground(width, height);
-    
-    // Center camera onto the absolute static floor if in Runner Mode.
-    // In Platformer mode, the camera follows the player, so it naturally handles its own scroll Y.
-    if (this.gameConfig.gameType === 'runner') {
-       const floorHeight = this.gameConfig.floorHeight || 100;
-       this.cameras.main.scrollY = (this.LOGICAL_FLOOR_Y + floorHeight) - height;
-    }
+      // Force the viewport to update to the new valid dimensions
+      this.cameras.main.setViewport(0, 0, width, height);
 
-    if (this.isGameOver) {
-      if (this.overlay) {
-        this.overlay.setSize(width, height);
+      this.drawBackground(width, height);
+      
+      // Center camera onto the absolute static floor if in Runner Mode.
+      // In Platformer mode, the camera follows the player, so it naturally handles its own scroll Y.
+      if (this.gameConfig.gameType === 'runner') {
+         const floorHeight = this.gameConfig.floorHeight || 100;
+         this.cameras.main.scrollY = (this.LOGICAL_FLOOR_Y + floorHeight) - height;
       }
-      if (this.gameOverText) this.gameOverText.setPosition(width / 2, height / 2 - 40);
-      if (this.subText) this.subText.setPosition(width / 2, height / 2 + 20);
-    }
+
+      if (this.isGameOver) {
+        if (this.overlay) {
+          this.overlay.setSize(width, height);
+        }
+        if (this.gameOverText) this.gameOverText.setPosition(width / 2, height / 2 - 40);
+        if (this.subText) this.subText.setPosition(width / 2, height / 2 + 20);
+      }
+    }, 150);
   }
   hitObstacle(player, obstacle) {
     if (this.isGameOver) return;

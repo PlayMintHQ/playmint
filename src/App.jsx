@@ -226,15 +226,14 @@ function App() {
         {/* CENTER COLUMN: Title */}
         {liveParams.gameName && (
           <div style={{ 
-            position: 'absolute', left: '50%', transform: 'translateX(-50%)', 
-            zIndex: 1, pointerEvents: 'none'
+            flex: '1 1 auto', textAlign: 'center', minWidth: 0, padding: '0 10px', pointerEvents: 'none'
           }}>
             <h1 style={{
               margin: '0', color: 'var(--pm-text-primary)', fontFamily: 'var(--font-game)',
-              fontStyle: 'italic', fontSize: 'clamp(20px, 4vw, 36px)', fontWeight: '900',
+              fontStyle: 'italic', fontSize: 'clamp(14px, 3vw, 36px)', fontWeight: '900',
               letterSpacing: '1px', textTransform: 'uppercase',
               textShadow: '2px 2px 0 #000, 4px 4px 15px rgba(0,229,153,0.3)',
-              lineHeight: 1.1, whiteSpace: 'nowrap'
+              lineHeight: 1.1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'
             }}>
               {liveParams.gameName}
             </h1>
@@ -372,10 +371,12 @@ function App() {
                     </div>
                     <input type="range" className="pm-slider" name="actionEnemyCount" min="0" max="20" step="1" value={liveParams.actionEnemyCount || 5} onChange={handleSliderChange} />
                   </div>
+                  {/* Temporarily disabled
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px' }}>
                     <label className="pm-label" style={{ margin: 0 }}>Enable Projectiles</label>
                     <input type="checkbox" checked={!!liveParams.actionProjectileEnabled} onChange={(e) => setLiveParams(prev => ({ ...prev, actionProjectileEnabled: e.target.checked }))} style={{ accentColor: 'var(--pm-accent-teal)', width: '20px', height: '20px', cursor: 'pointer' }} />
                   </div>
+                  */}
                 </>
               ) : (
                 <div style={{ color: 'var(--pm-text-tertiary)', fontSize: '13px', fontStyle: 'italic', textAlign: 'center' }}>
