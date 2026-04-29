@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import startGame from './PhaserGame';
+import startGame from './game';
 
 const GameComponent = ({ isFullscreen }) => {
   const gameContainerRef = useRef(null);
