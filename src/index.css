@@ -227,3 +227,111 @@ body {
   background: rgba(255,255,255,0.2);
 }
 
+/* ===== HUD Header ===== */
+.hud-header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  padding: clamp(8px, 2vw, 16px) clamp(12px, 3vw, 24px);
+  z-index: 900;
+  box-sizing: border-box;
+  pointer-events: none;
+  background: linear-gradient(to bottom, rgba(11,14,20,0.85) 0%, rgba(11,14,20,0.4) 70%, transparent 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hud-header__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  gap: 8px;
+}
+
+.hud-header__logo {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  pointer-events: auto;
+}
+.hud-header__logo img {
+  height: clamp(22px, 4vw, 32px);
+}
+
+.hud-header__title {
+  margin: 0;
+  color: var(--pm-text-primary);
+  font-family: var(--font-game);
+  font-style: italic;
+  font-weight: 900;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  text-shadow: 2px 2px 0 #000, 4px 4px 15px rgba(0,229,153,0.3);
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Inline title (desktop only) */
+.hud-header__title--inline {
+  flex: 1 1 0;
+  text-align: center;
+  min-width: 0;
+  padding: 0 12px;
+  font-size: clamp(16px, 2.5vw, 36px);
+  display: none;
+}
+
+/* Mobile title (below icon row) */
+.hud-header__title--mobile {
+  text-align: center;
+  font-size: clamp(14px, 4vw, 22px);
+  padding: 2px 0 0 0;
+  display: block;
+}
+
+.hud-header__controls {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: clamp(6px, 1.5vw, 16px);
+  pointer-events: auto;
+}
+
+.hud-header__score {
+  font-size: clamp(12px, 2.5vw, 18px);
+  font-weight: 700;
+  color: #fff;
+  font-family: var(--font-heading);
+  letter-spacing: 0.5px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  cursor: default;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.hud-header__icon-btn {
+  padding: 6px 8px !important;
+  border-radius: 8px !important;
+  font-size: 14px;
+}
+
+/* Desktop: show inline title, hide mobile title */
+@media (min-width: 600px) {
+  .hud-header__title--inline {
+    display: block;
+  }
+  .hud-header__title--mobile {
+    display: none;
+  }
+  .hud-header__score {
+    padding: 8px 16px;
+    font-size: clamp(14px, 2.5vw, 18px);
+  }
+}
+

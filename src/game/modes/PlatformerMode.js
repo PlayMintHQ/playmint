@@ -20,6 +20,10 @@ export default class PlatformerMode extends BaseMode {
     this.movingLeft = false;
     this.movingRight = false;
     
+    // Multitouch: track which pointer is pressing each button
+    this.leftPointerId = null;
+    this.rightPointerId = null;
+    
     this.platforms = null;
     this.enemies = null;
     
@@ -169,38 +173,61 @@ export default class PlatformerMode extends BaseMode {
       resolution: 3 // Forces high-DPI rendering to remove blur
     };
 
-    // Left Button
+    // Left Button — track pointer ID for multitouch
     this.btnLeft = this.scene.add.text(0, 0, '←', controlStyle)
       .setOrigin(0, 0)
       .setScrollFactor(0)
       .setDepth(100)
       .setAlpha(0.6)
       .setInteractive()
-      .on('pointerdown', (pointer, localX, localY, event) => { event.stopPropagation(); this.movingLeft = true; this.btnLeft.setAlpha(1); })
-      .on('pointerup', () => { this.movingLeft = false; this.btnLeft.setAlpha(0.6); })
-      .on('pointerout', () => { this.movingLeft = false; this.btnLeft.setAlpha(0.6); });
+      .on('pointerdown', (pointer, localX, localY, event) => {
+        event.stopPropagation();
+        this.movingLeft = true;
+        this.leftPointerId = pointer.id;
+        this.btnLeft.setAlpha(1);
+      })
+      .on('pointerup', (pointer) => {
+        if (pointer.id === this.leftPointerId) {
+          this.movingLeft = false;
+          this.leftPointerId = null;
+          this.btnLeft.setAlpha(0.6);
+        }
+      });
 
-    // Right Button
+    // Right Button — track pointer ID for multitouch
     this.btnRight = this.scene.add.text(0, 0, '→', controlStyle)
       .setOrigin(0, 0)
       .setScrollFactor(0)
       .setDepth(100)
       .setAlpha(0.6)
       .setInteractive()
-      .on('pointerdown', (pointer, localX, localY, event) => { event.stopPropagation(); this.movingRight = true; this.btnRight.setAlpha(1); })
-      .on('pointerup', () => { this.movingRight = false; this.btnRight.setAlpha(0.6); })
-      .on('pointerout', () => { this.movingRight = false; this.btnRight.setAlpha(0.6); });
+      .on('pointerdown', (pointer, localX, localY, event) => {
+        event.stopPropagation();
+        this.movingRight = true;
+        this.rightPointerId = pointer.id;
+        this.btnRight.setAlpha(1);
+      })
+      .on('pointerup', (pointer) => {
+        if (pointer.id === this.rightPointerId) {
+          this.movingRight = false;
+          this.rightPointerId = null;
+          this.btnRight.setAlpha(0.6);
+        }
+      });
 
-    // Jump Button
+    // Jump Button — no pointer tracking needed (instant action)
     this.btnJump = this.scene.add.text(0, 0, 'JUMP', controlStyle)
       .setOrigin(1, 0)
       .setScrollFactor(0)
       .setDepth(100)
       .setAlpha(0.6)
       .setInteractive()
-      .on('pointerdown', (pointer, localX, localY, event) => { event.stopPropagation(); this.jump(); this.btnJump.setAlpha(1); })
-      .on('pointerup', () => { this.btnJump.setAlpha(0.6); })
-      .on('pointerout', () => { this.btnJump.setAlpha(0.6); });
+      .on('pointerdown', (pointer, localX, localY, event) => {
+        event.stopPropagation();
+        this.jump();
+        this.btnJump.setAlpha(1);
+      })
+      .on('pointerup', () => { this.btnJump.setAlpha(0.6); });
 
     this.mobileControls.push(this.btnLeft, this.btnRight, this.btnJump);
     this.repositionMobileControls(this.scene.scale.width, this.scene.scale.height);
@@ -229,8 +256,13 @@ export default class PlatformerMode extends BaseMode {
       this.scene.player.setFrame(5); // Default standing frame
       this.movingLeft = false;
       this.movingRight = false;
+      this.leftPointerId = null;
+      this.rightPointerId = null;
       return;
     }
+
+    // Safety: release stuck mobile buttons if their pointer is no longer active
+    this.cleanupStaleTouchPointers();
 
     const { player } = this.scene;
     let isMoving = false;
@@ -261,6 +293,25 @@ export default class PlatformerMode extends BaseMode {
     } else {
       player.anims.stop();
       player.setFrame(6); // Jump frame
+    }
+  }
+
+  cleanupStaleTouchPointers() {
+    if (this.leftPointerId != null) {
+      const ptr = this.scene.input.manager.pointers.find(p => p.id === this.leftPointerId);
+      if (!ptr || !ptr.isDown) {
+        this.movingLeft = false;
+        this.leftPointerId = null;
+        if (this.btnLeft) this.btnLeft.setAlpha(0.6);
+      }
+    }
+    if (this.rightPointerId != null) {
+      const ptr = this.scene.input.manager.pointers.find(p => p.id === this.rightPointerId);
+      if (!ptr || !ptr.isDown) {
+        this.movingRight = false;
+        this.rightPointerId = null;
+        if (this.btnRight) this.btnRight.setAlpha(0.6);
+      }
     }
   }
 
