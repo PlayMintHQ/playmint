@@ -169,6 +169,23 @@ const CreatorPanel = ({
 }) => {
   const isCustom = presetKey === 'custom';
 
+  const handleDifficultyChange = (e) => {
+    const diff = parseInt(e.target.value, 10);
+    const mode = liveParams.gameType;
+    
+    setLiveParams(prev => {
+      const config = { ...prev, difficulty: diff };
+      if (mode === 'runner') {
+        config.runSpeed = 200 + (diff * 40); // 240 to 600
+        config.obstacleDelay = 2000 - (diff * 120); // 1880 to 800
+      } else if (mode === 'platformer') {
+        config.actionEnemyCount = Math.floor(diff * 1.5); // 1 to 15
+        config.actionJumpHeight = 400 + (diff * 30);
+      }
+      return config;
+    });
+  };
+
   return (
     <div 
       onPointerDown={(e) => e.stopPropagation()}
@@ -221,7 +238,19 @@ const CreatorPanel = ({
 
         {isCustom && (
           <div className="pm-card" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            <h3 className="pm-heading" style={{ fontSize: '16px', margin: 0, borderBottom: '1px solid var(--pm-border)', paddingBottom: '10px' }}>Physics & Gameplay</h3>
+            <h3 className="pm-heading" style={{ fontSize: '16px', margin: 0, borderBottom: '1px solid var(--pm-border)', paddingBottom: '10px' }}>Difficulty & Tuning</h3>
+            
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <label className="pm-label" style={{ margin: 0 }}>Difficulty (Auto-scales)</label>
+                <span style={{ fontSize: '13px', color: 'var(--pm-accent-purple)', fontWeight: '600' }}>{Math.round(liveParams.difficulty || 5)}</span>
+              </div>
+              <input type="range" className="pm-slider" name="difficulty" min="1" max="10" step="1" value={liveParams.difficulty || 5} onChange={handleDifficultyChange} />
+            </div>
+
+            <div style={{ width: '100%', height: '1px', background: 'var(--pm-border)', margin: '10px 0' }} />
+
+            <h3 className="pm-heading" style={{ fontSize: '16px', margin: 0, borderBottom: '1px solid var(--pm-border)', paddingBottom: '10px' }}>Physics Override</h3>
               
             {liveParams.gameType === 'runner' ? (
               <RunnerControls liveParams={liveParams} onSliderChange={onSliderChange} />

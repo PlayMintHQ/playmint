@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <filter id="glow3" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="7" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <radialGradient id="core3" cx="75%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="30%" stop-color="#00ffff"/>
+      <stop offset="100%" stop-color="#0055ff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <!-- PEAK frame - full wide energy blast with radiating streaks -->
+  <!-- Main arc -->
+  <path d="M 10,64 C 16,16 82,8 112,40 C 124,52 124,76 112,88 C 82,120 16,112 10,64 Z" stroke="#00ffff" stroke-width="5" fill="none" stroke-linecap="round" filter="url(#glow3)"/>
+  <!-- Bright inner arc -->
+  <path d="M 20,64 C 26,26 78,20 104,46 C 114,56 114,72 104,82 C 78,108 26,102 20,64 Z" stroke="#ffffff" stroke-width="3" fill="none" stroke-linecap="round" filter="url(#glow3)" opacity="0.9"/>
+  <!-- Radiating streaks from peak -->
+  <line x1="112" y1="40" x2="122" y2="28" stroke="#00ffff" stroke-width="2.5" stroke-linecap="round" filter="url(#glow3)" opacity="0.9"/>
+  <line x1="118" y1="58" x2="128" y2="52" stroke="#ffffff" stroke-width="2" stroke-linecap="round" filter="url(#glow3)" opacity="0.8"/>
+  <line x1="118" y1="70" x2="128" y2="76" stroke="#ffffff" stroke-width="2" stroke-linecap="round" filter="url(#glow3)" opacity="0.8"/>
+  <line x1="112" y1="88" x2="122" y2="100" stroke="#00ffff" stroke-width="2.5" stroke-linecap="round" filter="url(#glow3)" opacity="0.9"/>
+  <line x1="64" y1="8" x2="60" y2="0" stroke="#00ffff" stroke-width="2" stroke-linecap="round" filter="url(#glow3)" opacity="0.7"/>
+  <line x1="64" y1="120" x2="60" y2="128" stroke="#00ffff" stroke-width="2" stroke-linecap="round" filter="url(#glow3)" opacity="0.7"/>
+  <!-- Glowing orb at tip -->
+  <ellipse cx="113" cy="64" rx="6" ry="8" fill="url(#core3)" filter="url(#glow3)"/>
+  <circle cx="113" cy="64" r="4" fill="#ffffff" filter="url(#glow3)"/>
+  <!-- Energy fill -->
+  <ellipse cx="65" cy="64" rx="55" ry="40" fill="#00ffff" opacity="0.04" filter="url(#glow3)"/>
+</svg>

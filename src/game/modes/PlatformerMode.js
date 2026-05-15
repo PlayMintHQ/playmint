@@ -1,5 +1,7 @@
 import Phaser from 'phaser';
 import BaseMode from './BaseMode';
+import Projectile from '../objects/Projectile';
+import MeleeAttack from '../objects/MeleeAttack';
 
 export default class PlatformerMode extends BaseMode {
   init() {
@@ -26,6 +28,13 @@ export default class PlatformerMode extends BaseMode {
     
     this.platforms = null;
     this.enemies = null;
+    this.projectiles = null;
+    this.meleeAttacks = null;   // Pool of MeleeAttack animated sprites
+    this.winZone = null;
+
+    // Melee cooldown: prevent spamming (ms)
+    this.meleeCooldown = 0;
+    this.MELEE_COOLDOWN_MS = 400;
     
     // Mobile controls container
     this.mobileControls = [];
@@ -55,19 +64,54 @@ export default class PlatformerMode extends BaseMode {
     // Create fixed platforms for Level 1
     this.platforms = this.scene.physics.add.staticGroup();
     this.enemies = this.scene.physics.add.group();
+    this.projectiles = this.scene.physics.add.group({
+      classType: Projectile,
+      maxSize: 10,
+      runChildUpdate: true
+    });
+    this.meleeAttacks = this.scene.physics.add.group({
+      classType: MeleeAttack,
+      maxSize: 5,
+      runChildUpdate: false
+    });
+
     this.buildLevel1(height);
     
     // Enable collision
     this.scene.physics.add.collider(this.scene.player, this.platforms);
     this.scene.physics.add.collider(this.enemies, this.platforms);
     this.scene.physics.add.collider(this.enemies, this.scene.floor);
+    this.scene.physics.add.collider(this.projectiles, this.platforms, (proj) => {
+      if (proj.deactivate) proj.deactivate();
+    });
     
-    // Player hits enemy -> Game Over
-    this.scene.physics.add.collider(this.scene.player, this.enemies, this.scene.hitObstacle, null, this.scene);
+    // Player hits enemy -> Game Over (if not attacking)
+    this.scene.physics.add.overlap(this.scene.player, this.enemies, this.handlePlayerEnemyCollision, null, this);
+
+    // Projectile hits enemy -> Kill Enemy
+    this.scene.physics.add.overlap(this.projectiles, this.enemies, (proj, enemy) => {
+      if (proj.deactivate) proj.deactivate();
+      this.killEnemy(enemy);
+    });
+
+    // Melee hits enemy -> Kill Enemy (only once per swing via hasHit flag)
+    this.scene.physics.add.overlap(this.meleeAttacks, this.enemies, (atk, enemy) => {
+      if (!atk.hasHit) {
+        atk.hasHit = true;
+        this.killEnemy(enemy);
+      }
+    });
+
+    // Player reaches Win Zone
+    if (this.winZone) {
+      this.scene.physics.add.overlap(this.scene.player, this.winZone, () => {
+        if (this.scene.winGame) this.scene.winGame();
+      });
+    }
 
     // Keyboard inputs
     this.cursors = this.scene.input.keyboard.createCursorKeys();
-    this.keys = this.scene.input.keyboard.addKeys('W,A,S,D');
+    this.keys = this.scene.input.keyboard.addKeys('W,A,S,D,E,F');
     
     // Explicitly prevent Phaser from swallowing keystrokes, so HTML inputs work normally!
     const keyCodes = Phaser.Input.Keyboard.KeyCodes;
@@ -129,11 +173,15 @@ export default class PlatformerMode extends BaseMode {
     let enemiesCreated = 0;
     const maxEnemies = this.enemyCount;
 
-    layout.forEach(p => {
+    layout.forEach((p, index) => {
       // Use crate asset as building blocks for now
       const block = this.platforms.create(p.x, p.y, 'crate');
       block.setScale(p.scaleX, 0.5); // make them look like wide flat platforms
       block.refreshBody(); // important for static physics bodies after scale
+      
+      // Store edges for patrol logic
+      block.leftEdge = p.x - (block.displayWidth / 2);
+      block.rightEdge = p.x + (block.displayWidth / 2);
       
       if (p.hasEnemy && enemiesCreated < maxEnemies) {
         // Spawn an enemy slightly above the platform
@@ -146,8 +194,17 @@ export default class PlatformerMode extends BaseMode {
         enemy.setVelocityX(50);
         enemy.setBounceX(1);
         enemy.setCollideWorldBounds(true);
+        // Link enemy to platform for edge detection
+        enemy.patrolPlatform = block;
         
         enemiesCreated++;
+      }
+
+      // Add win zone on the last block
+      if (index === layout.length - 1) {
+        this.winZone = this.scene.physics.add.sprite(p.x, p.y - 100, 'crate').setVisible(false);
+        this.winZone.body.setAllowGravity(false);
+        this.winZone.body.setSize(100, 200);
       }
     });
   }
@@ -215,7 +272,7 @@ export default class PlatformerMode extends BaseMode {
         }
       });
 
-    // Jump Button — no pointer tracking needed (instant action)
+    // Jump Button
     this.btnJump = this.scene.add.text(0, 0, 'JUMP', controlStyle)
       .setOrigin(1, 0)
       .setScrollFactor(0)
@@ -229,7 +286,38 @@ export default class PlatformerMode extends BaseMode {
       })
       .on('pointerup', () => { this.btnJump.setAlpha(0.6); });
 
-    this.mobileControls.push(this.btnLeft, this.btnRight, this.btnJump);
+    // Melee Button
+    this.btnMelee = this.scene.add.text(0, 0, 'MELEE', controlStyle)
+      .setOrigin(1, 0)
+      .setScrollFactor(0)
+      .setDepth(100)
+      .setAlpha(0.6)
+      .setInteractive()
+      .on('pointerdown', (pointer, localX, localY, event) => {
+        event.stopPropagation();
+        this.melee();
+        this.btnMelee.setAlpha(1);
+      })
+      .on('pointerup', () => { this.btnMelee.setAlpha(0.6); });
+
+    // Shoot Button (if enabled)
+    if (this.projectilesEnabled) {
+      this.btnShoot = this.scene.add.text(0, 0, 'SHOOT', controlStyle)
+        .setOrigin(1, 0)
+        .setScrollFactor(0)
+        .setDepth(100)
+        .setAlpha(0.6)
+        .setInteractive()
+        .on('pointerdown', (pointer, localX, localY, event) => {
+          event.stopPropagation();
+          this.shoot();
+          this.btnShoot.setAlpha(1);
+        })
+        .on('pointerup', () => { this.btnShoot.setAlpha(0.6); });
+    }
+
+    this.mobileControls.push(this.btnLeft, this.btnRight, this.btnJump, this.btnMelee);
+    if (this.btnShoot) this.mobileControls.push(this.btnShoot);
     this.repositionMobileControls(this.scene.scale.width, this.scene.scale.height);
   }
 
@@ -237,6 +325,8 @@ export default class PlatformerMode extends BaseMode {
     if (this.btnLeft) this.btnLeft.setPosition(20, height - 100);
     if (this.btnRight) this.btnRight.setPosition(120, height - 100);
     if (this.btnJump) this.btnJump.setPosition(width - 20, height - 100);
+    if (this.btnMelee) this.btnMelee.setPosition(width - 20, height - 180);
+    if (this.btnShoot) this.btnShoot.setPosition(width - 150, height - 100);
   }
 
   isInputFocused() {
@@ -279,6 +369,33 @@ export default class PlatformerMode extends BaseMode {
     } else {
       player.setVelocityX(0);
     }
+
+    // Combat Input Polling (keys)
+    if (Phaser.Input.Keyboard.JustDown(this.keys.E)) this.melee();
+    if (this.projectilesEnabled && Phaser.Input.Keyboard.JustDown(this.keys.F)) this.shoot();
+
+    // Tick down melee cooldown
+    if (this.meleeCooldown > 0) this.meleeCooldown -= delta;
+
+    // Enemy Patrol Logic
+    this.enemies.children.iterate((enemy) => {
+      if (!enemy || !enemy.active) return;
+      
+      // Face direction of movement
+      if (enemy.body.velocity.x > 0) enemy.setFlipX(false);
+      else if (enemy.body.velocity.x < 0) enemy.setFlipX(true);
+      
+      // Edge detection
+      if (enemy.patrolPlatform) {
+        const p = enemy.patrolPlatform;
+        const eX = enemy.x;
+        if (enemy.body.velocity.x > 0 && eX > p.rightEdge - 10) {
+          enemy.setVelocityX(-50);
+        } else if (enemy.body.velocity.x < 0 && eX < p.leftEdge + 10) {
+          enemy.setVelocityX(50);
+        }
+      }
+    });
 
     // Animation Logic
     const touchingDown = player.body.touching.down || player.body.blocked.down;
@@ -324,6 +441,70 @@ export default class PlatformerMode extends BaseMode {
     }
   }
 
+  melee() {
+    if (this.scene.isGameOver || this.isInputFocused()) return;
+    if (this.meleeCooldown > 0) return;   // Respect cooldown
+
+    this.meleeCooldown = this.MELEE_COOLDOWN_MS;
+
+    // Flash the player white to show an attack was registered
+    this.scene.player.setTintFill(0xffffff);
+    this.scene.time.delayedCall(80, () => this.scene.player.clearTint());
+
+    // Retrieve an inactive MeleeAttack from the pool
+    const atk = this.meleeAttacks.get();
+    if (!atk) return;   // Pool exhausted – silently skip
+
+    const isFacingLeft = this.scene.player.flipX;
+    // Place the slash in front of the player
+    const offsetX = isFacingLeft ? -72 : 72;
+    atk.swing(
+      this.scene.player.x + offsetX,
+      this.scene.player.y,
+      isFacingLeft
+    );
+  }
+
+  shoot() {
+    if (this.scene.isGameOver || this.isInputFocused() || !this.projectilesEnabled) return;
+    
+    // Retrieve an inactive projectile from the pool
+    const projectile = this.projectiles.get();
+    
+    if (projectile) {
+      const isFacingLeft = this.scene.player.flipX;
+      const offsetX = isFacingLeft ? -20 : 20;
+      
+      // Set the themed texture, defaulting to 'projectile'
+      const textureKey = this.scene.gameConfig.actionProjectileType || 'projectile';
+      projectile.setTexture(textureKey);
+
+      // Fire it
+      projectile.fire(this.scene.player.x + offsetX, this.scene.player.y, isFacingLeft);
+    }
+  }
+
+  killEnemy(enemy) {
+    if (!enemy || !enemy.active) return;
+    // Spawn particle-like tiny rectangles
+    for (let i = 0; i < 5; i++) {
+      const bit = this.scene.add.rectangle(enemy.x, enemy.y, 8, 8, 0xff0000);
+      this.scene.physics.add.existing(bit);
+      bit.body.setVelocity(Phaser.Math.Between(-100, 100), Phaser.Math.Between(-200, 0));
+      this.scene.time.delayedCall(500, () => bit.destroy());
+    }
+    enemy.destroy();
+    
+    // Add to score
+    this.scene.score += 100;
+    window.dispatchEvent(new CustomEvent('update-score', { detail: this.scene.score }));
+  }
+
+  handlePlayerEnemyCollision(player, enemy) {
+    // Only hit if player touches enemy from side or bottom (basic)
+    this.scene.hitObstacle();
+  }
+
   onConfigUpdate(newConfig, oldConfig) {
     this.jumpForce = newConfig.actionJumpHeight || 600;
     this.enemyCount = newConfig.actionEnemyCount || 5;
@@ -358,6 +539,10 @@ export default class PlatformerMode extends BaseMode {
     
     if (this.enemies && this.enemies.scene) {
       try { this.enemies.clear(true, true); } catch (e) {}
+    }
+
+    if (this.meleeAttacks && this.meleeAttacks.scene) {
+      try { this.meleeAttacks.clear(true, true); } catch (e) {}
     }
     
     this.mobileControls.forEach(ctrl => {

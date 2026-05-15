@@ -1,5 +1,6 @@
 export const DEFAULT_CONFIG = {
   gameType: 'runner', // 'runner', 'platformer', 'dodge'
+  difficulty: 5,
   runSpeed: 350,
   jumpForce: 750,
   gravity: 1800,
@@ -23,6 +24,7 @@ export const GAME_PRESETS = {
   standard: {
     name: 'Runner',
     gameType: 'runner',
+    difficulty: 5,
     runSpeed: 350,
     jumpForce: 750,
     gravity: 1800,
@@ -31,9 +33,10 @@ export const GAME_PRESETS = {
   action_quest: {
     name: 'Action Quest',
     gameType: 'platformer',
+    difficulty: 5,
     actionJumpHeight: 600,
     actionGravity: 1500,
     actionEnemyCount: 3,
-    actionProjectileEnabled: false
+    actionProjectileEnabled: true // Enable by default for action quest now
   }
 };

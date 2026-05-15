@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <filter id="glow5" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <!-- Final frame - fading sparks and motes -->
+  <circle cx="80" cy="40" r="3" fill="#00ffff" filter="url(#glow5)" opacity="0.5"/>
+  <circle cx="100" cy="52" r="2" fill="#00ffff" filter="url(#glow5)" opacity="0.4"/>
+  <circle cx="104" cy="64" r="2.5" fill="#0088ff" filter="url(#glow5)" opacity="0.35"/>
+  <circle cx="100" cy="76" r="2" fill="#00ffff" filter="url(#glow5)" opacity="0.4"/>
+  <circle cx="80" cy="88" r="3" fill="#00ffff" filter="url(#glow5)" opacity="0.5"/>
+  <circle cx="60" cy="30" r="1.5" fill="#0088ff" filter="url(#glow5)" opacity="0.3"/>
+  <circle cx="60" cy="98" r="1.5" fill="#0088ff" filter="url(#glow5)" opacity="0.3"/>
+  <circle cx="115" cy="44" r="1.5" fill="#00ffff" filter="url(#glow5)" opacity="0.3"/>
+  <circle cx="115" cy="84" r="1.5" fill="#00ffff" filter="url(#glow5)" opacity="0.3"/>
+  <circle cx="40" cy="36" r="1" fill="#0088ff" filter="url(#glow5)" opacity="0.2"/>
+  <circle cx="40" cy="92" r="1" fill="#0088ff" filter="url(#glow5)" opacity="0.2"/>
+  <!-- Tiny center residual glow -->
+  <circle cx="64" cy="64" r="2" fill="#00ffff" filter="url(#glow5)" opacity="0.25"/>
+</svg>

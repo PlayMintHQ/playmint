@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <filter id="glow1" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="5" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <!-- Thin arc forming, trailing energy -->
+  <path d="M 30,64 Q 50,42 80,50 Q 90,56 88,64" stroke="#00ffff" stroke-width="3" fill="none" stroke-linecap="round" filter="url(#glow1)" opacity="0.7"/>
+  <path d="M 30,64 Q 50,86 80,78 Q 90,72 88,64" stroke="#0088ff" stroke-width="2" fill="none" stroke-linecap="round" filter="url(#glow1)" opacity="0.5"/>
+  <!-- Leading edge glow -->
+  <circle cx="88" cy="64" r="6" fill="#00ffff" filter="url(#glow1)" opacity="0.9"/>
+  <circle cx="88" cy="64" r="3" fill="#ffffff"/>
+  <!-- Trailing sparks -->
+  <circle cx="40" cy="62" r="2" fill="#00ffff" filter="url(#glow1)" opacity="0.5"/>
+  <circle cx="55" cy="60" r="1.5" fill="#00ffff" filter="url(#glow1)" opacity="0.4"/>
+</svg>

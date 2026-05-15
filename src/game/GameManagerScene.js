@@ -11,6 +11,17 @@ export default class GameManagerScene extends Phaser.Scene {
     this.load.spritesheet('dude', 'assets/dude.png', { frameWidth: 32, frameHeight: 48 });
     this.load.image('crate', 'assets/crate.png');
     this.load.image('ground', 'assets/ground.png');
+    this.load.svg('projectile', 'assets/shuriken.svg', { width: 48, height: 16 }); // Laser bolt
+    this.load.svg('shuriken', 'assets/shuriken.svg', { width: 32, height: 32 });
+    this.load.svg('fireball', 'assets/fireball.svg', { width: 32, height: 32 });
+    this.load.svg('laser', 'assets/laser.svg', { width: 48, height: 16 });
+    // Melee slash animation frames
+    this.load.svg('slash_f0', 'assets/slash_f0.svg', { width: 128, height: 128 });
+    this.load.svg('slash_f1', 'assets/slash_f1.svg', { width: 128, height: 128 });
+    this.load.svg('slash_f2', 'assets/slash_f2.svg', { width: 128, height: 128 });
+    this.load.svg('slash_f3', 'assets/slash_f3.svg', { width: 128, height: 128 });
+    this.load.svg('slash_f4', 'assets/slash_f4.svg', { width: 128, height: 128 });
+    this.load.svg('slash_f5', 'assets/slash_f5.svg', { width: 128, height: 128 });
   }
 
   init(data) {
@@ -19,7 +30,7 @@ export default class GameManagerScene extends Phaser.Scene {
       ...(window.__GAME_LIVE_CONFIG || {}),
       ...data
     };
-    
+
     this.gameModeManager = new GameModeManager(this);
   }
 
@@ -59,7 +70,7 @@ export default class GameManagerScene extends Phaser.Scene {
     this.floor.tileScaleX = this.gameConfig.floorTileScale || 0.15;
     this.floor.tileScaleY = this.gameConfig.floorTileScale || 0.15;
     this.physics.add.existing(this.floor, true); // Static
-    
+
     // Bounds must accommodate the static depth
     this.physics.world.setBounds(0, 0, floorWidth, this.LOGICAL_FLOOR_Y + floorHeight);
 
@@ -73,11 +84,28 @@ export default class GameManagerScene extends Phaser.Scene {
       });
     }
 
+    // Melee slash animation — 6 SVG textures cycled as individual frames
+    if (!this.anims.exists('slash_anim')) {
+      this.anims.create({
+        key: 'slash_anim',
+        frames: [
+          { key: 'slash_f0' },
+          { key: 'slash_f1' },
+          { key: 'slash_f2' },
+          { key: 'slash_f3' },
+          { key: 'slash_f4' },
+          { key: 'slash_f5' },
+        ],
+        frameRate: 18,  // ~333 ms total — snappy but readable
+        repeat: 0        // play once then fire ANIMATION_COMPLETE
+      });
+    }
+
     // Player Base Logic
     this.player = this.physics.add.sprite(150, this.LOGICAL_FLOOR_Y - 150, 'dude');
     this.player.setScale(this.gameConfig.playerScale || 1.5);
     this.physics.add.collider(this.player, this.floor);
-    
+
     // Core game mode handling
     this.gameModeManager.setMode(this.gameConfig.gameType);
     this.gameModeManager.create();
@@ -94,7 +122,7 @@ export default class GameManagerScene extends Phaser.Scene {
         this.gameModeManager.jump();
       }
     });
-    
+
     // Prevent default browser scrolling, except inside input fields
     this.preventKeyScrollListener = (e) => {
       if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
@@ -124,7 +152,7 @@ export default class GameManagerScene extends Phaser.Scene {
     this.updateConfigListener = (e) => {
       const newConfig = e.detail;
       const oldConfig = { ...this.gameConfig };
-      
+
       this.gameConfig = { ...this.gameConfig, ...newConfig };
 
       if (newConfig.gameType !== oldConfig.gameType) {
@@ -154,7 +182,7 @@ export default class GameManagerScene extends Phaser.Scene {
     if (this.resizeTimeout) clearTimeout(this.resizeTimeout);
     this.resizeTimeout = setTimeout(() => {
       if (!this.cameras || !this.cameras.main) return;
-      
+
       // Sanitize dimensions to prevent NaN/Matrix errors during mobile rotation
       const width = Math.max(1, this.scale.width);
       const height = Math.max(1, this.scale.height);
@@ -163,12 +191,12 @@ export default class GameManagerScene extends Phaser.Scene {
       this.cameras.main.setViewport(0, 0, width, height);
 
       this.drawBackground(width, height);
-      
+
       // Center camera onto the absolute static floor if in Runner Mode.
       // In Platformer mode, the camera follows the player, so it naturally handles its own scroll Y.
       if (this.gameConfig.gameType === 'runner') {
-         const floorHeight = this.gameConfig.floorHeight || 100;
-         this.cameras.main.scrollY = (this.LOGICAL_FLOOR_Y + floorHeight) - height;
+        const floorHeight = this.gameConfig.floorHeight || 100;
+        this.cameras.main.scrollY = (this.LOGICAL_FLOOR_Y + floorHeight) - height;
       }
 
       if (this.isGameOver) {
@@ -195,7 +223,7 @@ export default class GameManagerScene extends Phaser.Scene {
 
     // Use absolute positioning with scroll factor 0 so it ignores camera
     this.overlay = this.add.rectangle(0, 0, width, height, 0x000000, 0.6)
-      .setOrigin(0,0)
+      .setOrigin(0, 0)
       .setScrollFactor(0)
       .setDepth(10);
 
@@ -206,10 +234,10 @@ export default class GameManagerScene extends Phaser.Scene {
       fill: '#FF4136',
       fontStyle: '900'
     })
-    .setScrollFactor(0)
-    .setOrigin(0.5)
-    .setShadow(2, 2, 'rgba(0,0,0,0.5)', 4)
-    .setDepth(11);
+      .setScrollFactor(0)
+      .setOrigin(0.5)
+      .setShadow(2, 2, 'rgba(0,0,0,0.5)', 4)
+      .setDepth(11);
 
     const subTextFontSize = Math.min(24, width / 15) + 'px';
     this.subText = this.add.text(width / 2, height / 2 + 20, 'Tap or Press Space to Restart', {
@@ -218,9 +246,50 @@ export default class GameManagerScene extends Phaser.Scene {
       fill: '#FFFFFF',
       fontStyle: 'bold'
     })
-    .setScrollFactor(0)
-    .setOrigin(0.5)
-    .setDepth(11);
+      .setScrollFactor(0)
+      .setOrigin(0.5)
+      .setDepth(11);
+  }
+
+  winGame() {
+    if (this.isGameOver) return;
+    this.isGameOver = true;
+    this.hasWon = true;
+
+    this.physics.pause();
+    this.player.anims.stop();
+    this.player.setTint(0x00FF00); // Turn green for win
+
+    const width = this.scale.width;
+    const height = this.scale.height;
+
+    this.overlay = this.add.rectangle(0, 0, width, height, 0x000000, 0.6)
+      .setOrigin(0, 0)
+      .setScrollFactor(0)
+      .setDepth(10);
+
+    const winFontSize = Math.min(56, width / 6) + 'px';
+    this.gameOverText = this.add.text(width / 2, height / 2 - 40, 'YOU WIN!', {
+      fontFamily: 'system-ui, sans-serif',
+      fontSize: winFontSize,
+      fill: '#00FF00',
+      fontStyle: '900'
+    })
+      .setScrollFactor(0)
+      .setOrigin(0.5)
+      .setShadow(2, 2, 'rgba(0,0,0,0.5)', 4)
+      .setDepth(11);
+
+    const subTextFontSize = Math.min(24, width / 15) + 'px';
+    this.subText = this.add.text(width / 2, height / 2 + 20, 'Tap or Press Space to Restart', {
+      fontFamily: 'system-ui, sans-serif',
+      fontSize: subTextFontSize,
+      fill: '#FFFFFF',
+      fontStyle: 'bold'
+    })
+      .setScrollFactor(0)
+      .setOrigin(0.5)
+      .setDepth(11);
   }
 
   update(time, delta) {

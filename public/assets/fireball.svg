@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <radialGradient id="fireGrad" cx="30%" cy="50%" r="70%">
+      <stop offset="0%" stop-color="#fff59d"/>
+      <stop offset="40%" stop-color="#ff9800"/>
+      <stop offset="80%" stop-color="#f44336"/>
+      <stop offset="100%" stop-color="#b71c1c" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <path d="M 80,50 C 90,60 90,80 70,80 C 80,90 60,100 40,90 C 20,80 10,60 10,50 C 10,40 20,20 40,10 C 60,0 80,10 70,20 C 90,20 90,40 80,50 Z" fill="url(#fireGrad)"/>
+</svg>

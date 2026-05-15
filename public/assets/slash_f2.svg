@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <filter id="glow2" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <linearGradient id="arcGrad2" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#0088ff" stop-opacity="0.3"/>
+      <stop offset="60%" stop-color="#00ffff"/>
+      <stop offset="100%" stop-color="#ffffff"/>
+    </linearGradient>
+  </defs>
+  <!-- Crescent slash arc - outer -->
+  <path d="M 22,64 C 28,28 80,22 100,50 C 108,60 108,68 100,78 C 80,106 28,100 22,64 Z" stroke="#00ffff" stroke-width="4" fill="none" stroke-linecap="round" filter="url(#glow2)" opacity="0.8"/>
+  <!-- Inner bright arc -->
+  <path d="M 30,64 C 36,36 76,32 94,54 C 100,62 100,66 94,74 C 76,96 36,92 30,64 Z" stroke="#ffffff" stroke-width="2" fill="none" stroke-linecap="round" filter="url(#glow2)" opacity="0.6"/>
+  <!-- Trailing energy tail -->
+  <path d="M 22,64 Q 10,64 8,64" stroke="#00ffff" stroke-width="3" fill="none" stroke-linecap="round" filter="url(#glow2)" opacity="0.5"/>
+  <!-- Energy particles -->
+  <circle cx="18" cy="48" r="2.5" fill="#00ffff" filter="url(#glow2)" opacity="0.6"/>
+  <circle cx="18" cy="80" r="2" fill="#0088ff" filter="url(#glow2)" opacity="0.5"/>
+  <circle cx="104" cy="58" r="3" fill="#ffffff" filter="url(#glow2)"/>
+  <circle cx="104" cy="70" r="3" fill="#ffffff" filter="url(#glow2)"/>
+</svg>

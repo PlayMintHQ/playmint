@@ -3,6 +3,7 @@ import GameComponent from './GameComponent';
 import GameSelectorModal from './components/GameSelectorModal';
 import HudHeader from './components/HudHeader';
 import CreatorPanel from './components/CreatorPanel';
+import ScreenZero from './components/ScreenZero';
 import { GAME_PRESETS } from './gameConfig';
 
 const getInitialState = () => {
@@ -29,11 +30,12 @@ function App() {
   const [initialConfig] = useState(getInitialState);
   const [presetKey, setPresetKey] = useState(initialConfig.presetKey);
   const [liveParams, setLiveParams] = useState(initialConfig.liveParams);
+  const [hasStarted, setHasStarted] = useState(initialConfig.isImported);
   const fullscreenContainerRef = useRef(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isFullscreenSupported, setIsFullscreenSupported] = useState(true);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [isSelectorOpen, setIsSelectorOpen] = useState(!initialConfig.isImported);
+  const [isSelectorOpen, setIsSelectorOpen] = useState(false);
   const [score, setScore] = useState(0);
 
   // Clean URL hash after importing config
@@ -111,50 +113,62 @@ function App() {
     setIsMenuOpen(false);
   };
 
+  const handleGenerate = (key, customConfig) => {
+    setPresetKey(key);
+    setLiveParams(customConfig);
+    setHasStarted(true);
+  };
+
   return (
     <div ref={fullscreenContainerRef} style={{ position: 'relative', width: '100%', minHeight: '100dvh', overflow: 'hidden' }}>
       
-      <GameSelectorModal
-        isOpen={isSelectorOpen}
-        presetKey={presetKey}
-        onSelectPreset={applyPreset}
-        onClose={() => setIsSelectorOpen(false)}
-      />
+      {!hasStarted ? (
+        <ScreenZero onGenerate={handleGenerate} />
+      ) : (
+        <>
+          <GameSelectorModal
+            isOpen={isSelectorOpen}
+            presetKey={presetKey}
+            onSelectPreset={applyPreset}
+            onClose={() => setIsSelectorOpen(false)}
+          />
 
-      <HudHeader
-        liveParams={liveParams}
-        score={score}
-        isFullscreen={isFullscreen}
-        isFullscreenSupported={isFullscreenSupported}
-        onFullscreen={handleFullscreen}
-        onExitFullscreen={handleExitFullscreen}
-        onMenuOpen={() => setIsMenuOpen(true)}
-      />
+          <HudHeader
+            liveParams={liveParams}
+            score={score}
+            isFullscreen={isFullscreen}
+            isFullscreenSupported={isFullscreenSupported}
+            onFullscreen={handleFullscreen}
+            onExitFullscreen={handleExitFullscreen}
+            onMenuOpen={() => setIsMenuOpen(true)}
+          />
 
-      <CreatorPanel
-        isOpen={isMenuOpen}
-        onClose={() => setIsMenuOpen(false)}
-        onOpenSelector={handleOpenSelector}
-        liveParams={liveParams}
-        setLiveParams={setLiveParams}
-        presetKey={presetKey}
-        setPresetKey={setPresetKey}
-        onSliderChange={handleSliderChange}
-      />
+          <CreatorPanel
+            isOpen={isMenuOpen}
+            onClose={() => setIsMenuOpen(false)}
+            onOpenSelector={handleOpenSelector}
+            liveParams={liveParams}
+            setLiveParams={setLiveParams}
+            presetKey={presetKey}
+            setPresetKey={setPresetKey}
+            onSliderChange={handleSliderChange}
+          />
 
-      {/* Main Game Container */}
-      <div style={{ position: 'absolute', inset: 0, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-        <div style={{ width: '100%', height: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-          <GameComponent isFullscreen={isFullscreen} />
-        </div>
-      </div>
+          {/* Main Game Container */}
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+            <div style={{ width: '100%', height: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+              <GameComponent isFullscreen={isFullscreen} />
+            </div>
+          </div>
 
-      {liveParams.gameType === 'runner' && (
-        <div style={{ position: 'fixed', bottom: '30px', width: '100%', textAlign: 'center', zIndex: 10, pointerEvents: 'none' }}>
-          <p style={{ margin: 0, color: 'var(--pm-text-secondary)', fontSize: '14px', background: 'var(--pm-bg-panel)', padding: '8px 16px', display: 'inline-block', borderRadius: '20px', border: '1px solid var(--pm-border)', boxShadow: 'var(--pm-shadow-panel)' }}>
-            Tap or press <span style={{ background: 'var(--pm-bg-input)', padding: '2px 8px', borderRadius: '4px', color: 'var(--pm-accent-teal)', fontFamily: 'monospace', fontWeight: 'bold' }}>SPACE</span> to jump
-          </p>
-        </div>
+          {liveParams.gameType === 'runner' && (
+            <div style={{ position: 'fixed', bottom: '30px', width: '100%', textAlign: 'center', zIndex: 10, pointerEvents: 'none' }}>
+              <p style={{ margin: 0, color: 'var(--pm-text-secondary)', fontSize: '14px', background: 'var(--pm-bg-panel)', padding: '8px 16px', display: 'inline-block', borderRadius: '20px', border: '1px solid var(--pm-border)', boxShadow: 'var(--pm-shadow-panel)' }}>
+                Tap or press <span style={{ background: 'var(--pm-bg-input)', padding: '2px 8px', borderRadius: '4px', color: 'var(--pm-accent-teal)', fontFamily: 'monospace', fontWeight: 'bold' }}>SPACE</span> to jump
+              </p>
+            </div>
+          )}
+        </>
       )}
 
     </div>
