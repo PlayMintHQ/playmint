@@ -22,6 +22,7 @@ export default class GameManagerScene extends Phaser.Scene {
     this.load.svg('slash_f3', 'assets/slash_f3.svg', { width: 128, height: 128 });
     this.load.svg('slash_f4', 'assets/slash_f4.svg', { width: 128, height: 128 });
     this.load.svg('slash_f5', 'assets/slash_f5.svg', { width: 128, height: 128 });
+    this.load.image('stone_tile', 'assets/stone_tile.png');
   }
 
   init(data) {
@@ -51,6 +52,7 @@ export default class GameManagerScene extends Phaser.Scene {
     // Create a smooth background gradient
     this.bgGraphics = this.add.graphics();
     this.bgGraphics.setScrollFactor(0); // Pinned to camera
+    this.drawBackground(width, height); // Draw background immediately (fixes black screen)
 
     // Score state is managed in React. Update via DOM event.
     this.scoreTimer = this.time.addEvent({

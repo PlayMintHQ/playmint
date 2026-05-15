@@ -91,14 +91,14 @@ export default class PlatformerMode extends BaseMode {
     // Projectile hits enemy -> Kill Enemy
     this.scene.physics.add.overlap(this.projectiles, this.enemies, (proj, enemy) => {
       if (proj.deactivate) proj.deactivate();
-      this.killEnemy(enemy);
+      this.damageEnemy(enemy);
     });
 
     // Melee hits enemy -> Kill Enemy (only once per swing via hasHit flag)
     this.scene.physics.add.overlap(this.meleeAttacks, this.enemies, (atk, enemy) => {
       if (!atk.hasHit) {
         atk.hasHit = true;
-        this.killEnemy(enemy);
+        this.damageEnemy(enemy);
       }
     });
 
@@ -173,19 +173,27 @@ export default class PlatformerMode extends BaseMode {
     let enemiesCreated = 0;
     const maxEnemies = this.enemyCount;
 
+    const TILE_W = 64;
+    const PLATFORM_H = 32;
+
     layout.forEach((p, index) => {
-      // Use crate asset as building blocks for now
-      const block = this.platforms.create(p.x, p.y, 'crate');
-      block.setScale(p.scaleX, 0.5); // make them look like wide flat platforms
-      block.refreshBody(); // important for static physics bodies after scale
-      
+      const platWidth = p.scaleX * TILE_W;
+
+      // Visual: tileSprite (repeats the stone texture instead of stretching)
+      const block = this.scene.add.tileSprite(p.x, p.y, platWidth, PLATFORM_H, 'stone_tile');
+
+      // Physics: add static body matching the tileSprite dimensions
+      this.scene.physics.add.existing(block, true);
+      this.platforms.add(block);
+
       // Store edges for patrol logic
-      block.leftEdge = p.x - (block.displayWidth / 2);
-      block.rightEdge = p.x + (block.displayWidth / 2);
+      block.leftEdge = p.x - (platWidth / 2);
+      block.rightEdge = p.x + (platWidth / 2);
       
       if (p.hasEnemy && enemiesCreated < maxEnemies) {
         // Spawn an enemy slightly above the platform
         const enemy = this.enemies.create(p.x, p.y - 40, 'dude');
+        enemy.health = 3;
         enemy.setTint(0xff0000); // Red tint to distinguish from player
         enemy.setGravityY(this.gravity);
         enemy.setFrame(5); // standing frame
@@ -484,20 +492,39 @@ export default class PlatformerMode extends BaseMode {
     }
   }
 
-  killEnemy(enemy) {
+  damageEnemy(enemy) {
     if (!enemy || !enemy.active) return;
-    // Spawn particle-like tiny rectangles
-    for (let i = 0; i < 5; i++) {
-      const bit = this.scene.add.rectangle(enemy.x, enemy.y, 8, 8, 0xff0000);
-      this.scene.physics.add.existing(bit);
-      bit.body.setVelocity(Phaser.Math.Between(-100, 100), Phaser.Math.Between(-200, 0));
-      this.scene.time.delayedCall(500, () => bit.destroy());
-    }
-    enemy.destroy();
     
-    // Add to score
-    this.scene.score += 100;
-    window.dispatchEvent(new CustomEvent('update-score', { detail: this.scene.score }));
+    enemy.health -= 1;
+    
+    if (enemy.health <= 0) {
+      // Spawn particle-like tiny rectangles
+      for (let i = 0; i < 5; i++) {
+        const bit = this.scene.add.rectangle(enemy.x, enemy.y, 8, 8, 0xff0000);
+        this.scene.physics.add.existing(bit);
+        bit.body.setVelocity(Phaser.Math.Between(-100, 100), Phaser.Math.Between(-200, 0));
+        this.scene.time.delayedCall(500, () => bit.destroy());
+      }
+      enemy.destroy();
+      
+      // Add to score
+      this.scene.score += 100;
+      window.dispatchEvent(new CustomEvent('update-score', { detail: this.scene.score }));
+    } else {
+      // Tint and shake
+      enemy.setTintFill(0xffffff);
+      this.scene.tweens.add({
+        targets: enemy,
+        x: enemy.x + (enemy.body.velocity.x > 0 ? -5 : 5),
+        duration: 50,
+        yoyo: true,
+        ease: 'Power1',
+        onComplete: () => {
+          enemy.clearTint();
+          enemy.setTint(0xff0000);
+        }
+      });
+    }
   }
 
   handlePlayerEnemyCollision(player, enemy) {
