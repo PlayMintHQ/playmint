@@ -58,6 +58,7 @@ export default class PlatformerMode extends BaseMode {
     this.scene.player.setCollideWorldBounds(true);
     
     // Center-left spawn
+    const isForest = this.scene.activeTheme?.key === 'forest';
     const spawnX = isForest ? 48 : 150;
     const spawnY = isForest ? (this.scene.LOGICAL_FLOOR_Y - 48) : (this.scene.LOGICAL_FLOOR_Y - 250);
     this.scene.player.setPosition(spawnX, spawnY);

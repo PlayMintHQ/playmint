@@ -306,7 +306,7 @@ export default class GameManagerScene extends Phaser.Scene {
       }
 
     if (this.floorSegments && this.floorSegments.length) {
-      const floorWidth = this.gameConfig.gameType === 'platformer' ? 960 : Math.max(width * 4, 1600);
+      const floorWidth = this.gameConfig.gameType === 'platformer' ? 4000 : Math.max(width * 4, 1600);
       const floorHeight = this.activeTheme?.floorHeight || this.gameConfig.floorHeight || 100;
       const floorTexture = this.activeTheme.floorTexture || 'ground';
       const textureSource = this.textures.get(floorTexture)?.getSourceImage();
