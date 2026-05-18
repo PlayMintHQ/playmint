@@ -5,16 +5,17 @@ import MeleeAttack from '../objects/MeleeAttack';
 
 export default class PlatformerMode extends BaseMode {
   init() {
-    this.moveSpeed = 300; // Fixed speed as per new schema
-    this.jumpForce = this.scene.gameConfig.actionJumpHeight || 600;
-    this.gravity = this.scene.gameConfig.actionGravity || 1500;
+    const isForest = this.scene.activeTheme?.key === 'forest';
+    this.moveSpeed = isForest ? 80 : 300; // Fixed speed as per new schema
+    this.jumpForce = isForest ? 200 : (this.scene.gameConfig.actionJumpHeight || 600);
+    this.gravity = isForest ? 500 : (this.scene.gameConfig.actionGravity || 1500);
     
     // Feature hooks for future combat implementation
     this.enemyCount = this.scene.gameConfig.actionEnemyCount || 5;
     this.projectilesEnabled = this.scene.gameConfig.actionProjectileEnabled || false;
     
     // Determine world width based on our fixed level layout
-    this.worldWidth = 4000;
+    this.worldWidth = isForest ? 960 : 4000;
     
     // We will track input state directly
     this.cursors = null;
@@ -31,6 +32,8 @@ export default class PlatformerMode extends BaseMode {
     this.projectiles = null;
     this.meleeAttacks = null;   // Pool of MeleeAttack animated sprites
     this.winZone = null;
+    this.collectibles = null;
+    this.progressMilestones = new Set();
 
     // Melee cooldown: prevent spamming (ms)
     this.meleeCooldown = 0;
@@ -55,7 +58,9 @@ export default class PlatformerMode extends BaseMode {
     this.scene.player.setCollideWorldBounds(true);
     
     // Center-left spawn
-    this.scene.player.setPosition(150, this.scene.LOGICAL_FLOOR_Y - 250);
+    const spawnX = isForest ? 48 : 150;
+    const spawnY = isForest ? (this.scene.LOGICAL_FLOOR_Y - 48) : (this.scene.LOGICAL_FLOOR_Y - 250);
+    this.scene.player.setPosition(spawnX, spawnY);
 
     // Camera follow
     this.updateCameraBounds(this.scene.scale);
@@ -64,6 +69,7 @@ export default class PlatformerMode extends BaseMode {
     // Create fixed platforms for Level 1
     this.platforms = this.scene.physics.add.staticGroup();
     this.enemies = this.scene.physics.add.group();
+    this.collectibles = this.scene.physics.add.group();
     this.projectiles = this.scene.physics.add.group({
       classType: Projectile,
       maxSize: 10,
@@ -76,6 +82,8 @@ export default class PlatformerMode extends BaseMode {
     });
 
     this.buildLevel1(height);
+
+    this.spawnEnemiesForPlatforms();
     
     // Enable collision
     this.scene.physics.add.collider(this.scene.player, this.platforms);
@@ -83,6 +91,12 @@ export default class PlatformerMode extends BaseMode {
     this.scene.physics.add.collider(this.enemies, this.scene.floor);
     this.scene.physics.add.collider(this.projectiles, this.platforms, (proj) => {
       if (proj.deactivate) proj.deactivate();
+    });
+
+    this.scene.physics.add.overlap(this.scene.player, this.collectibles, (player, collectible) => {
+      if (!collectible || !collectible.active) return;
+      this.awardScore(25);
+      collectible.destroy();
     });
     
     // Player hits enemy -> Game Over (if not attacking)
@@ -126,15 +140,18 @@ export default class PlatformerMode extends BaseMode {
     this.resizeListener = (gameSize) => {
       if (this.resizeTimeout) clearTimeout(this.resizeTimeout);
       this.resizeTimeout = setTimeout(() => {
-        if (!this.scene || !this.scene.cameras || !this.scene.cameras.main) return;
-        const safeWidth = Math.max(1, gameSize.width);
-        const safeHeight = Math.max(1, gameSize.height);
-        
-        this.repositionMobileControls(safeWidth, safeHeight);
-        this.updateCameraBounds({ width: safeWidth, height: safeHeight });
+        this.handleResize(gameSize);
       }, 150);
     };
     this.scene.scale.on('resize', this.resizeListener, this);
+  }
+
+  handleResize(gameSize) {
+    if (!this.scene || !this.scene.cameras || !this.scene.cameras.main) return;
+    const safeWidth = Math.max(1, gameSize.width);
+    const safeHeight = Math.max(1, gameSize.height);
+    this.repositionMobileControls(safeWidth, safeHeight);
+    this.updateCameraBounds({ width: safeWidth, height: safeHeight });
   }
 
   updateCameraBounds(gameSize) {
@@ -158,7 +175,18 @@ export default class PlatformerMode extends BaseMode {
     const floorY = this.scene.LOGICAL_FLOOR_Y;
     
     // Very simple hand-placed static map
-    const layout = [
+    const isForest = this.scene.activeTheme?.key === 'forest';
+    const layout = isForest ? [
+      { x: 80, y: floorY - 16, scaleX: 6, hasEnemy: false },
+      { x: 160, y: floorY - 32, scaleX: 6, hasEnemy: true },
+      { x: 240, y: floorY - 16, scaleX: 5, hasEnemy: false },
+      { x: 320, y: floorY - 40, scaleX: 6, hasEnemy: true },
+      { x: 400, y: floorY - 56, scaleX: 6, hasEnemy: false },
+      { x: 480, y: floorY - 32, scaleX: 5, hasEnemy: true },
+      { x: 560, y: floorY - 16, scaleX: 6, hasEnemy: false },
+      { x: 640, y: floorY - 32, scaleX: 5, hasEnemy: true },
+      { x: 720, y: floorY - 48, scaleX: 12, hasEnemy: false }, // Big finish block
+    ] : [
       { x: 400, y: floorY - 80, scaleX: 1.5, hasEnemy: false },
       { x: 800, y: floorY - 150, scaleX: 2.0, hasEnemy: true },
       { x: 1200, y: floorY - 80, scaleX: 1.0, hasEnemy: false },
@@ -170,17 +198,18 @@ export default class PlatformerMode extends BaseMode {
       { x: 3400, y: floorY - 200, scaleX: 3.0, hasEnemy: false }, // Big finish block
     ];
 
-    let enemiesCreated = 0;
     const maxEnemies = this.enemyCount;
 
-    const TILE_W = 64;
-    const PLATFORM_H = 32;
+    const TILE_W = isForest ? 16 : 64;
+    const PLATFORM_H = isForest ? 16 : 32;
+    const themePlatformTexture = this.scene.activeTheme?.platformTexture || 'stone_tile';
+    const collectibleTexture = this.scene.activeTheme?.collectibleTexture || 'crate';
 
     layout.forEach((p, index) => {
       const platWidth = p.scaleX * TILE_W;
 
       // Visual: tileSprite (repeats the stone texture instead of stretching)
-      const block = this.scene.add.tileSprite(p.x, p.y, platWidth, PLATFORM_H, 'stone_tile');
+      const block = this.scene.add.tileSprite(p.x, p.y, platWidth, PLATFORM_H, themePlatformTexture);
 
       // Physics: add static body matching the tileSprite dimensions
       this.scene.physics.add.existing(block, true);
@@ -190,22 +219,14 @@ export default class PlatformerMode extends BaseMode {
       block.leftEdge = p.x - (platWidth / 2);
       block.rightEdge = p.x + (platWidth / 2);
       
-      if (p.hasEnemy && enemiesCreated < maxEnemies) {
-        // Spawn an enemy slightly above the platform
-        const enemy = this.enemies.create(p.x, p.y - 40, 'dude');
-        enemy.health = 3;
-        enemy.setTint(0xff0000); // Red tint to distinguish from player
-        enemy.setGravityY(this.gravity);
-        enemy.setFrame(5); // standing frame
-        
-        // Simple back and forth movement
-        enemy.setVelocityX(50);
-        enemy.setBounceX(1);
-        enemy.setCollideWorldBounds(true);
-        // Link enemy to platform for edge detection
-        enemy.patrolPlatform = block;
-        
-        enemiesCreated++;
+      if (p.hasEnemy && maxEnemies > 0) {
+        block.hasEnemySpot = true;
+      }
+
+      if (!p.hasEnemy && index % 2 === 0) {
+        const collectible = this.collectibles.create(p.x, p.y - 80, collectibleTexture);
+        collectible.setScale(0.5);
+        collectible.body.setAllowGravity(false);
       }
 
       // Add win zone on the last block
@@ -227,14 +248,14 @@ export default class PlatformerMode extends BaseMode {
     
     const controlStyle = {
       fontFamily: 'Impact, Arial Black, sans-serif',
-      fontSize: '36px',
+      fontSize: '28px',
       fontStyle: 'italic',
       fontWeight: '900',
       fill: '#ffffff',
       stroke: '#000000',
-      strokeThickness: 6,
-      shadow: { offsetX: 4, offsetY: 4, color: '#000000', blur: 0, stroke: true, fill: true },
-      padding: { left: 20, right: 20, top: 20, bottom: 20 },
+      strokeThickness: 5,
+      shadow: { offsetX: 3, offsetY: 3, color: '#000000', blur: 0, stroke: true, fill: true },
+      padding: { left: 14, right: 14, top: 14, bottom: 14 },
       resolution: 3 // Forces high-DPI rendering to remove blur
     };
 
@@ -330,11 +351,12 @@ export default class PlatformerMode extends BaseMode {
   }
 
   repositionMobileControls(width, height) {
-    if (this.btnLeft) this.btnLeft.setPosition(20, height - 100);
-    if (this.btnRight) this.btnRight.setPosition(120, height - 100);
-    if (this.btnJump) this.btnJump.setPosition(width - 20, height - 100);
-    if (this.btnMelee) this.btnMelee.setPosition(width - 20, height - 180);
-    if (this.btnShoot) this.btnShoot.setPosition(width - 150, height - 100);
+    const bottom = height - 80;
+    if (this.btnLeft) this.btnLeft.setPosition(16, bottom);
+    if (this.btnRight) this.btnRight.setPosition(88, bottom);
+    if (this.btnJump) this.btnJump.setPosition(width - 16, bottom);
+    if (this.btnMelee) this.btnMelee.setPosition(width - 16, bottom - 70);
+    if (this.btnShoot) this.btnShoot.setPosition(width - 120, bottom);
   }
 
   isInputFocused() {
@@ -404,6 +426,12 @@ export default class PlatformerMode extends BaseMode {
         }
       }
     });
+
+    const progressIndex = Math.floor(player.x / 400);
+    if (!this.progressMilestones.has(progressIndex)) {
+      this.progressMilestones.add(progressIndex);
+      if (progressIndex > 0) this.awardScore(10);
+    }
 
     // Animation Logic
     const touchingDown = player.body.touching.down || player.body.blocked.down;
@@ -496,6 +524,8 @@ export default class PlatformerMode extends BaseMode {
     if (!enemy || !enemy.active) return;
     
     enemy.health -= 1;
+
+    this.awardScore(10);
     
     if (enemy.health <= 0) {
       // Spawn particle-like tiny rectangles
@@ -505,11 +535,9 @@ export default class PlatformerMode extends BaseMode {
         bit.body.setVelocity(Phaser.Math.Between(-100, 100), Phaser.Math.Between(-200, 0));
         this.scene.time.delayedCall(500, () => bit.destroy());
       }
-      enemy.destroy();
-      
-      // Add to score
-      this.scene.score += 100;
-      window.dispatchEvent(new CustomEvent('update-score', { detail: this.scene.score }));
+      this.enemies.remove(enemy, true, true);
+
+      this.awardScore(100);
     } else {
       // Tint and shake
       enemy.setTintFill(0xffffff);
@@ -543,6 +571,53 @@ export default class PlatformerMode extends BaseMode {
         this.scene.player.body.setGravityY(this.gravity);
       }
     }
+    if (newConfig.actionEnemyCount !== oldConfig.actionEnemyCount) {
+      this.refreshEnemies();
+    }
+  }
+
+  awardScore(points) {
+    if (!points) return;
+    this.scene.score += points;
+    window.dispatchEvent(new CustomEvent('update-score', { detail: this.scene.score }));
+  }
+
+  refreshEnemies() {
+    if (!this.enemies) return;
+    this.enemies.clear(true, true);
+    this.spawnEnemiesForPlatforms();
+  }
+
+  spawnEnemiesForPlatforms() {
+    if (!this.platforms) return;
+    let enemiesCreated = 0;
+    const maxEnemies = this.enemyCount;
+
+    const enemySpots = [];
+    const fallbackSpots = [];
+
+    this.platforms.children.iterate((block) => {
+      if (!block || !block.leftEdge || !block.rightEdge) return;
+      if (block.hasEnemySpot) enemySpots.push(block);
+      else fallbackSpots.push(block);
+    });
+
+    const spawnOnBlock = (block) => {
+      if (!block || enemiesCreated >= maxEnemies) return;
+      const enemy = this.enemies.create(block.x, block.y - 40, 'dude');
+      enemy.health = 3;
+      enemy.setTint(0xff0000);
+      enemy.setGravityY(this.gravity);
+      enemy.setFrame(5);
+      enemy.setVelocityX(50);
+      enemy.setBounceX(1);
+      enemy.setCollideWorldBounds(true);
+      enemy.patrolPlatform = block;
+      enemiesCreated++;
+    };
+
+    enemySpots.forEach(spawnOnBlock);
+    fallbackSpots.forEach(spawnOnBlock);
   }
 
   cleanup() {
@@ -566,6 +641,10 @@ export default class PlatformerMode extends BaseMode {
     
     if (this.enemies && this.enemies.scene) {
       try { this.enemies.clear(true, true); } catch (e) {}
+    }
+
+    if (this.collectibles && this.collectibles.scene) {
+      try { this.collectibles.clear(true, true); } catch (e) {}
     }
 
     if (this.meleeAttacks && this.meleeAttacks.scene) {

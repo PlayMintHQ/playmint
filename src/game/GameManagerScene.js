@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { DEFAULT_CONFIG } from '../gameConfig';
+import { getTheme } from './themes';
 import GameModeManager from './GameModeManager';
 
 export default class GameManagerScene extends Phaser.Scene {
@@ -23,6 +24,20 @@ export default class GameManagerScene extends Phaser.Scene {
     this.load.svg('slash_f4', 'assets/slash_f4.svg', { width: 128, height: 128 });
     this.load.svg('slash_f5', 'assets/slash_f5.svg', { width: 128, height: 128 });
     this.load.image('stone_tile', 'assets/stone_tile.png');
+    this.load.image('lava_ground', 'assets/themes/lava/lava_ground.png');
+    this.load.image('lava_tile', 'assets/themes/lava/lava_tile.png');
+    this.load.image('ice_tile', 'assets/themes/ice/ice_tile.png');
+    this.load.image('bg_default_base', 'assets/themes/forest/bg_far.png');
+    this.load.image('bg_lava_base', 'assets/themes/lava/bg.png');
+    this.load.image('bg_lava_mountains', 'assets/themes/lava/mountains.png');
+    this.load.image('bg_lava_clouds', 'assets/themes/lava/clouds.png');
+    this.load.image('bg_ice_sky', 'assets/themes/ice/sky.png');
+    this.load.image('bg_ice_mountains', 'assets/themes/ice/mountains.png');
+    this.load.image('bg_ice_clouds', 'assets/themes/ice/clouds.png');
+    this.load.image('forest_bg_far', 'assets/themes/forest/bg_far.png');
+    this.load.image('forest_bg_mid', 'assets/themes/forest/bg_mid.png');
+    this.load.image('forest_ground', 'assets/themes/forest/ground_tile.png');
+    this.load.image('forest_platform', 'assets/themes/forest/ground_tile.png');
   }
 
   init(data) {
@@ -39,6 +54,7 @@ export default class GameManagerScene extends Phaser.Scene {
     this.isGameOver = false;
     this.score = 0;
     window.dispatchEvent(new CustomEvent('update-score', { detail: this.score }));
+    this.activeTheme = getTheme(this.gameConfig.themeKey);
 
     // Enable multitouch for mobile controls (movement + jumping)
     this.input.addPointer(2);
@@ -47,30 +63,56 @@ export default class GameManagerScene extends Phaser.Scene {
     const height = this.scale.height;
 
     this.LOGICAL_FLOOR_Y = 1000;
-    const floorHeight = this.gameConfig.floorHeight || 100;
+    const floorHeight = this.activeTheme.floorHeight || this.gameConfig.floorHeight || 100;
 
     // Create a smooth background gradient
     this.bgGraphics = this.add.graphics();
     this.bgGraphics.setScrollFactor(0); // Pinned to camera
+    this.bgGraphics.setDepth(-20);
+    this.bgLayers = [];
+    this.createBackgroundLayers();
     this.drawBackground(width, height); // Draw background immediately (fixes black screen)
 
     // Score state is managed in React. Update via DOM event.
-    this.scoreTimer = this.time.addEvent({
-      delay: this.gameConfig.scoreTimerDelay || 100,
-      callback: () => {
-        if (!this.isGameOver) {
-          this.score += 1;
-          window.dispatchEvent(new CustomEvent('update-score', { detail: this.score }));
-        }
-      },
-      loop: true
-    });
+    if (this.gameConfig.gameType === 'runner') {
+      this.scoreTimer = this.time.addEvent({
+        delay: this.gameConfig.scoreTimerDelay || 100,
+        callback: () => {
+          if (!this.isGameOver) {
+            this.score += 1;
+            window.dispatchEvent(new CustomEvent('update-score', { detail: this.score }));
+          }
+        },
+        loop: true
+      });
+    }
 
     // Floor - Make it wide enough to cover the world width if we are in platformer mode.
     const floorWidth = this.gameConfig.gameType === 'platformer' ? 4000 : Math.max(width * 2, 4000);
-    this.floor = this.add.tileSprite(0, this.LOGICAL_FLOOR_Y, floorWidth, floorHeight, 'ground').setOrigin(0, 0);
-    this.floor.tileScaleX = this.gameConfig.floorTileScale || 0.15;
-    this.floor.tileScaleY = this.gameConfig.floorTileScale || 0.15;
+    const floorTexture = this.activeTheme.floorTexture || 'ground';
+    const textureSource = this.textures.get(floorTexture)?.getSourceImage();
+    if (textureSource && textureSource.width && textureSource.height) {
+      const tileWidth = textureSource.width;
+      const tileHeight = textureSource.height;
+      const scaleY = floorHeight / tileHeight;
+      const scaledWidth = tileWidth * scaleY;
+      const repeatCount = Math.ceil(floorWidth / scaledWidth);
+
+      this.floorSegments = [];
+      for (let i = 0; i < repeatCount; i++) {
+        const tile = this.add.sprite(i * scaledWidth, this.LOGICAL_FLOOR_Y, floorTexture).setOrigin(0, 0);
+        tile.setScale(scaleY);
+        this.floorSegments.push(tile);
+      }
+
+      this.floor = this.add.rectangle(0, this.LOGICAL_FLOOR_Y, floorWidth, floorHeight, 0x000000, 0);
+      this.floor.setOrigin(0, 0);
+    } else {
+      this.floor = this.add.tileSprite(0, this.LOGICAL_FLOOR_Y, floorWidth, floorHeight, floorTexture).setOrigin(0, 0);
+      const themeTileScale = this.activeTheme.floorTileScale || 0.15;
+      this.floor.tileScaleX = this.gameConfig.floorTileScale || themeTileScale;
+      this.floor.tileScaleY = this.gameConfig.floorTileScale || themeTileScale;
+    }
     this.physics.add.existing(this.floor, true); // Static
 
     // Bounds must accommodate the static depth
@@ -104,7 +146,9 @@ export default class GameManagerScene extends Phaser.Scene {
     }
 
     // Player Base Logic
-    this.player = this.physics.add.sprite(150, this.LOGICAL_FLOOR_Y - 150, 'dude');
+    const playerYOffset = 150;
+    const playerX = 150;
+    this.player = this.physics.add.sprite(playerX, this.LOGICAL_FLOOR_Y - playerYOffset, 'dude');
     this.player.setScale(this.gameConfig.playerScale || 1.5);
     this.physics.add.collider(this.player, this.floor);
 
@@ -161,6 +205,10 @@ export default class GameManagerScene extends Phaser.Scene {
         // Instant Restart for UX Gap
         this.scene.restart();
       } else {
+        if (newConfig.themeKey && newConfig.themeKey !== oldConfig.themeKey) {
+          this.scene.restart();
+          return;
+        }
         this.gameModeManager.onConfigUpdate(newConfig, oldConfig);
       }
     };
@@ -169,14 +217,64 @@ export default class GameManagerScene extends Phaser.Scene {
     this.events.on('shutdown', () => {
       window.removeEventListener('update-game-config', this.updateConfigListener);
       window.removeEventListener('keydown', this.preventKeyScrollListener);
+      if (this.bgLayers) {
+        this.bgLayers.forEach((layer) => layer.destroy());
+        this.bgLayers = [];
+      }
+      if (this.floorSegments) {
+        this.floorSegments.forEach((segment) => segment.destroy());
+        this.floorSegments = [];
+      }
       this.gameModeManager.cleanup();
     });
   }
 
   drawBackground(width, height) {
     this.bgGraphics.clear();
-    this.bgGraphics.fillGradientStyle(0x87CEEB, 0x87CEEB, 0xe0f7fa, 0xe0f7fa, 1);
+    this.bgGraphics.fillStyle(0x0a0f16, 1);
     this.bgGraphics.fillRect(0, 0, width, height);
+  }
+
+  createBackgroundLayers() {
+    if (this.bgLayers && this.bgLayers.length) {
+      this.bgLayers.forEach((layer) => layer.destroy());
+    }
+    this.bgLayers = [];
+
+    const theme = this.activeTheme || getTheme(this.gameConfig.themeKey);
+    const width = this.scale.width;
+    const height = this.scale.height;
+    const layers = theme.backgroundLayers || [];
+
+    layers.forEach((layer) => {
+      const texture = this.textures.get(layer.key);
+      const source = texture.getSourceImage();
+      const textureWidth = source?.width || width;
+      const textureHeight = source?.height || height;
+      const baseScaleX = width / textureWidth;
+      const baseScaleY = height / textureHeight;
+      const baseScale = Math.max(baseScaleX, baseScaleY);
+
+      const spriteWidth = textureWidth;
+      const spriteHeight = textureHeight;
+      const sprite = this.add.tileSprite(0, 0, spriteWidth, spriteHeight, layer.key)
+        .setOrigin(0, 0)
+        .setScrollFactor(0)
+        .setDepth(-5 + this.bgLayers.length);
+
+      const scale = (layer.scale || 1) * baseScale;
+      sprite.__layerScale = layer.scale || 1;
+      sprite.setScale(scale);
+      if (layer.alpha != null) {
+        sprite.setAlpha(layer.alpha);
+      }
+      if (layer.tint) {
+        sprite.setTint(layer.tint);
+      }
+
+      sprite.__scrollSpeed = layer.speed || 0.1;
+      this.bgLayers.push(sprite);
+    });
   }
 
   handleResize(gameSize) {
@@ -193,6 +291,52 @@ export default class GameManagerScene extends Phaser.Scene {
       this.cameras.main.setViewport(0, 0, width, height);
 
       this.drawBackground(width, height);
+      if (this.bgLayers && this.bgLayers.length) {
+        this.bgLayers.forEach((layer) => {
+          const texture = this.textures.get(layer.texture.key);
+          const source = texture.getSourceImage();
+          const textureWidth = source?.width || width;
+          const textureHeight = source?.height || height;
+          const baseScaleX = width / textureWidth;
+          const baseScaleY = height / textureHeight;
+          const baseScale = Math.max(baseScaleX, baseScaleY);
+          const desiredScale = (layer.__layerScale || 1) * baseScale;
+          layer.setScale(desiredScale);
+        });
+      }
+
+    if (this.floorSegments && this.floorSegments.length) {
+      const floorWidth = this.gameConfig.gameType === 'platformer' ? 960 : Math.max(width * 4, 1600);
+      const floorHeight = this.activeTheme?.floorHeight || this.gameConfig.floorHeight || 100;
+      const floorTexture = this.activeTheme.floorTexture || 'ground';
+      const textureSource = this.textures.get(floorTexture)?.getSourceImage();
+      if (textureSource && textureSource.width && textureSource.height) {
+        const tileWidth = textureSource.width;
+        const tileHeight = textureSource.height;
+        const scaleY = floorHeight / tileHeight;
+        const scaledWidth = tileWidth * scaleY;
+        const repeatCount = Math.ceil(floorWidth / scaledWidth);
+
+        while (this.floorSegments.length < repeatCount) {
+          const tile = this.add.sprite(0, this.LOGICAL_FLOOR_Y, floorTexture).setOrigin(0, 0);
+          tile.setScale(scaleY);
+          this.floorSegments.push(tile);
+        }
+        while (this.floorSegments.length > repeatCount) {
+          const tile = this.floorSegments.pop();
+          tile.destroy();
+        }
+
+        this.floorSegments.forEach((tile, index) => {
+          tile.setScale(scaleY);
+          tile.setPosition(index * scaledWidth, this.LOGICAL_FLOOR_Y);
+        });
+      }
+    }
+
+      if (this.gameModeManager && this.gameModeManager.handleResize) {
+        this.gameModeManager.handleResize({ width, height });
+      }
 
       // Center camera onto the absolute static floor if in Runner Mode.
       // In Platformer mode, the camera follows the player, so it naturally handles its own scroll Y.
@@ -296,6 +440,17 @@ export default class GameManagerScene extends Phaser.Scene {
 
   update(time, delta) {
     if (this.isGameOver) return;
+    
+    if (this.gameConfig.gameType === 'runner') {
+       this.virtualScrollX = (this.virtualScrollX || 0) + (this.gameModeManager?.currentMode?.runSpeed || this.gameConfig.runSpeed) * (delta / 1000);
+    }
+    const scrollX = this.gameConfig.gameType === 'runner' ? this.virtualScrollX : (this.cameras?.main?.scrollX || 0);
+
+    if (this.bgLayers && this.bgLayers.length) {
+      this.bgLayers.forEach((layer) => {
+        layer.tilePositionX = scrollX * (this.gameConfig.gameType === 'runner' ? (layer.__scrollSpeed || 0.1) : -(layer.__scrollSpeed || 0.1));
+      });
+    }
     this.gameModeManager.update(time, delta);
   }
 }

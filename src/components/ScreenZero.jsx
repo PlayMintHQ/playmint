@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { GAME_PRESETS } from '../gameConfig';
 
 const BANNED_WORDS = ['fuck', 'shit', 'bitch', 'cunt', 'ass', 'dick', 'pussy', 'cock', 'nigger', 'faggot'];
@@ -53,6 +53,7 @@ const ScreenZero = ({ onGenerate }) => {
     let mode = 'random';
     let newConfig = {};
     let keywordsMatched = 0;
+    let themeKey = 'default';
 
     // Detect Mode
     if (text.match(/(action|quest|fight|platformer|enemies|shoot|kill|combat)/)) {
@@ -60,6 +61,17 @@ const ScreenZero = ({ onGenerate }) => {
       keywordsMatched++;
     } else if (text.match(/(run|dash|jump|runner|dodge|sprint)/)) {
       mode = 'standard';
+      keywordsMatched++;
+    }
+
+    if (text.match(/(lava|volcano|molten|inferno|ash)/)) {
+      themeKey = 'lava';
+      keywordsMatched++;
+    } else if (text.match(/(ice|snow|frost|glacier|winter)/)) {
+      themeKey = 'ice';
+      keywordsMatched++;
+    } else if (text.match(/(forest|jungle|wood|trees|verdant)/)) {
+      themeKey = 'forest';
       keywordsMatched++;
     }
 
@@ -72,26 +84,38 @@ const ScreenZero = ({ onGenerate }) => {
     
     // Default difficulty
     newConfig.difficulty = 5;
+    newConfig.themeKey = themeKey;
 
-    // Apply Modifiers
-    if (text.match(/(fast|speed|quick|rush)/)) {
+    const isFast = text.match(/(fast|speed|quick|rush)/);
+    const isSlow = text.match(/(slow|easy|relax|chill)/);
+    const isHard = text.match(/(hard|difficult|impossible|insane|chaos|crazy)/);
+    const isLowGravity = text.match(/(moon|float|space|fly|low gravity|zero gravity)/);
+
+    if (isSlow) {
+      newConfig.difficulty = 2;
+      keywordsMatched++;
+    }
+    if (isHard) {
+      newConfig.difficulty = 9;
+      keywordsMatched++;
+    }
+
+    applyDifficulty(newConfig, mode);
+
+    if (isFast) {
       if (mode === 'standard') newConfig.runSpeed = 600;
       if (mode === 'action_quest') newConfig.actionJumpHeight = 800;
       keywordsMatched++;
     }
-    if (text.match(/(slow|easy|relax|chill)/)) {
-      newConfig.difficulty = 2;
+    if (isSlow) {
       if (mode === 'standard') { newConfig.runSpeed = 200; newConfig.gravity = 1200; }
       if (mode === 'action_quest') { newConfig.actionEnemyCount = 1; newConfig.actionGravity = 1000; }
-      keywordsMatched++;
     }
-    if (text.match(/(hard|difficult|impossible|insane|chaos|crazy)/)) {
-      newConfig.difficulty = 9;
+    if (isHard) {
       if (mode === 'standard') { newConfig.runSpeed = 800; newConfig.gravity = 2500; newConfig.obstacleDelay = 600; }
       if (mode === 'action_quest') { newConfig.actionEnemyCount = 12; newConfig.actionGravity = 2000; }
-      keywordsMatched++;
     }
-    if (text.match(/(moon|float|space|fly|low gravity|low|gravity)/)) {
+    if (isLowGravity) {
       newConfig.gravity = 600;
       newConfig.actionGravity = 600;
       keywordsMatched++;
@@ -100,9 +124,7 @@ const ScreenZero = ({ onGenerate }) => {
     if (keywordsMatched === 0) {
       generateRandom("Prompt unrecognized. Generated a random variation.");
     } else {
-      // Apply difficulty mappings universally if set
-      applyDifficulty(newConfig, mode);
-      newConfig.gameName = input.length > 20 ? input.substring(0, 20) + '...' : input;
+      newConfig.gameName = generateImmersiveTitle(input, mode, themeKey);
       onGenerate('custom', newConfig);
     }
   };
@@ -115,6 +137,8 @@ const ScreenZero = ({ onGenerate }) => {
     applyDifficulty(config, mode);
     
     config.gameName = mode === 'action_quest' ? 'Random Quest' : 'Random Runner';
+    const themePool = ['forest', 'lava', 'ice', 'default'];
+    config.themeKey = themePool[Math.floor(Math.random() * themePool.length)];
     
     showToast(message);
     setTimeout(() => {
@@ -133,11 +157,32 @@ const ScreenZero = ({ onGenerate }) => {
     }
   };
 
+  const generateImmersiveTitle = (input, mode, theme) => {
+    const trimmed = input.trim();
+    if (trimmed.length > 4 && trimmed.length < 32) {
+      return trimmed;
+    }
+
+    const themeNames = {
+      lava: ['Ashfall', 'Molten', 'Cinder', 'Inferno'],
+      ice: ['Glacier', 'Frost', 'Arctic', 'Snowfall'],
+      forest: ['Verdant', 'Wildwood', 'Grove', 'Emerald'],
+      default: ['PlayMint', 'Core', 'Nova', 'Prime']
+    };
+    const modeNames = mode === 'action_quest'
+      ? ['Quest', 'Runes', 'Raid', 'Path']
+      : ['Run', 'Sprint', 'Rush', 'Dash'];
+
+    const themeList = themeNames[theme] || themeNames.default;
+    const title = `${themeList[Math.floor(Math.random() * themeList.length)]} ${modeNames[Math.floor(Math.random() * modeNames.length)]}`;
+    return title;
+  };
+
   return (
     <div style={{
       position: 'absolute', inset: 0,
       display: 'flex', flexDirection: 'column',
-      justifyContent: 'center', alignItems: 'center',
+      justifyContent: 'flex-end', alignItems: 'center',
       background: 'linear-gradient(135deg, #0a0f16 0%, #111827 100%)',
       zIndex: 9999, overflow: 'hidden'
     }}>
@@ -153,87 +198,97 @@ const ScreenZero = ({ onGenerate }) => {
         bottom: '-10%', right: '-10%', borderRadius: '50%', filter: 'blur(40px)', animation: 'float 12s infinite alternate-reverse'
       }} />
 
-      <div className="pm-glass-panel" style={{
-        padding: '40px', borderRadius: '24px', width: '90%', maxWidth: '500px',
-        display: 'flex', flexDirection: 'column', alignItems: 'center',
-        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255,255,255,0.1)',
-        position: 'relative', zIndex: 1
-      }}>
-        <h1 style={{
-          fontSize: '36px', fontWeight: '900', color: 'var(--pm-text-primary)',
-          marginBottom: '8px', textAlign: 'center', letterSpacing: '-1px',
-          background: 'linear-gradient(to right, #0db4b9, #a259ff)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'
-        }}>
-          PlayMint
-        </h1>
-        <p style={{ color: 'var(--pm-text-secondary)', marginBottom: '32px', textAlign: 'center', fontSize: '16px' }}>
-          Type a prompt to generate your game.
-        </p>
+      <div style={{ position: 'absolute', inset: 0, zIndex: 0, opacity: 0.5 }}>
+        <div style={{
+          position: 'absolute', inset: 0,
+          background: 'radial-gradient(circle at 20% 30%, rgba(0,229,153,0.2), transparent 45%), radial-gradient(circle at 80% 20%, rgba(255,140,0,0.18), transparent 50%), radial-gradient(circle at 50% 80%, rgba(138,43,226,0.18), transparent 55%)'
+        }} />
+      </div>
 
-        <form onSubmit={handleGenerate} style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      <div style={{
+        width: 'min(720px, 90vw)',
+        marginBottom: 'clamp(24px, 6vh, 60px)',
+        zIndex: 2,
+        animation: 'dockRise 0.6s ease-out'
+      }}>
+        <div style={{
+          display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+          marginBottom: '10px'
+        }}>
+          <h1 style={{
+            fontSize: 'clamp(20px, 4vw, 30px)', fontWeight: '900', margin: 0,
+            letterSpacing: '-0.5px', color: 'var(--pm-text-primary)'
+          }}>
+            Enter the Mint
+          </h1>
+          <span style={{
+            color: 'var(--pm-text-secondary)', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px'
+          }}>
+            V0 Generator
+          </span>
+        </div>
+
+        <form onSubmit={handleGenerate} className="pm-screenzero-form" style={{
+          width: '100%',
+          display: 'grid',
+          gridTemplateColumns: '1fr auto auto',
+          gap: '10px',
+          background: 'rgba(10,15,22,0.78)',
+          border: '1px solid rgba(255,255,255,0.14)',
+          borderRadius: '999px',
+          padding: '10px',
+          boxShadow: '0 20px 50px rgba(0,0,0,0.5), 0 0 0 1px rgba(0,229,153,0.08)',
+          backdropFilter: 'blur(10px)'
+        }}>
           <input
             type="text"
             className="pm-input"
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            placeholder="e.g. 'fast and hard action quest'..."
-            style={{ 
-              padding: '16px 20px', fontSize: '18px', borderRadius: '12px',
-              backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.15)',
-              color: '#fff', outline: 'none', transition: 'all 0.2s ease',
-              boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)'
+            placeholder="e.g. 'lava runner with low gravity'"
+            style={{
+              padding: '12px 16px', fontSize: '15px', borderRadius: '999px',
+              backgroundColor: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.12)'
             }}
-            onFocus={(e) => e.target.style.borderColor = 'var(--pm-accent-teal)'}
-            onBlur={(e) => e.target.style.borderColor = 'rgba(255,255,255,0.15)'}
             autoFocus
           />
-          
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button 
-              type="submit" 
-              className="pm-btn pm-btn-primary"
-              disabled={isGenerating}
-              style={{ 
-                flex: 1, padding: '16px', fontSize: '18px', borderRadius: '12px',
-                fontWeight: 'bold', letterSpacing: '0.5px',
-                opacity: isGenerating ? 0.7 : 1, transform: isGenerating ? 'scale(0.98)' : 'scale(1)',
-                transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)'
-              }}
-            >
-              {isGenerating ? 'Generating...' : 'Generate ⚡'}
-            </button>
-
-            <button 
-              type="button" 
-              onClick={handleQuickStart}
-              className="pm-btn pm-btn-outline"
-              disabled={isGenerating}
-              style={{ 
-                padding: '16px 24px', fontSize: '16px', borderRadius: '12px',
-                fontWeight: 'bold',
-                opacity: isGenerating ? 0.7 : 1, transform: isGenerating ? 'scale(0.98)' : 'scale(1)',
-                transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-                backgroundColor: 'rgba(255,255,255,0.05)'
-              }}
-            >
-              Quick Start
-            </button>
-          </div>
+          <button
+            type="submit"
+            className="pm-btn pm-btn-primary"
+            disabled={isGenerating}
+            style={{
+              padding: '10px 18px', fontSize: '14px', borderRadius: '999px',
+              fontWeight: 'bold', opacity: isGenerating ? 0.7 : 1
+            }}
+          >
+            {isGenerating ? 'Generating...' : 'Generate'}
+          </button>
+          <button
+            type="button"
+            onClick={handleQuickStart}
+            className="pm-btn pm-btn-outline pm-screenzero-quick"
+            disabled={isGenerating}
+            style={{
+              padding: '10px 16px', fontSize: '13px', borderRadius: '999px'
+            }}
+          >
+            Quick Start
+          </button>
         </form>
 
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'center', marginTop: '20px' }}>
-          {['fast game', 'low gravity platformer', 'hard mode'].map((example, i) => (
+        <div className="pm-screenzero-chips" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '10px' }}>
+          {['lava runner', 'ice quest', 'forest sprint'].map((example, i) => (
             <button
               key={i}
               type="button"
               onClick={() => handleExampleClick(example)}
               style={{
-                background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)',
-                color: 'var(--pm-text-secondary)', padding: '6px 12px', borderRadius: '20px',
-                fontSize: '13px', cursor: 'pointer', transition: 'all 0.2s ease',
+                background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)',
+                color: 'var(--pm-text-secondary)', padding: '6px 12px', borderRadius: '999px',
+                fontSize: '12px', cursor: 'pointer', transition: 'all 0.2s ease'
               }}
               onMouseEnter={(e) => { e.target.style.background = 'rgba(255,255,255,0.2)'; e.target.style.color = '#fff'; }}
-              onMouseLeave={(e) => { e.target.style.background = 'rgba(255,255,255,0.1)'; e.target.style.color = 'var(--pm-text-secondary)'; }}
+              onMouseLeave={(e) => { e.target.style.background = 'rgba(255,255,255,0.08)'; e.target.style.color = 'var(--pm-text-secondary)'; }}
             >
               Try: {example}
             </button>
@@ -254,12 +309,28 @@ const ScreenZero = ({ onGenerate }) => {
         <span style={{ fontSize: '20px' }}>✨</span> {toastMessage}
       </div>
       
-      <style>{`
-        @keyframes float {
-          0% { transform: translateY(0) scale(1); }
-          100% { transform: translateY(-20px) scale(1.05); }
-        }
-      `}</style>
+        <style>{`
+          @keyframes float {
+            0% { transform: translateY(0) scale(1); }
+            100% { transform: translateY(-20px) scale(1.05); }
+          }
+          @keyframes dockRise {
+            0% { opacity: 0; transform: translateY(10px); }
+            100% { opacity: 1; transform: translateY(0); }
+          }
+          @media (max-width: 640px) {
+            .pm-screenzero-form {
+              grid-template-columns: 1fr;
+              border-radius: 18px;
+            }
+            .pm-screenzero-quick {
+              display: none;
+            }
+            .pm-screenzero-chips {
+              display: none;
+            }
+          }
+        `}</style>
     </div>
   );
 };

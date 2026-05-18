@@ -37,6 +37,12 @@ export default class GameModeManager {
     if (this.activeMode) this.activeMode.update(time, delta);
   }
 
+  handleResize(gameSize) {
+    if (this.activeMode && this.activeMode.handleResize) {
+      this.activeMode.handleResize(gameSize);
+    }
+  }
+
   jump() {
     if (this.activeMode) this.activeMode.jump();
   }

@@ -8,6 +8,8 @@ const config = {
     mode: Phaser.Scale.RESIZE,
     autoCenter: Phaser.Scale.CENTER_BOTH,
   },
+  pixelArt: true,
+  roundPixels: true,
   physics: {
     default: 'arcade',
     arcade: {

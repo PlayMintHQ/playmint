@@ -42,6 +42,17 @@ body {
   overflow-x: hidden;
 }
 
+canvas {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+@media (max-width: 640px) {
+  .pm-input {
+    font-size: 14px;
+  }
+}
+
 #root {
   width: 100%;
   min-height: 100dvh;
@@ -335,3 +346,22 @@ body {
   }
 }
 
+@media (max-width: 480px) {
+  .hud-header {
+    padding: 6px 10px;
+  }
+  .hud-header__logo img {
+    height: 20px;
+  }
+  .hud-header__score {
+    font-size: 12px;
+    padding: 4px 8px;
+  }
+  .hud-header__icon-btn {
+    padding: 4px 6px !important;
+    font-size: 12px;
+  }
+  .hud-header__title--mobile {
+    display: none;
+  }
+}

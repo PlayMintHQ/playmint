@@ -3,14 +3,16 @@ import BaseMode from './BaseMode';
 
 export default class RunnerMode extends BaseMode {
   init() {
-    this.baseSpeed = this.scene.gameConfig.runSpeed || 350;
+    const isForest = this.scene.activeTheme?.key === 'forest';
+    this.baseSpeed = this.scene.gameConfig.runSpeed || (isForest ? 160 : 350);
     this.runSpeed = this.baseSpeed;
     this.obstacles = null;
     this.obstacleTimer = null;
   }
 
   create() {
-    this.scene.player.setGravityY(this.scene.gameConfig.gravity || 1800);
+    const isForest = this.scene.activeTheme?.key === 'forest';
+    this.scene.player.setGravityY(this.scene.gameConfig.gravity || (isForest ? 600 : 1800));
     this.scene.player.play('run');
 
     this.obstacles = this.scene.physics.add.group();
@@ -30,13 +32,14 @@ export default class RunnerMode extends BaseMode {
     if (this.scene.isGameOver) return;
 
     const scale = Phaser.Math.FloatBetween(this.scene.gameConfig.obstacleScaleMin || 0.8, this.scene.gameConfig.obstacleScaleMax || 1.2);
-    const spawnX = this.scene.cameras.main.scrollX + this.scene.scale.width + 50;
-    const obstacle = this.scene.add.sprite(spawnX, this.scene.LOGICAL_FLOOR_Y - 50, 'crate');
+    const spawnX = this.scene.cameras.main.scrollX + this.scene.cameras.main.width + 16;
+    const obstacle = this.scene.add.sprite(spawnX, this.scene.LOGICAL_FLOOR_Y - 16, 'crate');
     obstacle.setScale(scale);
     this.scene.physics.add.existing(obstacle);
     this.obstacles.add(obstacle);
 
-    obstacle.body.setGravityY(this.scene.gameConfig.gravity || 1800);
+    const isForest = this.scene.activeTheme?.key === 'forest';
+    obstacle.body.setGravityY(this.scene.gameConfig.gravity || (isForest ? 600 : 1800));
     obstacle.body.setVelocityX(-this.runSpeed);
   }
 
@@ -48,7 +51,20 @@ export default class RunnerMode extends BaseMode {
     }
 
     // Scroll floor
-    this.scene.floor.tilePositionX += (this.runSpeed * (delta / 1000)) / this.scene.floor.tileScaleX;
+      if (this.scene.floorSegments) {
+        this.scene.floorSegments.forEach((tile) => {
+          tile.x -= (this.runSpeed * (delta / 1000));
+        });
+        const tileWidth = this.scene.floorSegments[0]?.displayWidth || 16;
+        this.scene.floorSegments.forEach((tile) => {
+          if (tile.x + tileWidth < this.scene.cameras.main.scrollX) {
+            const maxX = Math.max(...this.scene.floorSegments.map(seg => seg.x));
+            tile.x = maxX + tileWidth;
+          }
+        });
+      } else {
+        this.scene.floor.tilePositionX += (this.runSpeed * (delta / 1000)) / this.scene.floor.tileScaleX;
+      }
 
     // Cleanup off-screen obstacles
     if (this.obstacles && this.obstacles.children) {

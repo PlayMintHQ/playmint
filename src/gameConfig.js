@@ -1,5 +1,6 @@
 export const DEFAULT_CONFIG = {
   gameType: 'runner', // 'runner', 'platformer', 'dodge'
+  themeKey: 'default',
   difficulty: 5,
   runSpeed: 350,
   jumpForce: 750,
@@ -24,6 +25,7 @@ export const GAME_PRESETS = {
   standard: {
     name: 'Runner',
     gameType: 'runner',
+    themeKey: 'default',
     difficulty: 5,
     runSpeed: 350,
     jumpForce: 750,
@@ -33,6 +35,7 @@ export const GAME_PRESETS = {
   action_quest: {
     name: 'Action Quest',
     gameType: 'platformer',
+    themeKey: 'default',
     difficulty: 5,
     actionJumpHeight: 600,
     actionGravity: 1500,

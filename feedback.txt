@@ -1,0 +1,143 @@
+
+I tested both Runner and Action Quest on mobile and desktop and here is my feedback for the M2 polishing phase:
+
+Prompt system Right now the prompt mostly changes the title, but not the actual generated experience.
+
+
+
+Example: I typed “Lava Runner”, but the game still looked like a normal runner with the same environment.
+
+
+
+For M2, even with simple logic, prompts should visibly affect the generated game.
+
+
+
+Examples:
+“lava” → lava environment / darker atmosphere
+“ice” → cold environment
+“forest” → forest visuals
+“hard” → harder gameplay
+“easy” → easier gameplay
+“low gravity” → different jump feeling
+
+
+
+Simple keyword mapping is enough for now
+
+Action Quest mobile controls On vertical mobile mode, some controls overlap and take too much screen space.
+
+
+
+The gameplay area should stay the main focus.
+
+Orientation issues When rotating the phone during gameplay (vertical ↔ horizontal), the game layout sometimes breaks and does not reposition correctly.
+
+
+
+Enemy system Projectiles and attacks hit enemies correctly, and reactions happen, but enemies do not disappear properly after being defeated.
+
+
+
+Score system In Action Quest, the score currently increases continuously like a timer.
+
+It would feel better if score was tied to gameplay actions:
+
+
+
+enemies defeated
+hits
+collectibles
+progression
+
+UI / HUD The HUD is improving, but mobile is starting to feel crowded:
+
+
+
+logo
+title
+score
+controls
+menu buttons
+
+
+
+Maybe later we can make some elements smaller or more transparent during gameplay.
+
+Game title generation The generated titles are better now, but eventually they should feel more immersive and less generic/debug-like.
+
+
+
+General direction Overall I really like the direction. The Creator is starting to feel like: “same core system adapting to different game types”
+
+
+
+That’s exactly the right direction for PlayMint.
+
+Also regarding the V0 / home screen:
+
+
+
+I think the landing/generation screen should progressively evolve into something more immersive and gameplay-focused.
+
+
+
+Right now it still feels a bit like a simple form page.
+
+The ideal direction would be:
+
+
+
+the game area becoming the main visual focus
+the generation UI feeling more integrated into the experience
+cleaner layout on mobile
+more “PlayMint fantasy” and atmosphere
+
+For desktop especially, I imagine something where:
+
+
+
+most of the screen is occupied by the game/world preview
+
+
+
+and the prompt/generation bar feels integrated into the bottom or lower part of the experience
+
+Maybe something similar could also be adapted later for mobile in a simpler way.
+
+
+
+The goal is: users should instantly feel: “I’m entering a game creation world” and not just filling a form.
+
+
+Also, I made a quick visual direction reference for what I imagine the V0 / generation screen evolving into.
+
+
+
+The idea is not to copy this exactly, but more to show the overall product direction and feeling I have in mind.
+
+
+
+Main ideas:
+
+
+
+- the game world becomes the main focus
+- the prompt system feels integrated into the experience
+- more immersive atmosphere
+- cleaner and more modern UI
+- users instantly feel they are entering a “game creation world”
+
+
+
+Especially for desktop, I think the gameplay/world preview should occupy most of the screen, while the prompt bar becomes part of the experience instead of feeling like a simple form page.
+
+
+
+For mobile, the same philosophy could exist in a lighter/simpler way.
+
+
+
+This is more a product/UX direction reference than a strict design requirement, but I think it helps define the PlayMint identity
+
+Oh and btw regarding the settings of ennemis account for the Quest mode, it didn't increase or decrease the number of ennemis
