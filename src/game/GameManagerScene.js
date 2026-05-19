@@ -38,6 +38,11 @@ export default class GameManagerScene extends Phaser.Scene {
     this.load.image('forest_bg_mid', 'assets/themes/forest/bg_mid.png');
     this.load.image('forest_ground', 'assets/themes/forest/ground_tile.png');
     this.load.image('forest_platform', 'assets/themes/forest/ground_tile.png');
+    this.load.image('winter_bg_1', 'assets/themes/winter/bg-1.png');
+    this.load.image('winter_bg_2', 'assets/themes/winter/bg-2.png');
+    this.load.image('winter_bg_3', 'assets/themes/winter/bg-3.png');
+    this.load.image('winter_ground_1', 'assets/themes/winter/winter_ground_1.png');
+    this.load.image('pine_snow', 'assets/themes/winter/pine-snow.gif');
   }
 
   init(data) {
@@ -232,7 +237,7 @@ export default class GameManagerScene extends Phaser.Scene {
   drawBackground(width, height) {
     this.bgGraphics.clear();
     this.bgGraphics.fillStyle(0x0a0f16, 1);
-    this.bgGraphics.fillRect(0, 0, width, height);
+    this.bgGraphics.fillRect(-width, -height, width * 3, height * 3);
   }
 
   createBackgroundLayers() {
@@ -257,8 +262,8 @@ export default class GameManagerScene extends Phaser.Scene {
 
       const spriteWidth = textureWidth;
       const spriteHeight = textureHeight;
-      const sprite = this.add.tileSprite(0, 0, spriteWidth, spriteHeight, layer.key)
-        .setOrigin(0, 0)
+      const sprite = this.add.tileSprite(width / 2, height / 2, spriteWidth, spriteHeight, layer.key)
+        .setOrigin(0.5, 0.5)
         .setScrollFactor(0)
         .setDepth(-5 + this.bgLayers.length);
 
@@ -290,6 +295,9 @@ export default class GameManagerScene extends Phaser.Scene {
       // Force the viewport to update to the new valid dimensions
       this.cameras.main.setViewport(0, 0, width, height);
 
+      const zoomFactor = this.gameConfig.gameType === 'platformer' ? Math.max(1, height / 480) : 1;
+      this.cameras.main.setZoom(zoomFactor);
+
       this.drawBackground(width, height);
       if (this.bgLayers && this.bgLayers.length) {
         this.bgLayers.forEach((layer) => {
@@ -297,11 +305,15 @@ export default class GameManagerScene extends Phaser.Scene {
           const source = texture.getSourceImage();
           const textureWidth = source?.width || width;
           const textureHeight = source?.height || height;
-          const baseScaleX = width / textureWidth;
-          const baseScaleY = height / textureHeight;
+          // Calculate scale to cover the logical viewport (which is smaller when zoomed in)
+          const logicalWidth = width / zoomFactor;
+          const logicalHeight = height / zoomFactor;
+          const baseScaleX = logicalWidth / textureWidth;
+          const baseScaleY = logicalHeight / textureHeight;
           const baseScale = Math.max(baseScaleX, baseScaleY);
           const desiredScale = (layer.__layerScale || 1) * baseScale;
           layer.setScale(desiredScale);
+          layer.setPosition(width / 2, height / 2);
         });
       }
 
@@ -310,6 +322,7 @@ export default class GameManagerScene extends Phaser.Scene {
       const floorHeight = this.activeTheme?.floorHeight || this.gameConfig.floorHeight || 100;
       const floorTexture = this.activeTheme.floorTexture || 'ground';
       const textureSource = this.textures.get(floorTexture)?.getSourceImage();
+
       if (textureSource && textureSource.width && textureSource.height) {
         const tileWidth = textureSource.width;
         const tileHeight = textureSource.height;
@@ -448,7 +461,7 @@ export default class GameManagerScene extends Phaser.Scene {
 
     if (this.bgLayers && this.bgLayers.length) {
       this.bgLayers.forEach((layer) => {
-        layer.tilePositionX = scrollX * (this.gameConfig.gameType === 'runner' ? (layer.__scrollSpeed || 0.1) : -(layer.__scrollSpeed || 0.1));
+        layer.tilePositionX = scrollX * (layer.__scrollSpeed || 0.1);
       });
     }
     this.gameModeManager.update(time, delta);

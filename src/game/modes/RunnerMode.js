@@ -33,7 +33,8 @@ export default class RunnerMode extends BaseMode {
 
     const scale = Phaser.Math.FloatBetween(this.scene.gameConfig.obstacleScaleMin || 0.8, this.scene.gameConfig.obstacleScaleMax || 1.2);
     const spawnX = this.scene.cameras.main.scrollX + this.scene.cameras.main.width + 16;
-    const obstacle = this.scene.add.sprite(spawnX, this.scene.LOGICAL_FLOOR_Y - 64, 'crate');
+    const obstacleTexture = this.scene.activeTheme?.obstacleTexture || 'crate';
+    const obstacle = this.scene.add.sprite(spawnX, this.scene.LOGICAL_FLOOR_Y - 64, obstacleTexture);
     obstacle.setScale(scale);
     this.scene.physics.add.existing(obstacle);
     this.obstacles.add(obstacle);

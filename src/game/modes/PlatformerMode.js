@@ -151,7 +151,8 @@ export default class PlatformerMode extends BaseMode {
     if (!this.scene || !this.scene.cameras || !this.scene.cameras.main) return;
     const safeWidth = Math.max(1, gameSize.width);
     const safeHeight = Math.max(1, gameSize.height);
-    this.repositionMobileControls(safeWidth, safeHeight);
+    const zoomFactor = this.scene.cameras.main.zoom || 1;
+    this.repositionMobileControls(safeWidth / zoomFactor, safeHeight / zoomFactor);
     this.updateCameraBounds({ width: safeWidth, height: safeHeight });
   }
 
