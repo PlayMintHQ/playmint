@@ -3,16 +3,16 @@ import BaseMode from './BaseMode';
 
 export default class RunnerMode extends BaseMode {
   init() {
-    const isForest = this.scene.activeTheme?.key === 'forest';
-    this.baseSpeed = this.scene.gameConfig.runSpeed || (isForest ? 160 : 350);
+    const theme = this.scene.activeTheme || {};
+    this.baseSpeed = this.scene.gameConfig.runSpeed || (theme.moveSpeed ? Math.round(theme.moveSpeed * 1.2) : 350);
     this.runSpeed = this.baseSpeed;
     this.obstacles = null;
     this.obstacleTimer = null;
   }
 
   create() {
-    const isForest = this.scene.activeTheme?.key === 'forest';
-    this.scene.player.setGravityY(this.scene.gameConfig.gravity || (isForest ? 600 : 1800));
+    const theme = this.scene.activeTheme || {};
+    this.scene.player.setGravityY(this.scene.gameConfig.gravity || (theme.gravity || 1800));
     this.scene.player.play('run');
 
     this.obstacles = this.scene.physics.add.group();
@@ -39,8 +39,8 @@ export default class RunnerMode extends BaseMode {
     this.scene.physics.add.existing(obstacle);
     this.obstacles.add(obstacle);
 
-    const isForest = this.scene.activeTheme?.key === 'forest';
-    obstacle.body.setGravityY(this.scene.gameConfig.gravity || (isForest ? 600 : 1800));
+    const theme = this.scene.activeTheme || {};
+    obstacle.body.setGravityY(this.scene.gameConfig.gravity || (theme.gravity || 1800));
     obstacle.body.setVelocityX(-this.runSpeed);
   }
 

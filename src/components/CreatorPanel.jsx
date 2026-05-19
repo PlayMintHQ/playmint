@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { GAME_PRESETS } from '../gameConfig';
+import { IconShare, IconExport, IconImport, IconReset, IconHome } from './Icons';
 
 const RunnerControls = ({ liveParams, onSliderChange }) => (
   <>
@@ -66,7 +67,7 @@ const PlatformerControls = ({ liveParams, onSliderChange }) => (
   </>
 );
 
-const ConfigActions = ({ liveParams, setLiveParams, setPresetKey }) => {
+const ConfigActions = ({ liveParams, setLiveParams, setPresetKey, onHomeClick }) => {
   const [exportStatus, setExportStatus] = useState('idle');
   const [isImporting, setIsImporting] = useState(false);
   const [importText, setImportText] = useState('');
@@ -80,19 +81,6 @@ const ConfigActions = ({ liveParams, setLiveParams, setPresetKey }) => {
       setTimeout(() => setExportStatus('idle'), 2000);
     } catch (error) {
       console.error('Failed to copy config to clipboard:', error);
-    }
-  };
-
-  const handleShareLink = () => {
-    try {
-      const configString = JSON.stringify(liveParams);
-      const encodedConfig = btoa(configString);
-      const shareUrl = `${window.location.origin}${window.location.pathname}${window.location.search}#config=${encodedConfig}`;
-      navigator.clipboard.writeText(shareUrl);
-      setExportStatus('linkCopied');
-      setTimeout(() => setExportStatus('idle'), 2000);
-    } catch (error) {
-      console.error('Failed to copy link to clipboard:', error);
     }
   };
 
@@ -133,27 +121,54 @@ const ConfigActions = ({ liveParams, setLiveParams, setPresetKey }) => {
   }
 
   return (
-    <>
-      <button className="pm-btn pm-btn-outline" onClick={handleShareLink} style={{ color: exportStatus === 'linkCopied' ? 'var(--pm-accent-teal)' : '' }}>
-        {exportStatus === 'linkCopied' ? '✓ Link Copied' : 'Copy Share Link'}
-      </button>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-        <button className="pm-btn pm-btn-outline" onClick={handleExport} style={{ padding: '8px' }}>
-          {exportStatus === 'copied' ? '✓ Copied' : 'Export Config'}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
+        <button className="pm-btn pm-btn-outline" onClick={onHomeClick} style={{ padding: '8px', fontSize: '16px', lineHeight: 1 }} title="Home">
+          <IconHome />
         </button>
-        <button className="pm-btn pm-btn-outline" onClick={() => { setIsImporting(true); setImportText(''); setImportError(''); }} style={{ padding: '8px' }}>Import Config</button>
+        <button className="pm-btn pm-btn-outline" onClick={handleExport} style={{ padding: '8px', fontSize: '16px', lineHeight: 1 }} title="Export Config">
+          {exportStatus === 'copied' ? '✓' : <IconExport />}
+        </button>
+        <button className="pm-btn pm-btn-outline" onClick={() => { setIsImporting(true); setImportText(''); setImportError(''); }} style={{ padding: '8px', fontSize: '16px', lineHeight: 1 }} title="Import Config"><IconImport /></button>
       </div>
       <button
         className="pm-btn pm-btn-muted"
         onClick={() => {
-          setLiveParams(prev => ({ ...GAME_PRESETS['standard'], gameName: 'PlayMint Core' }));
+          setLiveParams(() => ({ ...GAME_PRESETS['standard'], gameName: 'PlayMint Core' }));
           setPresetKey('standard');
         }}
-        style={{ marginTop: '4px' }}
+        style={{ marginTop: '4px', fontSize: '14px' }}
+        title="Reset to Default"
       >
-        Reset to Default
+        <IconReset /> Reset
       </button>
-    </>
+    </div>
+  );
+};
+
+/* Extracted share button with its own state */
+const ShareGameButton = ({ liveParams }) => {
+  const [status, setStatus] = useState('idle');
+  const handleShare = () => {
+    try {
+      const configString = btoa(JSON.stringify(liveParams));
+      const shareUrl = `${window.location.origin}${window.location.pathname}${window.location.search}#config=${configString}`;
+      navigator.clipboard.writeText(shareUrl);
+      setStatus('copied');
+      setTimeout(() => setStatus('idle'), 2000);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+  return (
+    <button
+      className="pm-btn pm-btn-primary"
+      onClick={handleShare}
+      title="Share Game"
+      style={{ justifyContent: 'center', width: '100%', gap: '6px' }}
+    >
+      {status === 'copied' ? '✓' : <IconShare />}
+    </button>
   );
 };
 
@@ -166,8 +181,22 @@ const CreatorPanel = ({
   presetKey,
   setPresetKey,
   onSliderChange,
+  onPromptGenerate,
+  onHomeClick,
 }) => {
   const isCustom = presetKey === 'custom';
+  const [promptText, setPromptText] = useState('');
+  const [promptBusy, setPromptBusy] = useState(false);
+
+  const handlePromptSubmit = () => {
+    if (!promptText.trim() || !onPromptGenerate) return;
+    setPromptBusy(true);
+    setTimeout(() => {
+      onPromptGenerate(promptText.trim());
+      setPromptText('');
+      setPromptBusy(false);
+    }, 400);
+  };
 
   const handleDifficultyChange = (e) => {
     const diff = parseInt(e.target.value, 10);
@@ -176,10 +205,10 @@ const CreatorPanel = ({
     setLiveParams(prev => {
       const config = { ...prev, difficulty: diff };
       if (mode === 'runner') {
-        config.runSpeed = 200 + (diff * 40); // 240 to 600
-        config.obstacleDelay = 2000 - (diff * 120); // 1880 to 800
+        config.runSpeed = 200 + (diff * 40);
+        config.obstacleDelay = 2000 - (diff * 120);
       } else if (mode === 'platformer') {
-        config.actionEnemyCount = Math.floor(diff * 1.5); // 1 to 15
+        config.actionEnemyCount = Math.floor(diff * 1.5);
         config.actionJumpHeight = 400 + (diff * 30);
       }
       return config;
@@ -196,25 +225,79 @@ const CreatorPanel = ({
         width: '100vw', maxWidth: '380px',
         transform: isOpen ? 'translateX(0)' : 'translateX(100%)',
         transition: 'transform 0.4s cubic-bezier(0.16, 1, 0.3, 1)', zIndex: 1000,
-        overflowY: 'auto', display: 'flex', flexDirection: 'column',
-        borderLeft: '1px solid var(--pm-border)'
+        display: 'flex', flexDirection: 'column',
+        borderLeft: '1px solid var(--pm-border)',
+        overflow: 'hidden'
       }}
     >
-      <div style={{ padding: '24px', borderBottom: '1px solid var(--pm-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <h2 className="pm-heading" style={{ fontSize: '20px', margin: 0 }}>Creator Panel</h2>
-        </div>
-        <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--pm-text-secondary)', fontSize: '24px', cursor: 'pointer' }}>✕</button>
+      {/* Atmospheric forge/world-creation backdrop */}
+      <div style={{ position: 'absolute', inset: 0, zIndex: 0, overflow: 'hidden' }}>
+        {/* Deep cosmic gradient */}
+        <div style={{
+          position: 'absolute', inset: 0,
+          background: `
+            radial-gradient(ellipse at 20% 30%, rgba(0,229,153,0.10) 0%, transparent 60%),
+            radial-gradient(ellipse at 80% 70%, rgba(138,43,226,0.08) 0%, transparent 50%),
+            radial-gradient(ellipse at 50% 0%, rgba(255,140,0,0.05) 0%, transparent 40%),
+            linear-gradient(160deg, rgba(7,10,16,0.95) 0%, rgba(15,22,37,0.9) 100%)
+          `
+        }} />
+        {/* Subtle grid overlay */}
+        <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0.04 }}>
+          <defs>
+            <pattern id="forge-grid" width="32" height="32" patternUnits="userSpaceOnUse">
+              <path d="M 32 0 L 0 0 0 32" fill="none" stroke="#00E599" strokeWidth="0.3"/>
+            </pattern>
+          </defs>
+          <rect width="100%" height="100%" fill="url(#forge-grid)" />
+        </svg>
+        {/* Floating creation sparks */}
+        <div style={{
+          position: 'absolute', width: '4px', height: '4px', borderRadius: '50%',
+          background: 'var(--pm-accent-teal)', opacity: 0.3,
+          top: '15%', right: '20%',
+          animation: 'forgeDrift 6s infinite alternate', zIndex: 0
+        }} />
+        <div style={{
+          position: 'absolute', width: '3px', height: '3px', borderRadius: '50%',
+          background: 'var(--pm-accent-orange)', opacity: 0.25,
+          top: '45%', right: '60%',
+          animation: 'forgeDrift 8s infinite alternate-reverse', zIndex: 0
+        }} />
+        <div style={{
+          position: 'absolute', width: '5px', height: '5px', borderRadius: '50%',
+          background: 'var(--pm-accent-purple)', opacity: 0.2,
+          top: '70%', right: '25%',
+          animation: 'forgeDrift 7s infinite alternate', zIndex: 0
+        }} />
+        <div style={{
+          position: 'absolute', width: '2px', height: '2px', borderRadius: '50%',
+          background: '#fff', opacity: 0.4,
+          top: '30%', right: '75%',
+          animation: 'forgeDrift 9s infinite alternate-reverse', zIndex: 0
+        }} />
+        {/* Faint glow at panel edge */}
+        <div style={{
+          position: 'absolute', top: 0, left: 0, right: 0, height: '2px',
+          background: 'linear-gradient(90deg, transparent, var(--pm-accent-teal), transparent)',
+          opacity: 0.4
+        }} />
       </div>
 
-      <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
-        
-        <button className="pm-btn pm-btn-primary" style={{ justifyContent: 'center' }} onClick={onOpenSelector}>
-          Change Mode
-        </button>
+      {/* Content layer on top of backdrop */}
+      <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+        <div style={{ padding: '24px', borderBottom: '1px solid var(--pm-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backdropFilter: 'blur(4px)' }}>
+          <div>
+            <h2 className="pm-heading" style={{ fontSize: '20px', margin: 0 }}>Creator Panel</h2>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--pm-text-secondary)', fontSize: '24px', cursor: 'pointer' }}>✕</button>
+        </div>
 
+      <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px', overflowY: 'auto', flex: 1 }}>
+
+        {/* 1. Game Name */}
         <div>
-          <label className="pm-label">Game Title:</label>
+          <label className="pm-label">Game Name</label>
           <input
             type="text"
             name="gameName"
@@ -225,8 +308,49 @@ const CreatorPanel = ({
           />
         </div>
 
+        {/* 2. Prompt Input */}
         <div>
-          <label className="pm-label">Mode Options:</label>
+          <label className="pm-label">Regenerate with Prompt</label>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <input
+              type="text"
+              className="pm-input"
+              value={promptText}
+              onChange={(e) => setPromptText(e.target.value)}
+              placeholder="e.g. lava runner"
+              onKeyDown={(e) => { if (e.key === 'Enter') handlePromptSubmit(); }}
+              style={{ flex: 1 }}
+            />
+            <button
+              className="pm-btn pm-btn-primary"
+              onClick={handlePromptSubmit}
+              disabled={promptBusy}
+              style={{ padding: '10px 14px', whiteSpace: 'nowrap', fontSize: '15px' }}
+              title="Generate"
+            >
+              {promptBusy ? '…' : '▶'}
+            </button>
+          </div>
+        </div>
+
+        {/* 3. Share Game button (primary CTA at top) */}
+        <ShareGameButton liveParams={liveParams} />
+
+        {/* 4. Browse All Game Types — opens main selector */}
+        <div>
+          <label className="pm-label">Game Type</label>
+          <button
+            onClick={onOpenSelector}
+            className="pm-btn pm-btn-outline"
+            style={{ width: '100%', justifyContent: 'center' }}
+          >
+            Browse All Game Types ⋯
+          </button>
+        </div>
+
+        {/* 5. Mode Options / Custom Tuning */}
+        <div>
+          <label className="pm-label">Mode Options</label>
           <button 
             onClick={() => setPresetKey('custom')}
             className={`pm-btn ${isCustom ? 'pm-btn-primary' : 'pm-btn-outline'}`}
@@ -264,10 +388,12 @@ const CreatorPanel = ({
           </div>
         )}
 
+        {/* 6. Config Actions at bottom */}
         <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <ConfigActions liveParams={liveParams} setLiveParams={setLiveParams} setPresetKey={setPresetKey} />
+          <ConfigActions liveParams={liveParams} setLiveParams={setLiveParams} setPresetKey={setPresetKey} onHomeClick={onHomeClick} />
         </div>
       </div>
+    </div>
     </div>
   );
 };

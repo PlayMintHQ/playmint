@@ -1,12 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { GAME_PRESETS } from '../gameConfig';
 
 const BANNED_WORDS = ['fuck', 'shit', 'bitch', 'cunt', 'ass', 'dick', 'pussy', 'cock', 'nigger', 'faggot'];
 
-const ScreenZero = ({ onGenerate }) => {
+const ScreenZero = ({ onGenerate, onClose, isOverlay }) => {
   const [prompt, setPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
+  const [transitionPhase, setTransitionPhase] = useState('idle'); // idle | expanding | done
+  const formRef = useRef(null);
 
   const showToast = (message) => {
     setToastMessage(message);
@@ -16,28 +18,32 @@ const ScreenZero = ({ onGenerate }) => {
   const handleGenerate = (e) => {
     if (e) e.preventDefault();
     setIsGenerating(true);
+    setTransitionPhase('expanding');
 
+    // After the expand animation finishes, run the prompt
     setTimeout(() => {
+      setTransitionPhase('done');
       processPrompt(prompt);
-      setIsGenerating(false);
-    }, 800); // Fake delay for UX
+    }, 700);
   };
 
   const handleQuickStart = () => {
     setIsGenerating(true);
+    setTransitionPhase('expanding');
     setTimeout(() => {
+      setTransitionPhase('done');
       generateRandom("Quick start! Generated a default preset.");
-      setIsGenerating(false);
-    }, 500);
+    }, 700);
   };
 
   const handleExampleClick = (exampleText) => {
     setPrompt(exampleText);
     setIsGenerating(true);
+    setTransitionPhase('expanding');
     setTimeout(() => {
+      setTransitionPhase('done');
       processPrompt(exampleText);
-      setIsGenerating(false);
-    }, 800);
+    }, 700);
   };
 
   const processPrompt = (input) => {
@@ -159,19 +165,23 @@ const ScreenZero = ({ onGenerate }) => {
 
   const generateImmersiveTitle = (input, mode, theme) => {
     const trimmed = input.trim();
-    if (trimmed.length > 4 && trimmed.length < 32) {
-      return trimmed;
+    // If prompt is a reasonable length, use it directly but capitalize properly
+    if (trimmed.length > 4 && trimmed.length < 36) {
+      return trimmed
+        .split(/\s+/)
+        .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(' ');
     }
 
     const themeNames = {
-      lava: ['Ashfall', 'Molten', 'Cinder', 'Inferno'],
-      ice: ['Glacier', 'Frost', 'Arctic', 'Snowfall'],
-      forest: ['Verdant', 'Wildwood', 'Grove', 'Emerald'],
-      default: ['PlayMint', 'Core', 'Nova', 'Prime']
+      lava: ['Ashfall', 'Molten', 'Cinder', 'Inferno', 'Ember', 'Scorch'],
+      ice: ['Glacier', 'Frost', 'Arctic', 'Snowfall', 'Permafrost', 'Hoarfrost'],
+      forest: ['Verdant', 'Wildwood', 'Grove', 'Emerald', 'Fern', 'Canopy'],
+      default: ['Prime', 'Core', 'Nova', 'Omega', 'Apex', 'Flux']
     };
     const modeNames = mode === 'action_quest'
-      ? ['Quest', 'Runes', 'Raid', 'Path']
-      : ['Run', 'Sprint', 'Rush', 'Dash'];
+      ? ['Quest', 'Runes', 'Raid', 'Path', 'Chronicle', 'Saga']
+      : ['Run', 'Sprint', 'Rush', 'Dash', 'Circuit', 'Marathon'];
 
     const themeList = themeNames[theme] || themeNames.default;
     const title = `${themeList[Math.floor(Math.random() * themeList.length)]} ${modeNames[Math.floor(Math.random() * modeNames.length)]}`;
@@ -182,150 +192,256 @@ const ScreenZero = ({ onGenerate }) => {
     <div style={{
       position: 'absolute', inset: 0,
       display: 'flex', flexDirection: 'column',
-      justifyContent: 'flex-end', alignItems: 'center',
-      background: 'linear-gradient(135deg, #0a0f16 0%, #111827 100%)',
+      alignItems: 'center',
       zIndex: 9999, overflow: 'hidden'
     }}>
-      {/* Animated background elements */}
+      {/* Winter parallax layers — three backgrounds at different depths */}
       <div style={{
-        position: 'absolute', width: '600px', height: '600px',
-        background: 'radial-gradient(circle, rgba(13,180,185,0.15) 0%, transparent 70%)',
-        top: '-20%', left: '-10%', borderRadius: '50%', filter: 'blur(40px)', animation: 'float 10s infinite alternate'
+        position: 'absolute', inset: 0, zIndex: 0,
+        backgroundImage: 'url(/assets/themes/winter/bg-1.png)',
+        backgroundSize: 'cover',
+        backgroundPosition: 'center 30%',
+        imageRendering: 'pixelated',
+        opacity: 0.85,
+        animation: 'parallaxFar 12s ease-in-out infinite alternate'
       }} />
       <div style={{
-        position: 'absolute', width: '500px', height: '500px',
-        background: 'radial-gradient(circle, rgba(162,89,255,0.1) 0%, transparent 70%)',
-        bottom: '-10%', right: '-10%', borderRadius: '50%', filter: 'blur(40px)', animation: 'float 12s infinite alternate-reverse'
+        position: 'absolute', inset: 0, zIndex: 0,
+        backgroundImage: 'url(/assets/themes/winter/bg-2.png)',
+        backgroundSize: 'cover',
+        backgroundPosition: 'center 30%',
+        imageRendering: 'pixelated',
+        opacity: 1,
+        animation: 'parallaxMid 8s ease-in-out infinite alternate'
+      }} />
+      <div style={{
+        position: 'absolute', inset: 0, zIndex: 0,
+        backgroundImage: 'url(/assets/themes/winter/bg-3.png)',
+        backgroundSize: 'cover',
+        backgroundPosition: 'center 30%',
+        imageRendering: 'pixelated',
+        opacity: 1,
+        animation: 'parallaxNear 5s ease-in-out infinite alternate'
+      }} />
+      {/* Dark gradient overlay for readability */}
+      <div style={{
+        position: 'absolute', inset: 0, zIndex: 1,
+        background: `
+          linear-gradient(180deg, rgba(7,10,16,0.5) 0%, rgba(7,10,16,0.15) 40%, rgba(7,10,16,0.4) 70%, rgba(7,10,16,0.8) 100%)
+        `
       }} />
 
-      <div style={{ position: 'absolute', inset: 0, zIndex: 0, opacity: 0.5 }}>
-        <div style={{
-          position: 'absolute', inset: 0,
-          background: 'radial-gradient(circle at 20% 30%, rgba(0,229,153,0.2), transparent 45%), radial-gradient(circle at 80% 20%, rgba(255,140,0,0.18), transparent 50%), radial-gradient(circle at 50% 80%, rgba(138,43,226,0.18), transparent 55%)'
-        }} />
+      {/* Grid lines */}
+      <svg style={{ position: 'absolute', inset: 0, zIndex: 2, width: '100%', height: '100%', opacity: 0.06 }}>
+        <defs>
+          <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(0,229,153,0.5)" strokeWidth="0.5"/>
+          </pattern>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#grid)" />
+      </svg>
+
+      {/* Floating glow orbs */}
+      <div style={{
+        position: 'absolute', width: '400px', height: '400px',
+        background: 'radial-gradient(circle, rgba(13,180,185,0.12) 0%, transparent 70%)',
+        top: '-5%', left: '-5%', borderRadius: '50%', filter: 'blur(50px)',
+        animation: 'float 14s infinite alternate', zIndex: 2
+      }} />
+      <div style={{
+        position: 'absolute', width: '350px', height: '350px',
+        background: 'radial-gradient(circle, rgba(162,89,255,0.08) 0%, transparent 70%)',
+        bottom: '10%', right: '-5%', borderRadius: '50%', filter: 'blur(50px)',
+        animation: 'float 18s infinite alternate-reverse', zIndex: 2
+      }} />
+
+      {/* ===== TOP: Title area (absolute, only visible as overlay close button) ===== */}
+      <div style={{
+        position: 'absolute', top: 0, left: 0, right: 0,
+        padding: 'clamp(16px, 3vw, 32px)',
+        zIndex: 4
+      }}>
+        {isOverlay && (
+          <button
+            onClick={onClose}
+            style={{
+              background: 'rgba(255,255,255,0.08)', border: '1px solid var(--pm-border)',
+              color: 'var(--pm-text-secondary)', fontSize: '18px',
+              padding: '6px 12px', borderRadius: '8px', cursor: 'pointer',
+              transition: 'all 0.2s'
+            }}
+            onMouseEnter={(e) => { e.target.style.background = 'rgba(255,255,255,0.2)'; e.target.style.color = '#fff'; }}
+            onMouseLeave={(e) => { e.target.style.background = 'rgba(255,255,255,0.08)'; e.target.style.color = 'var(--pm-text-secondary)'; }}
+          >
+            ✕ Close
+          </button>
+        )}
       </div>
 
+      {/* ===== MIDDLE: Slogan ===== */}
       <div style={{
-        width: 'min(720px, 90vw)',
-        marginBottom: 'clamp(24px, 6vh, 60px)',
-        zIndex: 2,
-        animation: 'dockRise 0.6s ease-out'
+        position: 'absolute', top: '50%', left: '50%',
+        transform: 'translate(-50%, -50%)',
+        zIndex: 3, textAlign: 'center',
+        pointerEvents: 'none',
+        animation: transitionPhase === 'idle' ? 'sloganFade 0.8s ease-out' : undefined
       }}>
-        <div style={{
-          display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
-          marginBottom: '10px'
+        <p style={{
+          margin: 0,
+          fontFamily: 'var(--font-heading)',
+          fontSize: 'clamp(18px, 3.5vw, 32px)',
+          fontWeight: '700',
+          color: 'var(--pm-text-primary)',
+          letterSpacing: '-0.3px',
+          opacity: 0.8,
+          textShadow: '0 2px 24px rgba(0,0,0,0.4)'
         }}>
-          <h1 style={{
-            fontSize: 'clamp(20px, 4vw, 30px)', fontWeight: '900', margin: 0,
-            letterSpacing: '-0.5px', color: 'var(--pm-text-primary)'
-          }}>
-            Enter the Mint
-          </h1>
-          <span style={{
-            color: 'var(--pm-text-secondary)', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px'
-          }}>
-            V0 Generator
-          </span>
-        </div>
+          From words to worlds.
+        </p>
+      </div>
 
-        <form onSubmit={handleGenerate} className="pm-screenzero-form" style={{
-          width: '100%',
-          display: 'grid',
-          gridTemplateColumns: '1fr auto auto',
-          gap: '10px',
-          background: 'rgba(10,15,22,0.78)',
-          border: '1px solid rgba(255,255,255,0.14)',
-          borderRadius: '999px',
-          padding: '10px',
-          boxShadow: '0 20px 50px rgba(0,0,0,0.5), 0 0 0 1px rgba(0,229,153,0.08)',
-          backdropFilter: 'blur(10px)'
+      {/* ===== BOTTOM: Prompt dock ===== */}
+      <div style={{
+        width: '100%',
+        marginTop: 'auto',
+        padding: '0 clamp(16px, 4vw, 48px) clamp(24px, 4vh, 48px)',
+        display: 'flex', flexDirection: 'column', alignItems: 'center',
+        zIndex: transitionPhase === 'expanding' ? 100 : 3,
+        position: transitionPhase === 'expanding' ? 'fixed' : 'relative',
+        inset: transitionPhase === 'expanding' ? 0 : undefined,
+        justifyContent: transitionPhase === 'expanding' ? 'center' : undefined,
+        animation: transitionPhase === 'idle' ? 'dockRise 0.6s ease-out' : undefined,
+        pointerEvents: transitionPhase === 'done' ? 'none' : undefined,
+        transition: 'all 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)'
+      }}>
+        <div ref={formRef} style={{
+          width: 'min(640px, 100%)',
+          transition: 'all 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)',
+          transform: transitionPhase === 'expanding' ? 'scale(1.6)' : 'scale(1)',
+          opacity: transitionPhase === 'expanding' ? 0 : 1
         }}>
-          <input
-            type="text"
-            className="pm-input"
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder="e.g. 'lava runner with low gravity'"
-            style={{
-              padding: '12px 16px', fontSize: '15px', borderRadius: '999px',
-              backgroundColor: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.12)'
-            }}
-            autoFocus
-          />
-          <button
-            type="submit"
-            className="pm-btn pm-btn-primary"
-            disabled={isGenerating}
-            style={{
-              padding: '10px 18px', fontSize: '14px', borderRadius: '999px',
-              fontWeight: 'bold', opacity: isGenerating ? 0.7 : 1
-            }}
-          >
-            {isGenerating ? 'Generating...' : 'Generate'}
-          </button>
-          <button
-            type="button"
-            onClick={handleQuickStart}
-            className="pm-btn pm-btn-outline pm-screenzero-quick"
-            disabled={isGenerating}
-            style={{
-              padding: '10px 16px', fontSize: '13px', borderRadius: '999px'
-            }}
-          >
-            Quick Start
-          </button>
-        </form>
-
-        <div className="pm-screenzero-chips" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '10px' }}>
-          {['lava runner', 'ice quest', 'forest sprint'].map((example, i) => (
-            <button
-              key={i}
-              type="button"
-              onClick={() => handleExampleClick(example)}
+          <form onSubmit={handleGenerate} className="pm-screenzero-form" style={{
+            width: '100%',
+            display: 'grid',
+            gridTemplateColumns: '1fr auto auto',
+            gap: '8px',
+            background: 'rgba(10,15,22,0.85)',
+            border: '1px solid rgba(255,255,255,0.12)',
+            borderRadius: '16px',
+            padding: '8px',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(0,229,153,0.06)',
+            backdropFilter: 'blur(12px)'
+          }}>
+            <input
+              type="text"
+              className="pm-input"
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              placeholder="e.g. 'lava runner with low gravity'"
               style={{
-                background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)',
-                color: 'var(--pm-text-secondary)', padding: '6px 12px', borderRadius: '999px',
-                fontSize: '12px', cursor: 'pointer', transition: 'all 0.2s ease'
+                padding: '12px 16px', fontSize: '14px', borderRadius: '12px',
+                backgroundColor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.08)'
               }}
-              onMouseEnter={(e) => { e.target.style.background = 'rgba(255,255,255,0.2)'; e.target.style.color = '#fff'; }}
-              onMouseLeave={(e) => { e.target.style.background = 'rgba(255,255,255,0.08)'; e.target.style.color = 'var(--pm-text-secondary)'; }}
+              autoFocus
+            />
+            <button
+              type="submit"
+              className="pm-btn pm-btn-primary"
+              disabled={isGenerating}
+              style={{
+                padding: '10px 18px', fontSize: '13px', borderRadius: '12px',
+                fontWeight: 'bold', opacity: isGenerating ? 0.7 : 1
+              }}
             >
-              Try: {example}
+              {isGenerating ? 'Generating...' : 'Generate'}
             </button>
-          ))}
+            <button
+              type="button"
+              onClick={handleQuickStart}
+              className="pm-btn pm-btn-outline pm-screenzero-quick"
+              disabled={isGenerating}
+              style={{
+                padding: '10px 14px', fontSize: '12px', borderRadius: '12px'
+              }}
+            >
+              Quick Start
+            </button>
+          </form>
+
+          <div className="pm-screenzero-chips" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '10px', justifyContent: 'center' }}>
+            {['lava runner', 'ice quest', 'forest sprint'].map((example, i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => handleExampleClick(example)}
+                style={{
+                  background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
+                  color: 'var(--pm-text-secondary)', padding: '5px 12px', borderRadius: '999px',
+                  fontSize: '11px', cursor: 'pointer', transition: 'all 0.2s ease',
+                  opacity: 0.7
+                }}
+                onMouseEnter={(e) => { e.target.style.background = 'rgba(255,255,255,0.15)'; e.target.style.color = '#fff'; e.target.style.opacity = '1'; }}
+                onMouseLeave={(e) => { e.target.style.background = 'rgba(255,255,255,0.06)'; e.target.style.color = 'var(--pm-text-secondary)'; e.target.style.opacity = '0.7'; }}
+              >
+                {example}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
       {/* Toast Notification */}
       <div style={{
-        position: 'absolute', bottom: toastMessage ? '40px' : '-100px',
+        position: 'absolute', bottom: toastMessage ? '120px' : '-100px',
         left: '50%', transform: 'translateX(-50%)',
-        background: 'rgba(0,0,0,0.8)', border: '1px solid var(--pm-accent-purple)',
-        color: '#fff', padding: '12px 24px', borderRadius: '30px',
+        background: 'rgba(0,0,0,0.85)', border: '1px solid var(--pm-accent-purple)',
+        color: '#fff', padding: '10px 20px', borderRadius: '30px',
         fontWeight: '500', transition: 'all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)',
         zIndex: 10000, boxShadow: '0 10px 25px rgba(0,0,0,0.5)',
-        display: 'flex', alignItems: 'center', gap: '8px'
+        display: 'flex', alignItems: 'center', gap: '8px',
+        fontSize: '13px'
       }}>
-        <span style={{ fontSize: '20px' }}>✨</span> {toastMessage}
+        <span style={{ fontSize: '18px' }}>✨</span> {toastMessage}
       </div>
       
         <style>{`
+          @keyframes parallaxFar {
+            0% { background-position-x: 50%; }
+            100% { background-position-x: 48%; }
+          }
+          @keyframes parallaxMid {
+            0% { background-position-x: 50%; }
+            100% { background-position-x: 46%; }
+          }
+          @keyframes parallaxNear {
+            0% { background-position-x: 50%; }
+            100% { background-position-x: 42%; }
+          }
           @keyframes float {
             0% { transform: translateY(0) scale(1); }
-            100% { transform: translateY(-20px) scale(1.05); }
+            100% { transform: translateY(-15px) scale(1.03); }
           }
           @keyframes dockRise {
-            0% { opacity: 0; transform: translateY(10px); }
+            0% { opacity: 0; transform: translateY(20px); }
             100% { opacity: 1; transform: translateY(0); }
+          }
+          @keyframes sloganFade {
+            0% { opacity: 0; transform: translate(-50%, -40%); }
+            100% { opacity: 1; transform: translate(-50%, -50%); }
           }
           @media (max-width: 640px) {
             .pm-screenzero-form {
-              grid-template-columns: 1fr;
-              border-radius: 18px;
+              grid-template-columns: 1fr auto;
+              border-radius: 14px;
             }
             .pm-screenzero-quick {
               display: none;
             }
+            .pm-screenzero-chips {
+              display: none;
+            }
+          }
+          @media (max-height: 500px) {
             .pm-screenzero-chips {
               display: none;
             }

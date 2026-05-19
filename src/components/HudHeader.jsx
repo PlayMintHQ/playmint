@@ -8,15 +8,16 @@ const HudHeader = ({
   onFullscreen,
   onExitFullscreen,
   onMenuOpen,
+  onLogoClick,
 }) => {
   return (
     <div className="hud-header">
       {/* Top row: Logo + Controls (always single line) */}
       <div className="hud-header__row">
-        {/* LEFT: Logo */}
-        <div className="hud-header__logo">
+        {/* LEFT: Logo (clickable) */}
+        <button className="hud-header__logo" onClick={onLogoClick} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}>
           <img src="/assets/Logo_PlayMint_(transparent).png" alt="PlayMint" />
-        </div>
+        </button>
 
         {/* CENTER: Title (hidden on mobile, shown inline on desktop) */}
         {liveParams.gameName && (
@@ -28,14 +29,15 @@ const HudHeader = ({
         {/* RIGHT: Controls */}
         <div className="hud-header__controls">
           <div className="hud-header__score pm-btn-outline">
-            SCORE: <span style={{ color: 'var(--pm-accent-teal)' }}>{score}</span>
+            <span className="hud-header__score-label">SCORE: </span>
+            <span style={{ color: 'var(--pm-accent-teal)' }}>{score}</span>
           </div>
 
           {!isFullscreen && isFullscreenSupported && (
-            <button className="pm-btn pm-btn-outline hud-header__icon-btn" onClick={onFullscreen} title="Fullscreen">⛶</button>
+            <button className="pm-btn pm-btn-outline hud-header__icon-btn hud-header__fullscreen-btn" onClick={onFullscreen} title="Fullscreen">⛶</button>
           )}
           {isFullscreen && (
-            <button className="pm-btn pm-btn-danger hud-header__icon-btn" onClick={onExitFullscreen} title="Exit Fullscreen">✖</button>
+            <button className="pm-btn pm-btn-danger hud-header__icon-btn hud-header__fullscreen-btn" onClick={onExitFullscreen} title="Exit Fullscreen">✖</button>
           )}
           
           <button className="pm-btn pm-btn-primary hud-header__icon-btn" onClick={onMenuOpen}>

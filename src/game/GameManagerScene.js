@@ -29,6 +29,7 @@ export default class GameManagerScene extends Phaser.Scene {
     this.load.image('ice_tile', 'assets/themes/ice/ice_tile.png');
     this.load.image('bg_default_base', 'assets/themes/forest/bg_far.png');
     this.load.image('bg_lava_base', 'assets/themes/lava/bg.png');
+    this.load.image('bg_lava_sky', 'assets/themes/lava/sky.png');
     this.load.image('bg_lava_mountains', 'assets/themes/lava/mountains.png');
     this.load.image('bg_lava_clouds', 'assets/themes/lava/clouds.png');
     this.load.image('bg_ice_sky', 'assets/themes/ice/sky.png');
@@ -155,6 +156,10 @@ export default class GameManagerScene extends Phaser.Scene {
     const playerX = 150;
     this.player = this.physics.add.sprite(playerX, this.LOGICAL_FLOOR_Y - playerYOffset, 'dude');
     this.player.setScale(this.gameConfig.playerScale || 1.5);
+    // Theme-based character tint
+    if (this.activeTheme?.playerTint) {
+      this.player.setTint(this.activeTheme.playerTint);
+    }
     this.physics.add.collider(this.player, this.floor);
 
     // Core game mode handling
@@ -199,6 +204,21 @@ export default class GameManagerScene extends Phaser.Scene {
     this.scale.on('resize', this.handleResize, this);
     this.handleResize(this.scale); // Force initial camera alignment
 
+    // Mobile orientation change handler — longer delay lets the browser settle
+    this.orientationHandler = () => {
+      if (this._orientationTimeout) clearTimeout(this._orientationTimeout);
+      this._orientationTimeout = setTimeout(() => {
+        if (this.scale && this.scale.refresh) {
+          this.scale.refresh();
+        }
+        this.handleResize(this.scale);
+      }, 400);
+    };
+    window.addEventListener('orientationchange', this.orientationHandler);
+    if (screen.orientation) {
+      screen.orientation.addEventListener('change', this.orientationHandler);
+    }
+
     // Live tuning integration
     this.updateConfigListener = (e) => {
       const newConfig = e.detail;
@@ -222,6 +242,10 @@ export default class GameManagerScene extends Phaser.Scene {
     this.events.on('shutdown', () => {
       window.removeEventListener('update-game-config', this.updateConfigListener);
       window.removeEventListener('keydown', this.preventKeyScrollListener);
+      window.removeEventListener('orientationchange', this.orientationHandler);
+      if (screen.orientation) {
+        screen.orientation.removeEventListener('change', this.orientationHandler);
+      }
       if (this.bgLayers) {
         this.bgLayers.forEach((layer) => layer.destroy());
         this.bgLayers = [];
@@ -260,16 +284,14 @@ export default class GameManagerScene extends Phaser.Scene {
       const baseScaleY = height / textureHeight;
       const baseScale = Math.max(baseScaleX, baseScaleY);
 
-      const spriteWidth = textureWidth;
-      const spriteHeight = textureHeight;
-      const sprite = this.add.tileSprite(width / 2, height / 2, spriteWidth, spriteHeight, layer.key)
+      const sprite = this.add.sprite(width / 2, height / 2, layer.key)
         .setOrigin(0.5, 0.5)
         .setScrollFactor(0)
         .setDepth(-5 + this.bgLayers.length);
 
-      const scale = (layer.scale || 1) * baseScale;
+      const finalScale = (layer.scale || 1) * baseScale;
       sprite.__layerScale = layer.scale || 1;
-      sprite.setScale(scale);
+      sprite.setScale(finalScale);
       if (layer.alpha != null) {
         sprite.setAlpha(layer.alpha);
       }
@@ -295,7 +317,7 @@ export default class GameManagerScene extends Phaser.Scene {
       // Force the viewport to update to the new valid dimensions
       this.cameras.main.setViewport(0, 0, width, height);
 
-      const zoomFactor = this.gameConfig.gameType === 'platformer' ? Math.max(1, height / 480) : 1;
+      const zoomFactor = 1;
       this.cameras.main.setZoom(zoomFactor);
 
       this.drawBackground(width, height);
@@ -362,52 +384,142 @@ export default class GameManagerScene extends Phaser.Scene {
         if (this.overlay) {
           this.overlay.setSize(width, height);
         }
-        if (this.gameOverText) this.gameOverText.setPosition(width / 2, height / 2 - 40);
-        if (this.subText) this.subText.setPosition(width / 2, height / 2 + 20);
+        if (this.gameOverText) this.gameOverText.setPosition(width / 2, height / 2 - 56);
+        if (this.scoreText) this.scoreText.setPosition(width / 2, height / 2 - 10);
+        if (this.decoLine) this.decoLine.setPosition(width / 2, height / 2 + 20);
+        if (this.subText) this.subText.setPosition(width / 2, height / 2 + 44);
       }
     }, 150);
   }
+  getThemeAccent() {
+    const tints = {
+      lava: '#FF6B3D',
+      ice: '#66AAFF',
+      forest: '#66CC66'
+    };
+    return tints[this.activeTheme?.key] || '#00E599';
+  }
+
+  createGameOverUI(title, titleColor, playerTint, scoreBonus) {
+    const width = this.scale.width;
+    const height = this.scale.height;
+    const accent = this.getThemeAccent();
+
+    // 1. Animated overlay — fade in
+    this.overlay = this.add.rectangle(0, 0, width, height, 0x000000, 0)
+      .setOrigin(0, 0)
+      .setScrollFactor(0)
+      .setDepth(10);
+    this.tweens.add({
+      targets: this.overlay,
+      alpha: { from: 0, to: 0.7 },
+      duration: 400,
+      ease: 'Cubic.easeOut'
+    });
+
+    if (scoreBonus) {
+      this.score += scoreBonus;
+      window.dispatchEvent(new CustomEvent('update-score', { detail: this.score }));
+    }
+
+    // 2. Title with glow (large shadow + pulse)
+    const titleSize = Math.min(52, width / 7) + 'px';
+    this.gameOverText = this.add.text(width / 2, height / 2 - 56, title, {
+      fontFamily: 'system-ui, sans-serif',
+      fontSize: titleSize,
+      fill: titleColor,
+      fontStyle: '900',
+      stroke: titleColor,
+      strokeThickness: 1
+    })
+      .setScrollFactor(0)
+      .setOrigin(0.5)
+      .setAlpha(0)
+      .setShadow(0, 0, titleColor, 20, true, true)
+      .setDepth(11);
+    this.tweens.add({
+      targets: this.gameOverText,
+      alpha: { from: 0, to: 1 },
+      y: { from: height / 2 - 40, to: height / 2 - 56 },
+      duration: 500,
+      ease: 'Back.easeOut'
+    });
+
+    // 3. Score display
+    const scoreSize = Math.min(20, width / 20) + 'px';
+    this.scoreText = this.add.text(width / 2, height / 2 - 10, `Score: ${this.score}`, {
+      fontFamily: 'system-ui, sans-serif',
+      fontSize: scoreSize,
+      fill: accent,
+      fontStyle: '700'
+    })
+      .setScrollFactor(0)
+      .setOrigin(0.5)
+      .setAlpha(0)
+      .setDepth(11);
+    this.tweens.add({
+      targets: this.scoreText,
+      alpha: { from: 0, to: 1 },
+      delay: 300,
+      duration: 400,
+      ease: 'Cubic.easeOut'
+    });
+
+    // 4. Decorative line
+    const lineWidth = Math.min(160, width * 0.3);
+    this.decoLine = this.add.rectangle(width / 2, height / 2 + 20, 0, 2, Phaser.Display.Color.HexStringToColor(accent).color, 0.6)
+      .setScrollFactor(0)
+      .setOrigin(0.5)
+      .setDepth(11);
+    this.tweens.add({
+      targets: this.decoLine,
+      displayWidth: { from: 0, to: lineWidth },
+      delay: 450,
+      duration: 400,
+      ease: 'Cubic.easeOut'
+    });
+
+    // 5. Restart hint — blinking pulse
+    const subSize = Math.min(18, width / 18) + 'px';
+    this.subText = this.add.text(width / 2, height / 2 + 44, 'Tap or press SPACE to restart', {
+      fontFamily: 'system-ui, sans-serif',
+      fontSize: subSize,
+      fill: '#FFFFFF',
+      fontStyle: '500'
+    })
+      .setScrollFactor(0)
+      .setOrigin(0.5)
+      .setAlpha(0)
+      .setDepth(11);
+    this.tweens.add({
+      targets: this.subText,
+      alpha: { from: 0, to: 0.9 },
+      delay: 600,
+      duration: 400
+    });
+    // Continuous pulse
+    this.tweens.add({
+      targets: this.subText,
+      alpha: { from: 0.9, to: 0.4 },
+      duration: 1200,
+      yoyo: true,
+      repeat: -1,
+      delay: 900,
+      ease: 'Sine.easeInOut'
+    });
+
+    // Apply player tint
+    this.player.setTint(playerTint);
+  }
+
   hitObstacle(player, obstacle) {
     if (this.isGameOver) return;
     this.isGameOver = true;
 
     this.physics.pause();
     this.player.anims.stop();
-    this.player.setTint(0x888888); // Turn gray
 
-    // Semi-transparent dark overlay for better contrast
-    // Use setScrollFactor(0) to fix to screen in platformer mode
-    const width = this.scale.width;
-    const height = this.scale.height;
-
-    // Use absolute positioning with scroll factor 0 so it ignores camera
-    this.overlay = this.add.rectangle(0, 0, width, height, 0x000000, 0.6)
-      .setOrigin(0, 0)
-      .setScrollFactor(0)
-      .setDepth(10);
-
-    const gameOverFontSize = Math.min(56, width / 6) + 'px';
-    this.gameOverText = this.add.text(width / 2, height / 2 - 40, 'GAME OVER', {
-      fontFamily: 'system-ui, sans-serif',
-      fontSize: gameOverFontSize,
-      fill: '#FF4136',
-      fontStyle: '900'
-    })
-      .setScrollFactor(0)
-      .setOrigin(0.5)
-      .setShadow(2, 2, 'rgba(0,0,0,0.5)', 4)
-      .setDepth(11);
-
-    const subTextFontSize = Math.min(24, width / 15) + 'px';
-    this.subText = this.add.text(width / 2, height / 2 + 20, 'Tap or Press Space to Restart', {
-      fontFamily: 'system-ui, sans-serif',
-      fontSize: subTextFontSize,
-      fill: '#FFFFFF',
-      fontStyle: 'bold'
-    })
-      .setScrollFactor(0)
-      .setOrigin(0.5)
-      .setDepth(11);
+    this.createGameOverUI('GAME OVER', '#FF4136', 0x888888, 0);
   }
 
   winGame() {
@@ -417,38 +529,8 @@ export default class GameManagerScene extends Phaser.Scene {
 
     this.physics.pause();
     this.player.anims.stop();
-    this.player.setTint(0x00FF00); // Turn green for win
 
-    const width = this.scale.width;
-    const height = this.scale.height;
-
-    this.overlay = this.add.rectangle(0, 0, width, height, 0x000000, 0.6)
-      .setOrigin(0, 0)
-      .setScrollFactor(0)
-      .setDepth(10);
-
-    const winFontSize = Math.min(56, width / 6) + 'px';
-    this.gameOverText = this.add.text(width / 2, height / 2 - 40, 'YOU WIN!', {
-      fontFamily: 'system-ui, sans-serif',
-      fontSize: winFontSize,
-      fill: '#00FF00',
-      fontStyle: '900'
-    })
-      .setScrollFactor(0)
-      .setOrigin(0.5)
-      .setShadow(2, 2, 'rgba(0,0,0,0.5)', 4)
-      .setDepth(11);
-
-    const subTextFontSize = Math.min(24, width / 15) + 'px';
-    this.subText = this.add.text(width / 2, height / 2 + 20, 'Tap or Press Space to Restart', {
-      fontFamily: 'system-ui, sans-serif',
-      fontSize: subTextFontSize,
-      fill: '#FFFFFF',
-      fontStyle: 'bold'
-    })
-      .setScrollFactor(0)
-      .setOrigin(0.5)
-      .setDepth(11);
+    this.createGameOverUI('YOU WIN!', '#00FF00', 0x00FF00, 500);
   }
 
   update(time, delta) {

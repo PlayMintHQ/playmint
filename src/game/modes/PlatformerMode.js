@@ -5,17 +5,17 @@ import MeleeAttack from '../objects/MeleeAttack';
 
 export default class PlatformerMode extends BaseMode {
   init() {
-    const isForest = this.scene.activeTheme?.key === 'forest';
-    this.moveSpeed = isForest ? 80 : 300; // Fixed speed as per new schema
-    this.jumpForce = isForest ? 200 : (this.scene.gameConfig.actionJumpHeight || 600);
-    this.gravity = isForest ? 500 : (this.scene.gameConfig.actionGravity || 1500);
+    const theme = this.scene.activeTheme || {};
+    this.moveSpeed = theme.moveSpeed || 300;
+    this.jumpForce = theme.jumpForce || (this.scene.gameConfig.actionJumpHeight || 600);
+    this.gravity = theme.gravity || (this.scene.gameConfig.actionGravity || 1500);
     
     // Feature hooks for future combat implementation
     this.enemyCount = this.scene.gameConfig.actionEnemyCount || 5;
     this.projectilesEnabled = this.scene.gameConfig.actionProjectileEnabled || false;
     
-    // Determine world width based on our fixed level layout
-    this.worldWidth = isForest ? 960 : 4000;
+    // Determine world width based on theme
+    this.worldWidth = theme.worldWidth || 4000;
     
     // We will track input state directly
     this.cursors = null;
@@ -41,6 +41,7 @@ export default class PlatformerMode extends BaseMode {
     
     // Mobile controls container
     this.mobileControls = [];
+    this.uiContainer = null;
   }
 
   create() {
@@ -57,10 +58,10 @@ export default class PlatformerMode extends BaseMode {
     this.scene.player.setGravityY(this.gravity);
     this.scene.player.setCollideWorldBounds(true);
     
-    // Center-left spawn
-    const isForest = this.scene.activeTheme?.key === 'forest';
-    const spawnX = isForest ? 48 : 150;
-    const spawnY = isForest ? (this.scene.LOGICAL_FLOOR_Y - 48) : (this.scene.LOGICAL_FLOOR_Y - 250);
+    // Spawn at theme-defined position
+    const theme = this.scene.activeTheme || {};
+    const spawnX = theme.spawnX || 150;
+    const spawnY = typeof theme.spawnY === 'number' ? (this.scene.LOGICAL_FLOOR_Y + theme.spawnY) : (this.scene.LOGICAL_FLOOR_Y - 250);
     this.scene.player.setPosition(spawnX, spawnY);
 
     // Camera follow
@@ -132,6 +133,7 @@ export default class PlatformerMode extends BaseMode {
     const keyCodes = Phaser.Input.Keyboard.KeyCodes;
     this.scene.input.keyboard.removeCapture([
       keyCodes.W, keyCodes.A, keyCodes.S, keyCodes.D,
+      keyCodes.E, keyCodes.F,
       keyCodes.SPACE, keyCodes.UP, keyCodes.DOWN, keyCodes.LEFT, keyCodes.RIGHT
     ]);
 
@@ -151,8 +153,11 @@ export default class PlatformerMode extends BaseMode {
     if (!this.scene || !this.scene.cameras || !this.scene.cameras.main) return;
     const safeWidth = Math.max(1, gameSize.width);
     const safeHeight = Math.max(1, gameSize.height);
-    const zoomFactor = this.scene.cameras.main.zoom || 1;
-    this.repositionMobileControls(safeWidth / zoomFactor, safeHeight / zoomFactor);
+    const camera = this.scene.cameras.main;
+    const viewWidth = camera.width || safeWidth;
+    const viewHeight = camera.height || safeHeight;
+    this.updateMobileControlSizing(viewWidth, viewHeight);
+    this.repositionMobileControls(viewWidth, viewHeight);
     this.updateCameraBounds({ width: safeWidth, height: safeHeight });
   }
 
@@ -177,8 +182,9 @@ export default class PlatformerMode extends BaseMode {
     const floorY = this.scene.LOGICAL_FLOOR_Y;
     
     // Very simple hand-placed static map
-    const isForest = this.scene.activeTheme?.key === 'forest';
-    const layout = isForest ? [
+    const theme = this.scene.activeTheme || {};
+    const isSmallWorld = (theme.worldWidth || 4000) < 2000;
+    const layout = isSmallWorld ? [
       { x: 80, y: floorY - 16, scaleX: 6, hasEnemy: false },
       { x: 160, y: floorY - 32, scaleX: 6, hasEnemy: true },
       { x: 240, y: floorY - 16, scaleX: 5, hasEnemy: false },
@@ -202,8 +208,8 @@ export default class PlatformerMode extends BaseMode {
 
     const maxEnemies = this.enemyCount;
 
-    const TILE_W = isForest ? 16 : 64;
-    const PLATFORM_H = isForest ? 16 : 32;
+    const TILE_W = theme.tileWidth || 64;
+    const PLATFORM_H = theme.platformHeight || 32;
     const themePlatformTexture = this.scene.activeTheme?.platformTexture || 'stone_tile';
     const collectibleTexture = this.scene.activeTheme?.collectibleTexture || 'crate';
 
@@ -257,14 +263,15 @@ export default class PlatformerMode extends BaseMode {
       stroke: '#000000',
       strokeThickness: 5,
       shadow: { offsetX: 3, offsetY: 3, color: '#000000', blur: 0, stroke: true, fill: true },
-      padding: { left: 14, right: 14, top: 14, bottom: 14 },
+      padding: { left: 10, right: 10, top: 10, bottom: 10 },
       resolution: 3 // Forces high-DPI rendering to remove blur
     };
+
+    this.uiContainer = this.scene.add.container(0, 0).setDepth(100).setScrollFactor(0);
 
     // Left Button — track pointer ID for multitouch
     this.btnLeft = this.scene.add.text(0, 0, '←', controlStyle)
       .setOrigin(0, 0)
-      .setScrollFactor(0)
       .setDepth(100)
       .setAlpha(0.6)
       .setInteractive()
@@ -285,7 +292,6 @@ export default class PlatformerMode extends BaseMode {
     // Right Button — track pointer ID for multitouch
     this.btnRight = this.scene.add.text(0, 0, '→', controlStyle)
       .setOrigin(0, 0)
-      .setScrollFactor(0)
       .setDepth(100)
       .setAlpha(0.6)
       .setInteractive()
@@ -304,9 +310,8 @@ export default class PlatformerMode extends BaseMode {
       });
 
     // Jump Button
-    this.btnJump = this.scene.add.text(0, 0, 'JUMP', controlStyle)
+    this.btnJump = this.scene.add.text(0, 0, '⤴', controlStyle)
       .setOrigin(1, 0)
-      .setScrollFactor(0)
       .setDepth(100)
       .setAlpha(0.6)
       .setInteractive()
@@ -318,9 +323,8 @@ export default class PlatformerMode extends BaseMode {
       .on('pointerup', () => { this.btnJump.setAlpha(0.6); });
 
     // Melee Button
-    this.btnMelee = this.scene.add.text(0, 0, 'MELEE', controlStyle)
+    this.btnMelee = this.scene.add.text(0, 0, '⚔', controlStyle)
       .setOrigin(1, 0)
-      .setScrollFactor(0)
       .setDepth(100)
       .setAlpha(0.6)
       .setInteractive()
@@ -333,9 +337,8 @@ export default class PlatformerMode extends BaseMode {
 
     // Shoot Button (if enabled)
     if (this.projectilesEnabled) {
-      this.btnShoot = this.scene.add.text(0, 0, 'SHOOT', controlStyle)
+      this.btnShoot = this.scene.add.text(0, 0, '⦿', controlStyle)
         .setOrigin(1, 0)
-        .setScrollFactor(0)
         .setDepth(100)
         .setAlpha(0.6)
         .setInteractive()
@@ -349,16 +352,110 @@ export default class PlatformerMode extends BaseMode {
 
     this.mobileControls.push(this.btnLeft, this.btnRight, this.btnJump, this.btnMelee);
     if (this.btnShoot) this.mobileControls.push(this.btnShoot);
-    this.repositionMobileControls(this.scene.scale.width, this.scene.scale.height);
+    this.uiContainer.add(this.mobileControls);
+    const camera = this.scene.cameras.main;
+    const viewWidth = camera.width;
+    const viewHeight = camera.height;
+    this.updateMobileControlSizing(viewWidth, viewHeight);
+    this.repositionMobileControls(viewWidth, viewHeight);
   }
 
-  repositionMobileControls(width, height) {
-    const bottom = height - 80;
-    if (this.btnLeft) this.btnLeft.setPosition(16, bottom);
-    if (this.btnRight) this.btnRight.setPosition(88, bottom);
-    if (this.btnJump) this.btnJump.setPosition(width - 16, bottom);
-    if (this.btnMelee) this.btnMelee.setPosition(width - 16, bottom - 70);
-    if (this.btnShoot) this.btnShoot.setPosition(width - 120, bottom);
+  updateMobileControlSizing(screenWidth, screenHeight) {
+    const minSide = Math.min(screenWidth, screenHeight);
+    // Bigger base for thumb-friendly touch targets
+    const baseSize = Phaser.Math.Clamp(Math.round(minSide * 0.12), 44, 64);
+    const moveFont = Math.round(baseSize * 0.75);
+    const actionFont = Math.round(baseSize * 0.95);
+    const movePadding = Math.round(baseSize * 0.35);
+    const actionPadding = Math.round(baseSize * 0.3);
+    const marginScreen = Math.round(baseSize * 0.45);
+    const gapScreen = Math.round(baseSize * 0.3);
+
+    this.applyMobileControlStyles({ moveFont, actionFont, movePadding, actionPadding });
+
+    this.mobileLayout = {
+      marginScreen,
+      gapScreen
+    };
+    this.refreshMobileHitAreas();
+  }
+
+  applyMobileControlStyles({ moveFont, actionFont, movePadding, actionPadding }) {
+    const setTextStyle = (btn, fontSize, padding) => {
+      if (!btn) return;
+      btn.setFontSize(fontSize);
+      btn.setPadding(padding, padding, padding, padding);
+    };
+
+    setTextStyle(this.btnLeft, moveFont, movePadding);
+    setTextStyle(this.btnRight, moveFont, movePadding);
+    setTextStyle(this.btnJump, actionFont, actionPadding);
+    setTextStyle(this.btnMelee, actionFont, actionPadding);
+    if (this.btnShoot) setTextStyle(this.btnShoot, actionFont, actionPadding);
+  }
+
+
+  refreshMobileHitAreas() {
+    const HIT_PAD = 12; // Extra touch area beyond the visible text
+    const setHitArea = (btn) => {
+      if (!btn) return;
+      const width = btn.displayWidth;
+      const height = btn.displayHeight;
+      btn.setInteractive(
+        new Phaser.Geom.Rectangle(-HIT_PAD, -HIT_PAD, width + HIT_PAD * 2, height + HIT_PAD * 2),
+        Phaser.Geom.Rectangle.Contains
+      );
+    };
+
+    setHitArea(this.btnLeft);
+    setHitArea(this.btnRight);
+    setHitArea(this.btnJump);
+    setHitArea(this.btnMelee);
+    setHitArea(this.btnShoot);
+  }
+
+  repositionMobileControls(screenWidth, screenHeight) {
+    const safeBottomInset = window?.__pmSafeAreaBottom || 0;
+    const safeRightInset = window?.__pmSafeAreaRight || 0;
+    const safeLeftInset = window?.__pmSafeAreaLeft || 0;
+    const safeTopInset = window?.__pmSafeAreaTop || 0;
+
+    const marginScreen = this.mobileLayout?.marginScreen || 28;
+    const gapScreen = this.mobileLayout?.gapScreen || 12;
+
+    const margin = marginScreen;
+    const gap = gapScreen;
+    const safeRight = safeRightInset + 12;
+    const safeLeft = safeLeftInset + 12;
+    const safeBottom = safeBottomInset + 12;
+
+    const leftBaseY = screenHeight - safeBottom - (this.btnLeft ? this.btnLeft.displayHeight : 0);
+    const leftBaseX = safeLeft + margin;
+    const moveGap = (this.btnLeft ? this.btnLeft.displayWidth : 0) + gap;
+
+    if (this.btnLeft) this.btnLeft.setPosition(leftBaseX, leftBaseY);
+    if (this.btnRight) this.btnRight.setPosition(leftBaseX + moveGap, leftBaseY);
+
+    const rightNudge = Math.round(gap * 0.6);
+    const rightBaseX = screenWidth - safeRight - margin + rightNudge;
+    const actionWidth = this.btnJump ? this.btnJump.displayWidth : 0;
+    const actionHeight = this.btnJump ? this.btnJump.displayHeight : 0;
+    const actionLeftX = rightBaseX - actionWidth - gap;
+
+    const bottomRowY = screenHeight - safeBottom - actionHeight;
+    const topRowY = bottomRowY - actionHeight - gap;
+
+    if (this.btnJump) this.btnJump.setPosition(rightBaseX, bottomRowY);
+    if (this.btnShoot) this.btnShoot.setPosition(actionLeftX, bottomRowY);
+    if (this.btnMelee) this.btnMelee.setPosition(rightBaseX, topRowY);
+
+    const topLimit = safeTopInset + margin;
+    if (topRowY < topLimit) {
+      const shift = topLimit - topRowY;
+      if (this.btnJump) this.btnJump.setY(bottomRowY + shift);
+      if (this.btnShoot) this.btnShoot.setY(bottomRowY + shift);
+      if (this.btnMelee) this.btnMelee.setY(topRowY + shift);
+    }
   }
 
   isInputFocused() {
@@ -523,35 +620,52 @@ export default class PlatformerMode extends BaseMode {
   }
 
   damageEnemy(enemy) {
-    if (!enemy || !enemy.active) return;
+    if (!enemy || !enemy.active || enemy._dying) return;
     
     enemy.health -= 1;
-
     this.awardScore(10);
     
     if (enemy.health <= 0) {
-      // Spawn particle-like tiny rectangles
-      for (let i = 0; i < 5; i++) {
-        const bit = this.scene.add.rectangle(enemy.x, enemy.y, 8, 8, 0xff0000);
+      // Mark dying immediately to prevent double-processing from rapid overlaps
+      enemy._dying = true;
+
+      // Death particles
+      for (let i = 0; i < 8; i++) {
+        const bit = this.scene.add.rectangle(enemy.x, enemy.y, 6, 6, 0xff4444);
         this.scene.physics.add.existing(bit);
-        bit.body.setVelocity(Phaser.Math.Between(-100, 100), Phaser.Math.Between(-200, 0));
-        this.scene.time.delayedCall(500, () => bit.destroy());
+        bit.body.setVelocity(
+          Phaser.Math.Between(-120, 120),
+          Phaser.Math.Between(-250, -50)
+        );
+        bit.body.setAllowGravity(true);
+        this.scene.time.delayedCall(600, () => bit.destroy());
       }
-      this.enemies.remove(enemy, true, true);
+
+      // Fade-out + shrink before removal
+      this.scene.tweens.add({
+        targets: enemy,
+        alpha: 0,
+        scaleX: 0,
+        scaleY: 0,
+        duration: 200,
+        ease: 'Power2',
+        onComplete: () => {
+          if (enemy.scene) {
+            this.enemies.remove(enemy, true, true);
+          }
+        }
+      });
 
       this.awardScore(100);
     } else {
-      // Tint and shake
+      // Damage flash
       enemy.setTintFill(0xffffff);
       this.scene.tweens.add({
         targets: enemy,
-        x: enemy.x + (enemy.body.velocity.x > 0 ? -5 : 5),
-        duration: 50,
+        duration: 60,
         yoyo: true,
-        ease: 'Power1',
         onComplete: () => {
-          enemy.clearTint();
-          enemy.setTint(0xff0000);
+          if (enemy.active) enemy.setTint(0xff0000);
         }
       });
     }
@@ -594,6 +708,7 @@ export default class PlatformerMode extends BaseMode {
     if (!this.platforms) return;
     let enemiesCreated = 0;
     const maxEnemies = this.enemyCount;
+    const enemyTexture = this.scene.activeTheme?.enemyTexture || 'dude';
 
     const enemySpots = [];
     const fallbackSpots = [];
@@ -606,7 +721,7 @@ export default class PlatformerMode extends BaseMode {
 
     const spawnOnBlock = (block) => {
       if (!block || enemiesCreated >= maxEnemies) return;
-      const enemy = this.enemies.create(block.x, block.y - 40, 'dude');
+      const enemy = this.enemies.create(block.x, block.y - 40, enemyTexture);
       enemy.health = 3;
       enemy.setTint(0xff0000);
       enemy.setGravityY(this.gravity);
@@ -657,5 +772,9 @@ export default class PlatformerMode extends BaseMode {
       if (ctrl && ctrl.scene) ctrl.destroy();
     });
     this.mobileControls = [];
+    if (this.uiContainer && this.uiContainer.scene) {
+      this.uiContainer.destroy();
+      this.uiContainer = null;
+    }
   }
 }

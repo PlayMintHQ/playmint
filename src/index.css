@@ -30,6 +30,11 @@
   --font-primary: 'Inter', system-ui, -apple-system, sans-serif;
   --font-heading: 'Outfit', system-ui, -apple-system, sans-serif;
   --font-game: 'Impact', 'Arial Black', sans-serif;
+
+  --pm-safe-area-top: env(safe-area-inset-top);
+  --pm-safe-area-right: env(safe-area-inset-right);
+  --pm-safe-area-bottom: env(safe-area-inset-bottom);
+  --pm-safe-area-left: env(safe-area-inset-left);
 }
 
 body {
@@ -41,6 +46,7 @@ body {
   -moz-osx-font-smoothing: grayscale;
   overflow-x: hidden;
 }
+
 
 canvas {
   image-rendering: pixelated;
@@ -326,10 +332,52 @@ canvas {
   white-space: nowrap;
 }
 
+/* Hide "SCORE:" label on mobile to save space */
+.hud-header__score-label {
+  display: inline;
+}
+@media (max-width: 480px) {
+  .hud-header__score-label {
+    display: none;
+  }
+}
+
 .hud-header__icon-btn {
   padding: 6px 8px !important;
   border-radius: 8px !important;
   font-size: 14px;
+}
+
+/* Hide fullscreen button on mobile (browsers handle it natively) */
+@media (max-width: 480px) {
+  .hud-header__fullscreen-btn {
+    display: none;
+  }
+}
+
+/* Landscape / short-height mobile: ultra-compact HUD */
+@media (max-height: 480px) {
+  .hud-header {
+    padding: 4px 8px;
+    gap: 0;
+  }
+  .hud-header__row {
+    gap: 4px;
+  }
+  .hud-header__logo img {
+    height: 16px;
+  }
+  .hud-header__score {
+    font-size: 11px;
+    padding: 2px 6px;
+  }
+  .hud-header__icon-btn {
+    padding: 2px 5px !important;
+    font-size: 11px;
+  }
+  .hud-header__title--mobile {
+    display: none !important;
+  }
 }
 
 /* Desktop: show inline title, hide mobile title */
@@ -364,4 +412,10 @@ canvas {
   .hud-header__title--mobile {
     display: none;
   }
+}
+
+@keyframes forgeDrift {
+  0% { transform: translate(0, 0) scale(1); opacity: 0.15; }
+  50% { opacity: 0.4; }
+  100% { transform: translate(-12px, -20px) scale(1.3); opacity: 0.1; }
 }
