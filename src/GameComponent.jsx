@@ -17,8 +17,18 @@ const GameComponent = ({ isFullscreen }) => {
     };
   }, []);
 
+  const handlePointerDown = () => {
+    const el = document.activeElement;
+    if (el && el !== document.body && el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA') {
+      el.blur();
+    }
+  };
+
   return (
-    <div style={{ position: 'relative', width: '100%', height: '100%', display: 'block' }}>
+    <div 
+      style={{ position: 'relative', width: '100%', height: '100%', display: 'block' }}
+      onPointerDown={handlePointerDown}
+    >
       <div
         ref={gameContainerRef}
         style={{

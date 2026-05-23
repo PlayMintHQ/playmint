@@ -205,11 +205,21 @@ export default class PlatformerMode extends BaseMode {
     const themePlatformTexture = this.scene.activeTheme?.platformTexture || 'stone_tile';
     const collectibleTexture = this.scene.activeTheme?.collectibleTexture || 'crate';
 
+    // Retrieve dimensions of the platform texture frame for correct dynamic repeating tile scale
+    const textureObj = this.scene.textures.get(themePlatformTexture);
+    const frame = textureObj?.get(0);
+    const frameWidth = frame ? frame.width : TILE_W;
+    const frameHeight = frame ? frame.height : PLATFORM_H;
+
     layout.forEach((p, index) => {
       const platWidth = p.scaleX * TILE_W;
 
-      // Visual: tileSprite (repeats the stone texture instead of stretching)
+      // Visual: tileSprite (repeats the texture instead of stretching)
       const block = this.scene.add.tileSprite(p.x, p.y, platWidth, PLATFORM_H, themePlatformTexture);
+      
+      // Dynamic tile scaling:
+      block.tileScaleX = TILE_W / frameWidth;
+      block.tileScaleY = PLATFORM_H / frameHeight;
 
       // Physics: add static body matching the tileSprite dimensions
       this.scene.physics.add.existing(block, true);
@@ -225,7 +235,12 @@ export default class PlatformerMode extends BaseMode {
 
       if (!p.hasEnemy && index % 2 === 0) {
         const collectible = this.collectibles.create(p.x, p.y - 80, collectibleTexture);
-        collectible.setScale(0.5);
+        if (collectibleTexture === 'fox') {
+          collectible.play('star_spin', true);
+          collectible.setScale(1.5); // stars are 16x16, scale to 24px
+        } else {
+          collectible.setScale(0.5);
+        }
         collectible.body.setAllowGravity(false);
       }
 
@@ -419,7 +434,7 @@ export default class PlatformerMode extends BaseMode {
       const h = btn.height;
       btn.disableInteractive();
       btn.setInteractive(
-        new Phaser.Geom.Rectangle(-w / 2 - HIT_PAD, -h / 2 - HIT_PAD, w + HIT_PAD * 2, h + HIT_PAD * 2),
+        new Phaser.Geom.Rectangle(-HIT_PAD, -HIT_PAD, w + HIT_PAD * 2, h + HIT_PAD * 2),
         Phaser.Geom.Rectangle.Contains
       );
     });
@@ -479,8 +494,7 @@ export default class PlatformerMode extends BaseMode {
 
     if (this.isInputFocused()) {
       this.scene.player.setVelocityX(0);
-      this.scene.player.anims.stop();
-      this.scene.player.setFrame(5); // Default standing frame
+      this.scene.playPlayerAnim('idle');
       this.movingLeft = false;
       this.movingRight = false;
       this.leftPointerId = null;
@@ -488,7 +502,6 @@ export default class PlatformerMode extends BaseMode {
       return;
     }
 
-    // Safety: release stuck mobile buttons if their pointer is no longer active
     this.cleanupStaleTouchPointers();
 
     const { player } = this.scene;
@@ -508,7 +521,9 @@ export default class PlatformerMode extends BaseMode {
     }
 
     // Jump Input Polling
-    if (Phaser.Input.Keyboard.JustDown(this.keys.SPACE)) this.jump();
+    const spaceJustDown = (this.keys?.SPACE && Phaser.Input.Keyboard.JustDown(this.keys.SPACE)) || 
+                          (this.cursors?.space && Phaser.Input.Keyboard.JustDown(this.cursors.space));
+    if (spaceJustDown) this.jump();
 
     // Combat Input Polling (keys)
     if (Phaser.Input.Keyboard.JustDown(this.keys.E)) this.melee();
@@ -547,15 +562,13 @@ export default class PlatformerMode extends BaseMode {
     const touchingDown = player.body.touching.down || player.body.blocked.down;
     
     if (touchingDown) {
-      if (isMoving && !player.anims.isPlaying) {
-        player.play('run', true);
-      } else if (!isMoving) {
-        player.anims.stop();
-        player.setFrame(5);
+      if (isMoving) {
+        this.scene.playPlayerAnim('run');
+      } else {
+        this.scene.playPlayerAnim('idle');
       }
     } else {
-      player.anims.stop();
-      player.setFrame(6); // Jump frame
+      this.scene.playPlayerAnim('jump');
     }
   }
 
@@ -719,7 +732,8 @@ export default class PlatformerMode extends BaseMode {
     if (!this.platforms) return;
     let enemiesCreated = 0;
     const maxEnemies = this.enemyCount;
-    const enemyTexture = this.scene.activeTheme?.enemyTexture || 'dude';
+    const theme = this.scene.activeTheme;
+    const enemyTexture = theme?.enemyTexture || 'dude';
 
     const enemySpots = [];
     const fallbackSpots = [];
@@ -734,9 +748,17 @@ export default class PlatformerMode extends BaseMode {
       if (!block || enemiesCreated >= maxEnemies) return;
       const enemy = this.enemies.create(block.x, block.y - 40, enemyTexture);
       enemy.health = 3;
-      enemy.setTint(0xff0000);
       enemy.setGravityY(this.gravity);
-      enemy.setFrame(5);
+      
+      if (enemyTexture === 'fox') {
+        enemy.setScale(1.5);
+        const enemyAnim = theme?.enemyAnim || 'slug_walk';
+        enemy.play(enemyAnim, true);
+      } else {
+        enemy.setFrame(5);
+        enemy.setTint(0xff0000);
+      }
+      
       enemy.setVelocityX(50);
       enemy.setBounceX(1);
       enemy.setCollideWorldBounds(true);

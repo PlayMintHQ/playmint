@@ -6,6 +6,7 @@ import CreatorPanel from './components/CreatorPanel';
 import ScreenZero from './components/ScreenZero';
 import { GAME_PRESETS } from './gameConfig';
 import { parsePromptKeywords, generateTitle } from './game/promptUtils';
+import GameOverOverlay from './components/GameOverOverlay';
 
 const getInitialState = () => {
   if (typeof window !== 'undefined') {
@@ -32,6 +33,7 @@ function App() {
   const [presetKey, setPresetKey] = useState(initialConfig.presetKey);
   const [liveParams, setLiveParams] = useState(initialConfig.liveParams);
   const [hasStarted, setHasStarted] = useState(initialConfig.isImported);
+  const [isTransitioning, setIsTransitioning] = useState(false);
   const fullscreenContainerRef = useRef(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isFullscreenSupported, setIsFullscreenSupported] = useState(true);
@@ -39,8 +41,10 @@ function App() {
   const [isSelectorOpen, setIsSelectorOpen] = useState(false);
   const [score, setScore] = useState(0);
   const [isPromptOpen, setIsPromptOpen] = useState(false);
-  const [gameKey] = useState(0);
   const [isTouchDevice, setIsTouchDevice] = useState(false);
+  const [isGameOver, setIsGameOver] = useState(false);
+  const [gameOverData, setGameOverData] = useState(null);
+  const [gameKey, setGameKey] = useState(0);
 
   // Clean URL hash after importing config
   useEffect(() => {
@@ -49,6 +53,28 @@ function App() {
       window.history.replaceState(null, '', window.location.pathname + window.location.search);
     }
     setIsTouchDevice('ontouchstart' in window || navigator.maxTouchPoints > 0);
+  }, []);
+
+  // Global capture-phase keyboard event interceptor.
+  // Stops keyboard event propagation if the target is an HTML input or textarea.
+  // This guarantees Phaser never captures key events (preventing defaults) while typing.
+  useEffect(() => {
+    const handleCaptureKeyboard = (e) => {
+      const el = e.target;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
+        e.stopPropagation();
+      }
+    };
+    
+    window.addEventListener('keydown', handleCaptureKeyboard, true);
+    window.addEventListener('keyup', handleCaptureKeyboard, true);
+    window.addEventListener('keypress', handleCaptureKeyboard, true);
+    
+    return () => {
+      window.removeEventListener('keydown', handleCaptureKeyboard, true);
+      window.removeEventListener('keyup', handleCaptureKeyboard, true);
+      window.removeEventListener('keypress', handleCaptureKeyboard, true);
+    };
   }, []);
 
   // Fullscreen API detection & listener
@@ -72,6 +98,39 @@ function App() {
     window.addEventListener('update-score', handleScoreUpdate);
     return () => window.removeEventListener('update-score', handleScoreUpdate);
   }, []);
+
+  // Game Over listener from Phaser
+  useEffect(() => {
+    const handleGameOver = (e) => {
+      setGameOverData(e.detail);
+      setIsGameOver(true);
+    };
+    const handleGameReset = () => {
+      setIsGameOver(false);
+      setGameOverData(null);
+    };
+    window.addEventListener('game-over', handleGameOver);
+    window.addEventListener('game-reset', handleGameReset);
+    return () => {
+      window.removeEventListener('game-over', handleGameOver);
+      window.removeEventListener('game-reset', handleGameReset);
+    };
+  }, []);
+
+  const handleRestartGame = () => {
+    setGameKey(k => k + 1);
+    window.dispatchEvent(new CustomEvent('restart-game'));
+  };
+
+  // Force game remount when gameType or themeKey changes so assets are cleanly loaded
+  useEffect(() => {
+    setGameKey(k => k + 1);
+  }, [liveParams.gameType, liveParams.themeKey]);
+
+  const handleTweakSettings = () => {
+    setIsGameOver(false);
+    setIsMenuOpen(true);
+  };
 
   // Sync live params to Phaser via global + CustomEvent
   if (typeof window !== 'undefined') {
@@ -159,6 +218,14 @@ function App() {
     setIsMenuOpen(false);
   };
 
+  // Automatically blur active input element when the game starts or config updates
+  // to ensure keyboard focus shifts back to the game/body.
+  useEffect(() => {
+    if (document.activeElement && typeof document.activeElement.blur === 'function') {
+      document.activeElement.blur();
+    }
+  }, [hasStarted, presetKey, liveParams]);
+
   const handleGoHome = () => {
     setHasStarted(false);
     setIsMenuOpen(false);
@@ -219,10 +286,25 @@ function App() {
   return (
     <div ref={fullscreenContainerRef} style={{ position: 'relative', width: '100%', minHeight: '100dvh', overflow: 'hidden' }}>
       
-      {!hasStarted ? (
-        <ScreenZero onGenerate={handleGenerate} />
-      ) : (
-        <>
+      {/* Game view rendered if started OR if transitioning */}
+      {(hasStarted || isTransitioning) && (
+        <div style={{
+          position: 'absolute',
+          inset: 0,
+          opacity: 1,
+          zIndex: 1,
+          pointerEvents: 'none'
+        }}>
+          {isGameOver && gameOverData && (
+            <GameOverOverlay
+              isWin={gameOverData.isWin}
+              score={gameOverData.score}
+              themeKey={gameOverData.themeKey}
+              gameType={gameOverData.gameType}
+              onRestart={handleRestartGame}
+              onTweakSettings={handleTweakSettings}
+            />
+          )}
           <GameSelectorModal
             isOpen={isSelectorOpen}
             presetKey={presetKey}
@@ -255,7 +337,7 @@ function App() {
           />
 
           {/* Main Game Container */}
-          <div style={{ position: 'absolute', inset: 0, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', justifyContent: 'center', alignItems: 'center', pointerEvents: 'auto' }}>
             <div style={{ width: '100%', height: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
               <GameComponent key={gameKey} isFullscreen={isFullscreen} />
             </div>
@@ -276,15 +358,30 @@ function App() {
               </p>
             </div>
           )}
+        </div>
+      )}
 
-          {isPromptOpen && (
-            <ScreenZero
-              onGenerate={handleOverlayGenerate}
-              onClose={() => setIsPromptOpen(false)}
-              isOverlay
-            />
-          )}
-        </>
+      {/* ScreenZero rendered if NOT started */}
+      {!hasStarted && (
+        <ScreenZero
+          onStartTransition={(config) => {
+            setIsTransitioning(true);
+            setLiveParams(config);
+          }}
+          onCompleteTransition={() => {
+            setHasStarted(true);
+            setIsTransitioning(false);
+          }}
+          isTransitioning={isTransitioning}
+        />
+      )}
+
+      {isPromptOpen && (
+        <ScreenZero
+          onGenerate={handleOverlayGenerate}
+          onClose={() => setIsPromptOpen(false)}
+          isOverlay
+        />
       )}
 
     </div>

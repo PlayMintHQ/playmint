@@ -18,7 +18,8 @@ export const THEMES = {
     platformHeight: 32,
     spawnX: 150,
     spawnY: -250,
-    enemyTexture: 'dude'
+    enemyTexture: 'dude',
+    playerType: 'dude'
   },
   lava: {
     key: 'lava',
@@ -43,7 +44,8 @@ export const THEMES = {
     platformHeight: 32,
     spawnX: 150,
     spawnY: -250,
-    enemyTexture: 'dude'
+    enemyTexture: 'dude',
+    playerType: 'dude'
   },
   ice: {
     key: 'ice',
@@ -58,7 +60,7 @@ export const THEMES = {
     ],
     floorHeight: 48,
     floorTileScale: 2.0,
-    collectibleTexture: 'pine_snow',
+    collectibleTexture: 'fox',
     obstacleTexture: 'pine_snow',
     moveSpeed: 280,
     jumpForce: 550,
@@ -68,7 +70,9 @@ export const THEMES = {
     platformHeight: 24,
     spawnX: 150,
     spawnY: -200,
-    enemyTexture: 'pine_snow'
+    enemyTexture: 'fox',
+    enemyAnim: 'yeti_walk',
+    playerType: 'fox'
   },
   forest: {
     key: 'forest',
@@ -82,7 +86,7 @@ export const THEMES = {
     ],
     floorHeight: 48,
     floorTileScale: 1.0,
-    collectibleTexture: 'crate',
+    collectibleTexture: 'fox',
     obstacleTexture: 'forest_ground',
     moveSpeed: 80,
     jumpForce: 200,
@@ -92,7 +96,9 @@ export const THEMES = {
     platformHeight: 16,
     spawnX: 48,
     spawnY: -48,
-    enemyTexture: 'pine_snow'
+    enemyTexture: 'fox',
+    enemyAnim: 'slug_walk',
+    playerType: 'fox'
   },
   city: {
     key: 'city',
@@ -117,7 +123,8 @@ export const THEMES = {
     platformHeight: 32,
     spawnX: 150,
     spawnY: -250,
-    enemyTexture: 'dude'
+    enemyTexture: 'dude',
+    playerType: 'dude'
   },
   space: {
     key: 'space',
@@ -142,7 +149,8 @@ export const THEMES = {
     platformHeight: 32,
     spawnX: 150,
     spawnY: -250,
-    enemyTexture: 'dude'
+    enemyTexture: 'dude',
+    playerType: 'dude'
   }
 };
 

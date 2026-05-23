@@ -10,6 +10,7 @@ export default class GameManagerScene extends Phaser.Scene {
 
   preload() {
     this.load.spritesheet('dude', 'assets/dude.png', { frameWidth: 32, frameHeight: 48 });
+    this.load.atlas('fox', 'assets/atlas/atlas.png', 'assets/atlas/atlas.json');
     this.load.image('crate', 'assets/crate.png');
     this.load.image('ground', 'assets/ground.png');
     this.load.svg('projectile', 'assets/shuriken.svg', { width: 48, height: 16 }); // Laser bolt
@@ -70,6 +71,7 @@ export default class GameManagerScene extends Phaser.Scene {
 
   create() {
     this.isGameOver = false;
+    window.dispatchEvent(new CustomEvent('game-reset'));
     this.score = 0;
     window.dispatchEvent(new CustomEvent('update-score', { detail: this.score }));
     this.activeTheme = getTheme(this.gameConfig.themeKey);
@@ -108,17 +110,20 @@ export default class GameManagerScene extends Phaser.Scene {
     // Floor - Make it wide enough to cover the world width if we are in platformer mode.
     const floorWidth = this.gameConfig.gameType === 'platformer' ? 4000 : Math.max(width * 2, 4000);
     const floorTexture = this.activeTheme.floorTexture || 'ground';
-    const textureSource = this.textures.get(floorTexture)?.getSourceImage();
-    if (textureSource && textureSource.width && textureSource.height) {
-      const tileWidth = textureSource.width;
-      const tileHeight = textureSource.height;
+    const floorFrameIndex = this.activeTheme.floorFrame !== undefined ? this.activeTheme.floorFrame : 0;
+    const textureObj = this.textures.get(floorTexture);
+    const frame = textureObj?.get(floorFrameIndex);
+
+    if (frame && frame.width && frame.height) {
+      const tileWidth = frame.width;
+      const tileHeight = frame.height;
       const scaleY = floorHeight / tileHeight;
       const scaledWidth = tileWidth * scaleY;
       const repeatCount = Math.ceil(floorWidth / scaledWidth);
 
       this.floorSegments = [];
       for (let i = 0; i < repeatCount; i++) {
-        const tile = this.add.sprite(i * scaledWidth, this.LOGICAL_FLOOR_Y, floorTexture).setOrigin(0, 0);
+        const tile = this.add.sprite(i * scaledWidth, this.LOGICAL_FLOOR_Y, floorTexture, floorFrameIndex).setOrigin(0, 0);
         tile.setScale(scaleY);
         this.floorSegments.push(tile);
       }
@@ -126,7 +131,7 @@ export default class GameManagerScene extends Phaser.Scene {
       this.floor = this.add.rectangle(0, this.LOGICAL_FLOOR_Y, floorWidth, floorHeight, 0x000000, 0);
       this.floor.setOrigin(0, 0);
     } else {
-      this.floor = this.add.tileSprite(0, this.LOGICAL_FLOOR_Y, floorWidth, floorHeight, floorTexture).setOrigin(0, 0);
+      this.floor = this.add.tileSprite(0, this.LOGICAL_FLOOR_Y, floorWidth, floorHeight, floorTexture, floorFrameIndex).setOrigin(0, 0);
       const themeTileScale = this.activeTheme.floorTileScale || 0.15;
       this.floor.tileScaleX = this.gameConfig.floorTileScale || themeTileScale;
       this.floor.tileScaleY = this.gameConfig.floorTileScale || themeTileScale;
@@ -144,6 +149,81 @@ export default class GameManagerScene extends Phaser.Scene {
         frameRate: 10,
         repeat: -1
       });
+    }
+
+    // Fox animations
+    if (!this.anims.exists('fox_run')) {
+      this.anims.create({
+        key: 'fox_run',
+        frames: this.anims.generateFrameNames('fox', { prefix: 'run-', start: 1, end: 8 }),
+        frameRate: 12,
+        repeat: -1
+      });
+    }
+    if (!this.anims.exists('fox_idle')) {
+      this.anims.create({
+        key: 'fox_idle',
+        frames: this.anims.generateFrameNames('fox', { prefix: 'idle-', start: 1, end: 4 }),
+        frameRate: 6,
+        repeat: -1
+      });
+    }
+    if (!this.anims.exists('fox_jump')) {
+      this.anims.create({
+        key: 'fox_jump',
+        frames: this.anims.generateFrameNames('fox', { prefix: 'jump-', start: 1, end: 5 }),
+        frameRate: 10,
+        repeat: 0
+      });
+    }
+    if (!this.anims.exists('star_spin')) {
+      try {
+        const frames = this.anims.generateFrameNames('fox', { prefix: 'star/star-', start: 1, end: 4 });
+        if (frames && frames.length > 0) {
+          this.anims.create({
+            key: 'star_spin',
+            frames: frames,
+            frameRate: 8,
+            repeat: -1
+          });
+        }
+      } catch (e) {
+        console.warn('Could not load star atlas frames, skipping anim creation');
+      }
+    }
+    if (!this.anims.exists('slug_walk')) {
+      try {
+        let frames = this.anims.generateFrameNames('fox', { prefix: 'slug/slug-', start: 1, end: 2 });
+        if (!frames || frames.length === 0) {
+          // Fallback to walk frames which are present in the atlas
+          frames = this.anims.generateFrameNames('fox', { prefix: 'walk-', start: 1, end: 4 });
+        }
+        if (frames && frames.length > 0) {
+          this.anims.create({
+            key: 'slug_walk',
+            frames: frames,
+            frameRate: 6,
+            repeat: -1
+          });
+        }
+      } catch (e) {
+        console.warn('Could not load slug atlas frames');
+      }
+    }
+    if (!this.anims.exists('yeti_walk')) {
+      try {
+        const frames = this.anims.generateFrameNames('fox', { prefix: 'yeti-', start: 1, end: 8 });
+        if (frames && frames.length > 0) {
+          this.anims.create({
+            key: 'yeti_walk',
+            frames: frames,
+            frameRate: 8,
+            repeat: -1
+          });
+        }
+      } catch (e) {
+        console.warn('Could not load yeti atlas frames');
+      }
     }
 
     // Melee slash animation — 6 SVG textures cycled as individual frames
@@ -166,8 +246,9 @@ export default class GameManagerScene extends Phaser.Scene {
     // Player Base Logic
     const playerYOffset = 150;
     const playerX = 150;
-    this.player = this.physics.add.sprite(playerX, this.LOGICAL_FLOOR_Y - playerYOffset, 'dude');
-    this.player.setScale(this.gameConfig.playerScale || 1.5);
+    const playerType = this.activeTheme.playerType || 'dude';
+    this.player = this.physics.add.sprite(playerX, this.LOGICAL_FLOOR_Y - playerYOffset, playerType);
+    this.player.setScale(this.gameConfig.playerScale || (playerType === 'fox' ? 1.8 : 1.5));
     // Theme-based character tint
     if (this.activeTheme?.playerTint) {
       this.player.setTint(this.activeTheme.playerTint);
@@ -250,10 +331,18 @@ export default class GameManagerScene extends Phaser.Scene {
     };
     window.addEventListener('update-game-config', this.updateConfigListener);
 
+    this.restartGameListener = () => {
+      if (this.isGameOver) {
+        this.scene.restart();
+      }
+    };
+    window.addEventListener('restart-game', this.restartGameListener);
+
     this.events.on('shutdown', () => {
       window.removeEventListener('update-game-config', this.updateConfigListener);
       window.removeEventListener('keydown', this.preventKeyScrollListener);
       window.removeEventListener('orientationchange', this.orientationHandler);
+      window.removeEventListener('restart-game', this.restartGameListener);
       if (screen.orientation) {
         screen.orientation.removeEventListener('change', this.orientationHandler);
       }
@@ -350,35 +439,37 @@ export default class GameManagerScene extends Phaser.Scene {
         });
       }
 
-    if (this.floorSegments && this.floorSegments.length) {
-      const floorWidth = this.gameConfig.gameType === 'platformer' ? 4000 : Math.max(width * 4, 1600);
-      const floorHeight = this.activeTheme?.floorHeight || this.gameConfig.floorHeight || 100;
-      const floorTexture = this.activeTheme.floorTexture || 'ground';
-      const textureSource = this.textures.get(floorTexture)?.getSourceImage();
+      if (this.floorSegments && this.floorSegments.length) {
+        const floorWidth = this.gameConfig.gameType === 'platformer' ? 4000 : Math.max(width * 4, 1600);
+        const floorHeight = this.activeTheme?.floorHeight || this.gameConfig.floorHeight || 100;
+        const floorTexture = this.activeTheme.floorTexture || 'ground';
+        const floorFrameIndex = this.activeTheme.floorFrame !== undefined ? this.activeTheme.floorFrame : 0;
+        const textureObj = this.textures.get(floorTexture);
+        const frame = textureObj?.get(floorFrameIndex);
 
-      if (textureSource && textureSource.width && textureSource.height) {
-        const tileWidth = textureSource.width;
-        const tileHeight = textureSource.height;
-        const scaleY = floorHeight / tileHeight;
-        const scaledWidth = tileWidth * scaleY;
-        const repeatCount = Math.ceil(floorWidth / scaledWidth);
+        if (frame && frame.width && frame.height) {
+          const tileWidth = frame.width;
+          const tileHeight = frame.height;
+          const scaleY = floorHeight / tileHeight;
+          const scaledWidth = tileWidth * scaleY;
+          const repeatCount = Math.ceil(floorWidth / scaledWidth);
 
-        while (this.floorSegments.length < repeatCount) {
-          const tile = this.add.sprite(0, this.LOGICAL_FLOOR_Y, floorTexture).setOrigin(0, 0);
-          tile.setScale(scaleY);
-          this.floorSegments.push(tile);
+          while (this.floorSegments.length < repeatCount) {
+            const tile = this.add.sprite(0, this.LOGICAL_FLOOR_Y, floorTexture, floorFrameIndex).setOrigin(0, 0);
+            tile.setScale(scaleY);
+            this.floorSegments.push(tile);
+          }
+          while (this.floorSegments.length > repeatCount) {
+            const tile = this.floorSegments.pop();
+            tile.destroy();
+          }
+
+          this.floorSegments.forEach((tile, index) => {
+            tile.setScale(scaleY);
+            tile.setPosition(index * scaledWidth, this.LOGICAL_FLOOR_Y);
+          });
         }
-        while (this.floorSegments.length > repeatCount) {
-          const tile = this.floorSegments.pop();
-          tile.destroy();
-        }
-
-        this.floorSegments.forEach((tile, index) => {
-          tile.setScale(scaleY);
-          tile.setPosition(index * scaledWidth, this.LOGICAL_FLOOR_Y);
-        });
       }
-    }
 
       if (this.gameModeManager && this.gameModeManager.handleResize) {
         this.gameModeManager.handleResize({ width, height });
@@ -391,17 +482,33 @@ export default class GameManagerScene extends Phaser.Scene {
         this.cameras.main.scrollY = (this.LOGICAL_FLOOR_Y + floorHeight) - height;
       }
 
-      if (this.isGameOver) {
-        if (this.overlay) {
-          this.overlay.setSize(width, height);
-        }
-        if (this.gameOverText) this.gameOverText.setPosition(width / 2, height / 2 - 56);
-        if (this.scoreText) this.scoreText.setPosition(width / 2, height / 2 - 10);
-        if (this.decoLine) this.decoLine.setPosition(width / 2, height / 2 + 20);
-        if (this.subText) this.subText.setPosition(width / 2, height / 2 + 44);
-      }
     }, 150);
   }
+
+  playPlayerAnim(animName) {
+    const playerType = this.activeTheme.playerType || 'dude';
+    if (playerType === 'fox') {
+      if (animName === 'run') {
+        this.player.play('fox_run', true);
+      } else if (animName === 'idle') {
+        this.player.play('fox_idle', true);
+      } else if (animName === 'jump') {
+        this.player.play('fox_jump', true);
+      }
+    } else {
+      // dude
+      if (animName === 'run') {
+        this.player.play('run', true);
+      } else if (animName === 'idle') {
+        this.player.anims.stop();
+        this.player.setFrame(5);
+      } else if (animName === 'jump') {
+        this.player.anims.stop();
+        this.player.setFrame(6);
+      }
+    }
+  }
+
   getThemeAccent() {
     const tints = {
       lava: '#FF6B3D',
@@ -413,116 +520,24 @@ export default class GameManagerScene extends Phaser.Scene {
     return tints[this.activeTheme?.key] || '#00E599';
   }
 
-  createGameOverUI(title, titleColor, playerTint, scoreBonus) {
-    const width = this.scale.width;
-    const height = this.scale.height;
-    const accent = this.getThemeAccent();
-
-    // 1. Animated overlay — fade in
-    this.overlay = this.add.rectangle(0, 0, width, height, 0x000000, 0)
-      .setOrigin(0, 0)
-      .setScrollFactor(0)
-      .setDepth(10);
-    this.tweens.add({
-      targets: this.overlay,
-      alpha: { from: 0, to: 0.7 },
-      duration: 400,
-      ease: 'Cubic.easeOut'
-    });
-
+  createGameOverUI(isWin, playerTint, scoreBonus) {
     if (scoreBonus) {
       this.score += scoreBonus;
       window.dispatchEvent(new CustomEvent('update-score', { detail: this.score }));
     }
 
-    // 2. Title with glow (large shadow + pulse)
-    const titleSize = Math.min(52, width / 7) + 'px';
-    this.gameOverText = this.add.text(width / 2, height / 2 - 56, title, {
-      fontFamily: 'system-ui, sans-serif',
-      fontSize: titleSize,
-      fill: titleColor,
-      fontStyle: '900',
-      stroke: titleColor,
-      strokeThickness: 1
-    })
-      .setScrollFactor(0)
-      .setOrigin(0.5)
-      .setAlpha(0)
-      .setShadow(0, 0, titleColor, 20, true, true)
-      .setDepth(11);
-    this.tweens.add({
-      targets: this.gameOverText,
-      alpha: { from: 0, to: 1 },
-      y: { from: height / 2 - 40, to: height / 2 - 56 },
-      duration: 500,
-      ease: 'Back.easeOut'
-    });
-
-    // 3. Score display
-    const scoreSize = Math.min(20, width / 20) + 'px';
-    this.scoreText = this.add.text(width / 2, height / 2 - 10, `Score: ${this.score}`, {
-      fontFamily: 'system-ui, sans-serif',
-      fontSize: scoreSize,
-      fill: accent,
-      fontStyle: '700'
-    })
-      .setScrollFactor(0)
-      .setOrigin(0.5)
-      .setAlpha(0)
-      .setDepth(11);
-    this.tweens.add({
-      targets: this.scoreText,
-      alpha: { from: 0, to: 1 },
-      delay: 300,
-      duration: 400,
-      ease: 'Cubic.easeOut'
-    });
-
-    // 4. Decorative line
-    const lineWidth = Math.min(160, width * 0.3);
-    this.decoLine = this.add.rectangle(width / 2, height / 2 + 20, 0, 2, Phaser.Display.Color.HexStringToColor(accent).color, 0.6)
-      .setScrollFactor(0)
-      .setOrigin(0.5)
-      .setDepth(11);
-    this.tweens.add({
-      targets: this.decoLine,
-      displayWidth: { from: 0, to: lineWidth },
-      delay: 450,
-      duration: 400,
-      ease: 'Cubic.easeOut'
-    });
-
-    // 5. Restart hint — blinking pulse
-    const subSize = Math.min(18, width / 18) + 'px';
-    this.subText = this.add.text(width / 2, height / 2 + 44, 'Tap or press SPACE to restart', {
-      fontFamily: 'system-ui, sans-serif',
-      fontSize: subSize,
-      fill: '#FFFFFF',
-      fontStyle: '500'
-    })
-      .setScrollFactor(0)
-      .setOrigin(0.5)
-      .setAlpha(0)
-      .setDepth(11);
-    this.tweens.add({
-      targets: this.subText,
-      alpha: { from: 0, to: 0.9 },
-      delay: 600,
-      duration: 400
-    });
-    // Continuous pulse
-    this.tweens.add({
-      targets: this.subText,
-      alpha: { from: 0.9, to: 0.4 },
-      duration: 1200,
-      yoyo: true,
-      repeat: -1,
-      delay: 900,
-      ease: 'Sine.easeInOut'
-    });
-
     // Apply player tint
     this.player.setTint(playerTint);
+
+    // Dispatch the custom event to trigger React UI
+    window.dispatchEvent(new CustomEvent('game-over', {
+      detail: {
+        isWin,
+        score: this.score,
+        themeKey: this.gameConfig.themeKey || 'default',
+        gameType: this.gameConfig.gameType || 'runner'
+      }
+    }));
   }
 
   hitObstacle(player, obstacle) {
@@ -532,7 +547,7 @@ export default class GameManagerScene extends Phaser.Scene {
     this.physics.pause();
     this.player.anims.stop();
 
-    this.createGameOverUI('GAME OVER', '#FF4136', 0x888888, 0);
+    this.createGameOverUI(false, 0x888888, 0);
   }
 
   winGame() {
@@ -543,14 +558,14 @@ export default class GameManagerScene extends Phaser.Scene {
     this.physics.pause();
     this.player.anims.stop();
 
-    this.createGameOverUI('YOU WIN!', '#00FF00', 0x00FF00, 500);
+    this.createGameOverUI(true, 0x00FF00, 500);
   }
 
   update(time, delta) {
     if (this.isGameOver) return;
     
     if (this.gameConfig.gameType === 'runner') {
-       this.virtualScrollX = (this.virtualScrollX || 0) + (this.gameModeManager?.currentMode?.runSpeed || this.gameConfig.runSpeed) * (delta / 1000);
+       this.virtualScrollX = (this.virtualScrollX || 0) + (this.gameModeManager?.activeMode?.runSpeed || this.gameConfig.runSpeed) * (delta / 1000);
     }
     const scrollX = this.gameConfig.gameType === 'runner' ? this.virtualScrollX : (this.cameras?.main?.scrollX || 0);
 

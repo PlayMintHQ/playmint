@@ -12,6 +12,9 @@ const config = {
   roundPixels: true,
   input: {
     activePointers: 4,
+    keyboard: true,
+    mouse: true,
+    touch: true
   },
   physics: {
     default: 'arcade',
