@@ -1,4 +1,5 @@
 import React from 'react';
+import { IconFullscreen, IconFullscreenExit, IconMenu } from './Icons';
 
 const HudHeader = ({
   liveParams,
@@ -34,14 +35,18 @@ const HudHeader = ({
           </div>
 
           {!isFullscreen && isFullscreenSupported && (
-            <button className="pm-btn pm-btn-outline hud-header__icon-btn hud-header__fullscreen-btn" onClick={onFullscreen} title="Fullscreen">⛶</button>
+            <button className="pm-btn pm-btn-outline hud-header__icon-btn hud-header__fullscreen-btn" onClick={onFullscreen} title="Fullscreen">
+              <IconFullscreen />
+            </button>
           )}
           {isFullscreen && (
-            <button className="pm-btn pm-btn-danger hud-header__icon-btn hud-header__fullscreen-btn" onClick={onExitFullscreen} title="Exit Fullscreen">✖</button>
+            <button className="pm-btn pm-btn-danger hud-header__icon-btn hud-header__fullscreen-btn" onClick={onExitFullscreen} title="Exit Fullscreen">
+              <IconFullscreenExit />
+            </button>
           )}
-          
+
           <button className="pm-btn pm-btn-primary hud-header__icon-btn" onClick={onMenuOpen}>
-            ☰
+            <IconMenu />
           </button>
         </div>
       </div>

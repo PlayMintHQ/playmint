@@ -167,13 +167,12 @@ export default class GameManagerScene extends Phaser.Scene {
     this.gameModeManager.create();
 
     // Generic Input for runner or generic jumps
-    this.input.keyboard.on('keydown-SPACE', (e) => {
+    this.input.keyboard.on('keydown-SPACE', () => {
+      const el = document.activeElement;
+      const isTextInput = el && (el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && (el.type === 'text' || el.type === 'number')));
+      if (isTextInput) return;
       if (this.isGameOver) {
-        const el = document.activeElement;
-        const isTextInput = el && (el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && (el.type === 'text' || el.type === 'number')));
-        if (!isTextInput) {
-          this.scene.restart();
-        }
+        this.scene.restart();
       } else {
         this.gameModeManager.jump();
       }

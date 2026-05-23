@@ -10,6 +10,9 @@ const config = {
   },
   pixelArt: true,
   roundPixels: true,
+  input: {
+    activePointers: 4,
+  },
   physics: {
     default: 'arcade',
     arcade: {

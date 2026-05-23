@@ -1,13 +1,25 @@
 import React, { useState, useRef } from 'react';
 import { GAME_PRESETS } from '../gameConfig';
+import { parsePromptKeywords, generateTitle } from '../game/promptUtils';
 
 const BANNED_WORDS = ['fuck', 'shit', 'bitch', 'cunt', 'ass', 'dick', 'pussy', 'cock', 'nigger', 'faggot'];
+
+const AVAILABLE_MODES = [
+  { key: 'standard', label: 'Runner' },
+  { key: 'action_quest', label: 'Action Quest' },
+];
+
+const COMING_SOON_MODES = [
+  'Empire Builder', 'RPG Adventure', 'Fighting Arena',
+  'Racing Rush', 'Shooter Arena', 'Survival Mode', 'Simulator World',
+];
 
 const ScreenZero = ({ onGenerate, onClose, isOverlay }) => {
   const [prompt, setPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [transitionPhase, setTransitionPhase] = useState('idle'); // idle | expanding | done
+  const [selectedMode, setSelectedMode] = useState(null); // null | 'standard' | 'action_quest'
   const formRef = useRef(null);
 
   const showToast = (message) => {
@@ -48,89 +60,45 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay }) => {
 
   const processPrompt = (input) => {
     const text = input.toLowerCase().trim();
-    
-    // Safety check
+
     const isUnsafe = BANNED_WORDS.some(word => text.includes(word));
     if (isUnsafe || text === '') {
       generateRandom(isUnsafe ? "Inappropriate prompt. Generated a random variation." : "Generated a random variation.");
       return;
     }
 
-    let mode = 'random';
-    let newConfig = {};
-    let keywordsMatched = 0;
-    let themeKey = 'default';
+    const result = parsePromptKeywords(text);
+    const mode = selectedMode || result.mode || (Math.random() > 0.5 ? 'action_quest' : 'standard');
+    const themeKey = result.themeKey || 'default';
 
-    // Detect Mode
-    if (text.match(/(action|quest|fight|platformer|enemies|shoot|kill|combat)/)) {
-      mode = 'action_quest';
-      keywordsMatched++;
-    } else if (text.match(/(run|dash|jump|runner|dodge|sprint)/)) {
-      mode = 'standard';
-      keywordsMatched++;
-    }
-
-    if (text.match(/(lava|volcano|molten|inferno|ash)/)) {
-      themeKey = 'lava';
-      keywordsMatched++;
-    } else if (text.match(/(ice|snow|frost|glacier|winter)/)) {
-      themeKey = 'ice';
-      keywordsMatched++;
-    } else if (text.match(/(forest|jungle|wood|trees|verdant)/)) {
-      themeKey = 'forest';
-      keywordsMatched++;
-    }
-
-    if (mode === 'random') {
-      mode = Math.random() > 0.5 ? 'action_quest' : 'standard';
-    }
-
-    // Start with base preset
-    newConfig = { ...GAME_PRESETS[mode] };
-    
-    // Default difficulty
-    newConfig.difficulty = 5;
+    const newConfig = { ...GAME_PRESETS[mode] };
     newConfig.themeKey = themeKey;
 
-    const isFast = text.match(/(fast|speed|quick|rush)/);
-    const isSlow = text.match(/(slow|easy|relax|chill)/);
-    const isHard = text.match(/(hard|difficult|impossible|insane|chaos|crazy)/);
-    const isLowGravity = text.match(/(moon|float|space|fly|low gravity|zero gravity)/);
-
-    if (isSlow) {
-      newConfig.difficulty = 2;
-      keywordsMatched++;
-    }
-    if (isHard) {
-      newConfig.difficulty = 9;
-      keywordsMatched++;
-    }
-
+    const diff = result.modifiers.isHard ? 9 : result.modifiers.isSlow ? 2 : 5;
+    newConfig.difficulty = diff;
     applyDifficulty(newConfig, mode);
 
-    if (isFast) {
+    if (result.modifiers.isFast) {
       if (mode === 'standard') newConfig.runSpeed = 600;
       if (mode === 'action_quest') newConfig.actionJumpHeight = 800;
-      keywordsMatched++;
     }
-    if (isSlow) {
+    if (result.modifiers.isSlow) {
       if (mode === 'standard') { newConfig.runSpeed = 200; newConfig.gravity = 1200; }
       if (mode === 'action_quest') { newConfig.actionEnemyCount = 1; newConfig.actionGravity = 1000; }
     }
-    if (isHard) {
+    if (result.modifiers.isHard) {
       if (mode === 'standard') { newConfig.runSpeed = 800; newConfig.gravity = 2500; newConfig.obstacleDelay = 600; }
       if (mode === 'action_quest') { newConfig.actionEnemyCount = 12; newConfig.actionGravity = 2000; }
     }
-    if (isLowGravity) {
+    if (result.modifiers.isLowGravity) {
       newConfig.gravity = 600;
       newConfig.actionGravity = 600;
-      keywordsMatched++;
     }
 
-    if (keywordsMatched === 0) {
+    if (result.keywordsMatched === 0) {
       generateRandom("Prompt unrecognized. Generated a random variation.");
     } else {
-      newConfig.gameName = generateImmersiveTitle(input, mode, themeKey);
+      newConfig.gameName = generateTitle(input, mode, themeKey);
       onGenerate('custom', newConfig);
     }
   };
@@ -161,31 +129,6 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay }) => {
       config.actionEnemyCount = Math.floor(diff * 1.5); // 1 to 15
       config.actionJumpHeight = 400 + (diff * 30);
     }
-  };
-
-  const generateImmersiveTitle = (input, mode, theme) => {
-    const trimmed = input.trim();
-    // If prompt is a reasonable length, use it directly but capitalize properly
-    if (trimmed.length > 4 && trimmed.length < 36) {
-      return trimmed
-        .split(/\s+/)
-        .map(w => w.charAt(0).toUpperCase() + w.slice(1))
-        .join(' ');
-    }
-
-    const themeNames = {
-      lava: ['Ashfall', 'Molten', 'Cinder', 'Inferno', 'Ember', 'Scorch'],
-      ice: ['Glacier', 'Frost', 'Arctic', 'Snowfall', 'Permafrost', 'Hoarfrost'],
-      forest: ['Verdant', 'Wildwood', 'Grove', 'Emerald', 'Fern', 'Canopy'],
-      default: ['Prime', 'Core', 'Nova', 'Omega', 'Apex', 'Flux']
-    };
-    const modeNames = mode === 'action_quest'
-      ? ['Quest', 'Runes', 'Raid', 'Path', 'Chronicle', 'Saga']
-      : ['Run', 'Sprint', 'Rush', 'Dash', 'Circuit', 'Marathon'];
-
-    const themeList = themeNames[theme] || themeNames.default;
-    const title = `${themeList[Math.floor(Math.random() * themeList.length)]} ${modeNames[Math.floor(Math.random() * modeNames.length)]}`;
-    return title;
   };
 
   return (
@@ -221,7 +164,7 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay }) => {
         backgroundPosition: 'center 30%',
         imageRendering: 'pixelated',
         opacity: 1,
-        animation: 'parallaxNear 5s ease-in-out infinite alternate'
+        animation: 'parallaxNear 7s ease-in-out infinite alternate'
       }} />
       {/* Dark gradient overlay for readability */}
       <div style={{
@@ -278,7 +221,7 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay }) => {
         )}
       </div>
 
-      {/* ===== MIDDLE: Slogan ===== */}
+      {/* ===== MIDDLE: Logo + Slogan ===== */}
       <div style={{
         position: 'absolute', top: '50%', left: '50%',
         transform: 'translate(-50%, -50%)',
@@ -286,6 +229,11 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay }) => {
         pointerEvents: 'none',
         animation: transitionPhase === 'idle' ? 'sloganFade 0.8s ease-out' : undefined
       }}>
+        <img
+          src="/assets/Logo_PlayMint_(transparent).png"
+          alt="PlayMint"
+          style={{ height: '36px', marginBottom: '12px', opacity: 0.9, display: 'block', marginLeft: 'auto', marginRight: 'auto' }}
+        />
         <p style={{
           margin: 0,
           fontFamily: 'var(--font-heading)',
@@ -368,7 +316,90 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay }) => {
             </button>
           </form>
 
-          <div className="pm-screenzero-chips" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '10px', justifyContent: 'center' }}>
+          {/* ===== GAME MODE SELECTOR ===== */}
+          <div className="pm-screenzero-modes" style={{ marginTop: '16px', textAlign: 'center' }}>
+            <p style={{
+              margin: '0 0 10px 0',
+              fontSize: '12px',
+              fontWeight: '600',
+              color: 'var(--pm-text-secondary)',
+              letterSpacing: '0.5px',
+              textTransform: 'uppercase',
+            }}>
+              Choose your game type
+            </p>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'center' }}>
+              {AVAILABLE_MODES.map((mode) => {
+                const isActive = selectedMode === mode.key;
+                return (
+                  <button
+                    key={mode.key}
+                    type="button"
+                    disabled={isGenerating}
+                    onClick={() => setSelectedMode(isActive ? null : mode.key)}
+                    style={{
+                      padding: '6px 16px',
+                      borderRadius: '8px',
+                      fontSize: '12px',
+                      fontWeight: '600',
+                      cursor: isGenerating ? 'default' : 'pointer',
+                      transition: 'all 0.2s ease',
+                      background: isActive ? 'rgba(0,229,153,0.15)' : 'rgba(255,255,255,0.06)',
+                      border: isActive ? '1px solid var(--pm-accent-teal)' : '1px solid rgba(255,255,255,0.12)',
+                      color: isActive ? 'var(--pm-accent-teal)' : 'var(--pm-text-secondary)',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isActive && !isGenerating) {
+                        e.target.style.background = 'rgba(255,255,255,0.12)';
+                        e.target.style.color = '#fff';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isActive && !isGenerating) {
+                        e.target.style.background = 'rgba(255,255,255,0.06)';
+                        e.target.style.color = 'var(--pm-text-secondary)';
+                      }
+                    }}
+                  >
+                    {mode.label}
+                  </button>
+                );
+              })}
+              {COMING_SOON_MODES.map((name) => (
+                <span
+                  key={name}
+                  style={{
+                    padding: '6px 16px',
+                    borderRadius: '8px',
+                    fontSize: '12px',
+                    fontWeight: '500',
+                    background: 'rgba(255,255,255,0.03)',
+                    border: '1px solid rgba(255,255,255,0.06)',
+                    color: 'var(--pm-text-tertiary)',
+                    opacity: 0.4,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    cursor: 'default',
+                  }}
+                >
+                  {name}
+                  <span style={{
+                    fontSize: '9px',
+                    fontWeight: '700',
+                    background: 'rgba(255,255,255,0.06)',
+                    padding: '1px 5px',
+                    borderRadius: '4px',
+                    color: 'var(--pm-text-tertiary)',
+                  }}>
+                    LOCKED
+                  </span>
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div className="pm-screenzero-chips" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '14px', justifyContent: 'center' }}>
             {['lava runner', 'ice quest', 'forest sprint'].map((example, i) => (
               <button
                 key={i}
@@ -415,7 +446,7 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay }) => {
           }
           @keyframes parallaxNear {
             0% { background-position-x: 50%; }
-            100% { background-position-x: 42%; }
+            100% { background-position-x: 44%; }
           }
           @keyframes float {
             0% { transform: translateY(0) scale(1); }
@@ -435,6 +466,9 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay }) => {
               border-radius: 14px;
             }
             .pm-screenzero-quick {
+              display: none;
+            }
+            .pm-screenzero-modes {
               display: none;
             }
             .pm-screenzero-chips {

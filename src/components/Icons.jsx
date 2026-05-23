@@ -41,3 +41,25 @@ export const IconHome = () => (
     <path d="M5 8v8a1 1 0 0 0 1 1h3v-4h2v4h3a1 1 0 0 0 1-1V8" />
   </svg>
 );
+
+export const IconFullscreen = () => (
+  <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={s}>
+    <path d="M3 8V3h5" />
+    <path d="M17 12v5h-5" />
+  </svg>
+);
+
+export const IconFullscreenExit = () => (
+  <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={s}>
+    <path d="M8 3v5H3" />
+    <path d="M12 17v-5h5" />
+  </svg>
+);
+
+export const IconMenu = () => (
+  <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={s}>
+    <line x1="2" y1="5" x2="18" y2="5" />
+    <line x1="2" y1="10" x2="18" y2="10" />
+    <line x1="2" y1="15" x2="18" y2="15" />
+  </svg>
+);

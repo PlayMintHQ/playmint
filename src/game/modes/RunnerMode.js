@@ -15,6 +15,8 @@ export default class RunnerMode extends BaseMode {
     this.scene.player.setGravityY(this.scene.gameConfig.gravity || (theme.gravity || 1800));
     this.scene.player.play('run');
 
+    this.spaceKey = this.scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+
     this.obstacles = this.scene.physics.add.group();
 
     this.obstacleTimer = this.scene.time.addEvent({
@@ -46,6 +48,10 @@ export default class RunnerMode extends BaseMode {
 
   update(time, delta) {
     if (this.scene.isGameOver) return;
+
+    if (Phaser.Input.Keyboard.JustDown(this.spaceKey)) {
+      this.jump();
+    }
 
     if ((this.scene.player.body.touching.down || this.scene.player.body.blocked.down) && !this.scene.player.anims.isPlaying) {
       this.scene.player.play('run', true);

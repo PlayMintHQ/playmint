@@ -127,15 +127,7 @@ export default class PlatformerMode extends BaseMode {
 
     // Keyboard inputs
     this.cursors = this.scene.input.keyboard.createCursorKeys();
-    this.keys = this.scene.input.keyboard.addKeys('W,A,S,D,E,F');
-    
-    // Explicitly prevent Phaser from swallowing keystrokes, so HTML inputs work normally!
-    const keyCodes = Phaser.Input.Keyboard.KeyCodes;
-    this.scene.input.keyboard.removeCapture([
-      keyCodes.W, keyCodes.A, keyCodes.S, keyCodes.D,
-      keyCodes.E, keyCodes.F,
-      keyCodes.SPACE, keyCodes.UP, keyCodes.DOWN, keyCodes.LEFT, keyCodes.RIGHT
-    ]);
+    this.keys = this.scene.input.keyboard.addKeys('W,A,S,D,E,F,SPACE');
 
     // Create Mobile D-Pad
     this.createMobileControls();
@@ -246,172 +238,185 @@ export default class PlatformerMode extends BaseMode {
     });
   }
 
-  createMobileControls() {
-    // Robust check: render mobile controls if the device supports touch natively, 
-    // OR if screen is sufficiently narrow (like a developer simulating mobile on Desktop)
-    const isTouch = this.scene.sys.game.device.input.touch;
-    if (!isTouch && this.scene.scale.width > 1024) {
-      return;
-    }
-    
-    const controlStyle = {
-      fontFamily: 'Impact, Arial Black, sans-serif',
-      fontSize: '28px',
-      fontStyle: 'italic',
-      fontWeight: '900',
-      fill: '#ffffff',
-      stroke: '#000000',
-      strokeThickness: 5,
-      shadow: { offsetX: 3, offsetY: 3, color: '#000000', blur: 0, stroke: true, fill: true },
-      padding: { left: 10, right: 10, top: 10, bottom: 10 },
-      resolution: 3 // Forces high-DPI rendering to remove blur
+  generateMobileIcons() {
+    const iconSize = 64;
+    const h = iconSize / 2;
+
+    const makeIcon = (key, draw) => {
+      const g = this.scene.make.graphics({ add: false });
+      draw(g, h);
+      g.generateTexture(key, iconSize, iconSize);
+      g.destroy();
     };
 
-    this.uiContainer = this.scene.add.container(0, 0).setDepth(100).setScrollFactor(0);
+    // Jump: upward chevron arrow with base line
+    makeIcon('icon_jump', (g, c) => {
+      g.fillStyle(0xffffff, 1);
+      // Arrow head (chevron)
+      g.fillTriangle(c, c - 18, c - 16, c + 4, c + 16, c + 4);
+      // Arrow shaft
+      g.fillRect(c - 5, c + 4, 10, 18);
+      // Base line
+      g.fillRect(c - 12, c + 22, 24, 4);
+    });
 
-    // Left Button — track pointer ID for multitouch
-    this.btnLeft = this.scene.add.text(0, 0, '←', controlStyle)
-      .setOrigin(0, 0)
+    // Melee: sword shape (blade + crossguard)
+    makeIcon('icon_melee', (g, c) => {
+      g.fillStyle(0xffffff, 1);
+      // Blade
+      g.fillRect(c - 3, 4, 6, 30);
+      // Blade tip
+      g.fillTriangle(c - 8, 8, c + 8, 8, c, 2);
+      // Crossguard
+      g.fillRect(4, c - 3, iconSize - 8, 6);
+      // Handle
+      g.fillRect(c - 2, c + 5, 4, 14);
+    });
+
+    // Shoot: crosshair (+) with center dot
+    makeIcon('icon_shoot', (g, c) => {
+      g.fillStyle(0xffffff, 1);
+      g.fillRect(c - 3, 6, 6, 16);
+      g.fillRect(c - 3, h + 10, 6, 16);
+      g.fillRect(6, c - 3, 16, 6);
+      g.fillRect(h + 10, c - 3, 16, 6);
+      g.fillCircle(c, c, 4);
+    });
+
+    // Left / Right arrows (used inline in createMobileControls)
+  }
+
+  createMobileButton(x, y, textureKey, size, onPress, onRelease) {
+    const btn = this.scene.add.image(x, y, textureKey)
       .setDepth(100)
-      .setAlpha(0.6)
-      .setInteractive()
+      .setAlpha(0.65)
+      .setScale(size / 64)
+      .setInteractive({ useHandCursor: false })
       .on('pointerdown', (pointer, localX, localY, event) => {
         event.stopPropagation();
-        this.movingLeft = true;
-        this.leftPointerId = pointer.id;
-        this.btnLeft.setAlpha(1);
+        btn.setAlpha(1);
+        if (onPress) onPress(pointer);
       })
       .on('pointerup', (pointer) => {
+        btn.setAlpha(0.65);
+        if (onRelease) onRelease(pointer);
+      })
+      .on('pointerout', () => {
+        btn.setAlpha(0.65);
+      });
+
+    this.uiContainer.add(btn);
+    this.mobileControls.push(btn);
+    return btn;
+  }
+
+  createMobileControls() {
+    const isTouch = this.scene.sys.game.device.input.touch;
+    if (!isTouch && this.scene.scale.width > 1024) return;
+
+    this.generateMobileIcons();
+
+    this.uiContainer = this.scene.add.container(0, 0)
+      .setDepth(100)
+      .setScrollFactor(0);
+
+    // Left / Right buttons — use simple arrow images
+    const arrowSize = 64;
+    const makeArrowIcon = (key, dir) => {
+      const g = this.scene.make.graphics({ add: false });
+      g.fillStyle(0xffffff, 1);
+      const c = arrowSize / 2;
+      if (dir === 'left') {
+        g.fillTriangle(c + 12, c - 18, c + 12, c + 18, c - 16, c);
+      } else {
+        g.fillTriangle(c - 12, c - 18, c - 12, c + 18, c + 16, c);
+      }
+      g.generateTexture(key, arrowSize, arrowSize);
+      g.destroy();
+    };
+    makeArrowIcon('icon_arrow_left', 'left');
+    makeArrowIcon('icon_arrow_right', 'right');
+
+    const btnSize = 56;
+
+    this.btnLeft = this.createMobileButton(0, 0, 'icon_arrow_left', btnSize,
+      (pointer) => {
+        this.movingLeft = true;
+        this.leftPointerId = pointer.id;
+      },
+      (pointer) => {
         if (pointer.id === this.leftPointerId) {
           this.movingLeft = false;
           this.leftPointerId = null;
-          this.btnLeft.setAlpha(0.6);
         }
-      });
+      }
+    );
 
-    // Right Button — track pointer ID for multitouch
-    this.btnRight = this.scene.add.text(0, 0, '→', controlStyle)
-      .setOrigin(0, 0)
-      .setDepth(100)
-      .setAlpha(0.6)
-      .setInteractive()
-      .on('pointerdown', (pointer, localX, localY, event) => {
-        event.stopPropagation();
+    this.btnRight = this.createMobileButton(0, 0, 'icon_arrow_right', btnSize,
+      (pointer) => {
         this.movingRight = true;
         this.rightPointerId = pointer.id;
-        this.btnRight.setAlpha(1);
-      })
-      .on('pointerup', (pointer) => {
+      },
+      (pointer) => {
         if (pointer.id === this.rightPointerId) {
           this.movingRight = false;
           this.rightPointerId = null;
-          this.btnRight.setAlpha(0.6);
         }
-      });
+      }
+    );
 
-    // Jump Button
-    this.btnJump = this.scene.add.text(0, 0, '⤴', controlStyle)
-      .setOrigin(1, 0)
-      .setDepth(100)
-      .setAlpha(0.6)
-      .setInteractive()
-      .on('pointerdown', (pointer, localX, localY, event) => {
-        event.stopPropagation();
-        this.jump();
-        this.btnJump.setAlpha(1);
-      })
-      .on('pointerup', () => { this.btnJump.setAlpha(0.6); });
+    this.btnJump = this.createMobileButton(0, 0, 'icon_jump', btnSize,
+      () => this.jump()
+    );
 
-    // Melee Button
-    this.btnMelee = this.scene.add.text(0, 0, '⚔', controlStyle)
-      .setOrigin(1, 0)
-      .setDepth(100)
-      .setAlpha(0.6)
-      .setInteractive()
-      .on('pointerdown', (pointer, localX, localY, event) => {
-        event.stopPropagation();
-        this.melee();
-        this.btnMelee.setAlpha(1);
-      })
-      .on('pointerup', () => { this.btnMelee.setAlpha(0.6); });
+    this.btnMelee = this.createMobileButton(0, 0, 'icon_melee', btnSize,
+      () => this.melee()
+    );
 
-    // Shoot Button (if enabled)
     if (this.projectilesEnabled) {
-      this.btnShoot = this.scene.add.text(0, 0, '⦿', controlStyle)
-        .setOrigin(1, 0)
-        .setDepth(100)
-        .setAlpha(0.6)
-        .setInteractive()
-        .on('pointerdown', (pointer, localX, localY, event) => {
-          event.stopPropagation();
-          this.shoot();
-          this.btnShoot.setAlpha(1);
-        })
-        .on('pointerup', () => { this.btnShoot.setAlpha(0.6); });
+      this.btnShoot = this.createMobileButton(0, 0, 'icon_shoot', btnSize,
+        () => this.shoot()
+      );
     }
 
-    this.mobileControls.push(this.btnLeft, this.btnRight, this.btnJump, this.btnMelee);
-    if (this.btnShoot) this.mobileControls.push(this.btnShoot);
-    this.uiContainer.add(this.mobileControls);
     const camera = this.scene.cameras.main;
-    const viewWidth = camera.width;
-    const viewHeight = camera.height;
-    this.updateMobileControlSizing(viewWidth, viewHeight);
-    this.repositionMobileControls(viewWidth, viewHeight);
+    this.updateMobileControlSizing(camera.width, camera.height);
+    this.repositionMobileControls(camera.width, camera.height);
   }
 
   updateMobileControlSizing(screenWidth, screenHeight) {
     const minSide = Math.min(screenWidth, screenHeight);
-    // Bigger base for thumb-friendly touch targets
     const baseSize = Phaser.Math.Clamp(Math.round(minSide * 0.12), 44, 64);
-    const moveFont = Math.round(baseSize * 0.75);
-    const actionFont = Math.round(baseSize * 0.95);
-    const movePadding = Math.round(baseSize * 0.35);
-    const actionPadding = Math.round(baseSize * 0.3);
     const marginScreen = Math.round(baseSize * 0.45);
     const gapScreen = Math.round(baseSize * 0.3);
 
-    this.applyMobileControlStyles({ moveFont, actionFont, movePadding, actionPadding });
-
     this.mobileLayout = {
       marginScreen,
-      gapScreen
+      gapScreen,
+      targetSize: baseSize
     };
+
+    // Apply scale to all image-based buttons
+    const scale = baseSize / 64;
+    this.mobileControls.forEach((btn) => {
+      if (btn) btn.setScale(scale);
+    });
+
     this.refreshMobileHitAreas();
   }
 
-  applyMobileControlStyles({ moveFont, actionFont, movePadding, actionPadding }) {
-    const setTextStyle = (btn, fontSize, padding) => {
-      if (!btn) return;
-      btn.setFontSize(fontSize);
-      btn.setPadding(padding, padding, padding, padding);
-    };
-
-    setTextStyle(this.btnLeft, moveFont, movePadding);
-    setTextStyle(this.btnRight, moveFont, movePadding);
-    setTextStyle(this.btnJump, actionFont, actionPadding);
-    setTextStyle(this.btnMelee, actionFont, actionPadding);
-    if (this.btnShoot) setTextStyle(this.btnShoot, actionFont, actionPadding);
-  }
-
-
   refreshMobileHitAreas() {
-    const HIT_PAD = 12; // Extra touch area beyond the visible text
-    const setHitArea = (btn) => {
+    const HIT_PAD = 12;
+    this.mobileControls.forEach((btn) => {
       if (!btn) return;
-      const width = btn.displayWidth;
-      const height = btn.displayHeight;
+      const w = btn.displayWidth;
+      const h = btn.displayHeight;
+      btn.disableInteractive();
       btn.setInteractive(
-        new Phaser.Geom.Rectangle(-HIT_PAD, -HIT_PAD, width + HIT_PAD * 2, height + HIT_PAD * 2),
+        new Phaser.Geom.Rectangle(-w / 2 - HIT_PAD, -h / 2 - HIT_PAD, w + HIT_PAD * 2, h + HIT_PAD * 2),
         Phaser.Geom.Rectangle.Contains
       );
-    };
-
-    setHitArea(this.btnLeft);
-    setHitArea(this.btnRight);
-    setHitArea(this.btnJump);
-    setHitArea(this.btnMelee);
-    setHitArea(this.btnShoot);
+    });
   }
 
   repositionMobileControls(screenWidth, screenHeight) {
@@ -420,41 +425,38 @@ export default class PlatformerMode extends BaseMode {
     const safeLeftInset = window?.__pmSafeAreaLeft || 0;
     const safeTopInset = window?.__pmSafeAreaTop || 0;
 
-    const marginScreen = this.mobileLayout?.marginScreen || 28;
-    const gapScreen = this.mobileLayout?.gapScreen || 12;
-
-    const margin = marginScreen;
-    const gap = gapScreen;
+    const margin = this.mobileLayout?.marginScreen || 28;
+    const gap = this.mobileLayout?.gapScreen || 12;
+    const btnSize = this.mobileLayout?.targetSize || 64;
     const safeRight = safeRightInset + 12;
     const safeLeft = safeLeftInset + 12;
     const safeBottom = safeBottomInset + 12;
 
-    const leftBaseY = screenHeight - safeBottom - (this.btnLeft ? this.btnLeft.displayHeight : 0);
-    const leftBaseX = safeLeft + margin;
-    const moveGap = (this.btnLeft ? this.btnLeft.displayWidth : 0) + gap;
+    // ── Left side: movement buttons (origin 0.5) ──
+    const leftEdgeX = safeLeft + margin;
+    const bottomY = screenHeight - safeBottom - btnSize;
+    const centerY = bottomY + btnSize / 2;
 
-    if (this.btnLeft) this.btnLeft.setPosition(leftBaseX, leftBaseY);
-    if (this.btnRight) this.btnRight.setPosition(leftBaseX + moveGap, leftBaseY);
+    if (this.btnLeft) this.btnLeft.setPosition(leftEdgeX + btnSize / 2, centerY);
+    if (this.btnRight) this.btnRight.setPosition(leftEdgeX + btnSize + gap + btnSize / 2, centerY);
 
+    // ── Right side: action buttons, stacked on right edge ──
     const rightNudge = Math.round(gap * 0.6);
-    const rightBaseX = screenWidth - safeRight - margin + rightNudge;
-    const actionWidth = this.btnJump ? this.btnJump.displayWidth : 0;
-    const actionHeight = this.btnJump ? this.btnJump.displayHeight : 0;
-    const actionLeftX = rightBaseX - actionWidth - gap;
+    const rightEdgeX = screenWidth - safeRight - margin + rightNudge;
+    const bottomCenter = screenHeight - safeBottom - btnSize / 2;
+    const topCenter = bottomCenter - btnSize - gap;
 
-    const bottomRowY = screenHeight - safeBottom - actionHeight;
-    const topRowY = bottomRowY - actionHeight - gap;
+    if (this.btnJump) this.btnJump.setPosition(rightEdgeX - btnSize / 2, bottomCenter);
+    if (this.btnShoot) this.btnShoot.setPosition(rightEdgeX - btnSize - gap - btnSize / 2, bottomCenter);
+    if (this.btnMelee) this.btnMelee.setPosition(rightEdgeX - btnSize / 2, topCenter);
 
-    if (this.btnJump) this.btnJump.setPosition(rightBaseX, bottomRowY);
-    if (this.btnShoot) this.btnShoot.setPosition(actionLeftX, bottomRowY);
-    if (this.btnMelee) this.btnMelee.setPosition(rightBaseX, topRowY);
-
-    const topLimit = safeTopInset + margin;
-    if (topRowY < topLimit) {
-      const shift = topLimit - topRowY;
-      if (this.btnJump) this.btnJump.setY(bottomRowY + shift);
-      if (this.btnShoot) this.btnShoot.setY(bottomRowY + shift);
-      if (this.btnMelee) this.btnMelee.setY(topRowY + shift);
+    // Safety: ensure buttons don't overlap the top safe area
+    const topLimit = safeTopInset + margin + btnSize / 2;
+    if (topCenter < topLimit) {
+      const shift = topLimit - topCenter;
+      if (this.btnJump) this.btnJump.setY(bottomCenter + shift);
+      if (this.btnShoot) this.btnShoot.setY(bottomCenter + shift);
+      if (this.btnMelee) this.btnMelee.setY(topCenter + shift);
     }
   }
 
@@ -498,6 +500,9 @@ export default class PlatformerMode extends BaseMode {
     } else {
       player.setVelocityX(0);
     }
+
+    // Jump Input Polling
+    if (Phaser.Input.Keyboard.JustDown(this.keys.SPACE)) this.jump();
 
     // Combat Input Polling (keys)
     if (Phaser.Input.Keyboard.JustDown(this.keys.E)) this.melee();
@@ -554,7 +559,7 @@ export default class PlatformerMode extends BaseMode {
       if (!ptr || !ptr.isDown) {
         this.movingLeft = false;
         this.leftPointerId = null;
-        if (this.btnLeft) this.btnLeft.setAlpha(0.6);
+        if (this.btnLeft) this.btnLeft.setAlpha(0.65);
       }
     }
     if (this.rightPointerId != null) {
@@ -562,7 +567,7 @@ export default class PlatformerMode extends BaseMode {
       if (!ptr || !ptr.isDown) {
         this.movingRight = false;
         this.rightPointerId = null;
-        if (this.btnRight) this.btnRight.setAlpha(0.6);
+        if (this.btnRight) this.btnRight.setAlpha(0.65);
       }
     }
   }
