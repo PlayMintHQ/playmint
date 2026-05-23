@@ -7,6 +7,7 @@ import ScreenZero from './components/ScreenZero';
 import { GAME_PRESETS } from './gameConfig';
 import { parsePromptKeywords, generateTitle } from './game/promptUtils';
 import GameOverOverlay from './components/GameOverOverlay';
+import MobileControls from './components/MobileControls';
 
 const getInitialState = () => {
   if (typeof window !== 'undefined') {
@@ -46,13 +47,14 @@ function App() {
   const [gameOverData, setGameOverData] = useState(null);
   const [gameKey, setGameKey] = useState(0);
 
-  // Clean URL hash after importing config
+  // Detect touch device or narrow screen layout dynamically for mobile virtual D-pad
   useEffect(() => {
-    const hash = window.location.hash;
-    if (hash && hash.startsWith('#config=')) {
-      window.history.replaceState(null, '', window.location.pathname + window.location.search);
-    }
-    setIsTouchDevice('ontouchstart' in window || navigator.maxTouchPoints > 0);
+    const checkLayout = () => {
+      setIsTouchDevice('ontouchstart' in window || navigator.maxTouchPoints > 0 || window.innerWidth <= 1024);
+    };
+    checkLayout();
+    window.addEventListener('resize', checkLayout);
+    return () => window.removeEventListener('resize', checkLayout);
   }, []);
 
   // Global capture-phase keyboard event interceptor.
@@ -342,6 +344,15 @@ function App() {
               <GameComponent key={gameKey} isFullscreen={isFullscreen} />
             </div>
           </div>
+
+          {/* Premium Virtual Mobile Controls Overlay */}
+          {isTouchDevice && hasStarted && !isGameOver && (
+            <MobileControls
+              gameType={liveParams.gameType}
+              themeKey={liveParams.themeKey}
+              projectilesEnabled={!!liveParams.actionProjectileEnabled}
+            />
+          )}
 
           {!isTouchDevice && liveParams.gameType === 'runner' && (
             <div style={{ position: 'fixed', bottom: '30px', width: '100%', textAlign: 'center', zIndex: 10, pointerEvents: 'none' }}>

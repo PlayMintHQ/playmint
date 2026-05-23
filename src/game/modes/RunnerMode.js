@@ -37,8 +37,17 @@ export default class RunnerMode extends BaseMode {
     this.scene.physics.add.collider(this.obstacles, this.scene.floor);
     this.scene.physics.add.collider(this.scene.player, this.obstacles, this.scene.hitObstacle, null, this.scene);
 
-    // Create Mobile Controls (Jump button)
-    this.createMobileControls();
+    // Listen for custom virtual controls input events from the React overlay
+    this.gameInputListener = (e) => {
+      if (!e.detail) return;
+      const { action, state } = e.detail;
+      const isDown = state === 'down';
+      
+      if (action === 'jump' && isDown) {
+        this.scene.jump();
+      }
+    };
+    window.addEventListener('game-input', this.gameInputListener);
 
     this.resizeListener = (gameSize) => {
       if (this.resizeTimeout) clearTimeout(this.resizeTimeout);
@@ -323,9 +332,11 @@ export default class RunnerMode extends BaseMode {
     if (this.obstacles && this.obstacles.scene) {
       try { this.obstacles.clear(true, true); } catch (e) {}
     }
-    this.mobileControls.forEach(ctrl => {
-      if (ctrl && ctrl.scene) ctrl.destroy();
-    });
+    if (this.gameInputListener) {
+      window.removeEventListener('game-input', this.gameInputListener);
+      this.gameInputListener = null;
+    }
+
     this.mobileControls = [];
     if (this.uiContainer && this.uiContainer.scene) {
       this.uiContainer.destroy();

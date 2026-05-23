@@ -129,8 +129,25 @@ export default class PlatformerMode extends BaseMode {
     this.cursors = this.scene.input.keyboard.createCursorKeys();
     this.keys = this.scene.input.keyboard.addKeys('W,A,S,D,E,F,SPACE');
 
-    // Create Mobile D-Pad
-    this.createMobileControls();
+    // Listen for custom virtual controls input events from the React overlay
+    this.gameInputListener = (e) => {
+      if (!e.detail) return;
+      const { action, state } = e.detail;
+      const isDown = state === 'down';
+      
+      if (action === 'left') {
+        this.movingLeft = isDown;
+      } else if (action === 'right') {
+        this.movingRight = isDown;
+      } else if (action === 'jump' && isDown) {
+        this.jump();
+      } else if (action === 'melee' && isDown) {
+        this.melee();
+      } else if (action === 'shoot' && isDown) {
+        this.shoot();
+      }
+    };
+    window.addEventListener('game-input', this.gameInputListener);
 
     this.resizeListener = (gameSize) => {
       if (this.resizeTimeout) clearTimeout(this.resizeTimeout);
@@ -502,8 +519,6 @@ export default class PlatformerMode extends BaseMode {
       return;
     }
 
-    this.cleanupStaleTouchPointers();
-
     const { player } = this.scene;
     let isMoving = false;
 
@@ -801,9 +816,11 @@ export default class PlatformerMode extends BaseMode {
       try { this.meleeAttacks.clear(true, true); } catch (e) {}
     }
     
-    this.mobileControls.forEach(ctrl => {
-      if (ctrl && ctrl.scene) ctrl.destroy();
-    });
+    if (this.gameInputListener) {
+      window.removeEventListener('game-input', this.gameInputListener);
+      this.gameInputListener = null;
+    }
+
     this.mobileControls = [];
     if (this.uiContainer && this.uiContainer.scene) {
       this.uiContainer.destroy();

@@ -419,3 +419,96 @@ canvas {
   50% { opacity: 0.4; }
   100% { transform: translate(-12px, -20px) scale(1.3); opacity: 0.1; }
 }
+
+/* Premium Mobile Virtual Controls Overlay Styling */
+.pm-mobile-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 100;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  box-sizing: border-box;
+  padding: env(safe-area-inset-top, 20px) env(safe-area-inset-right, 20px) calc(env(safe-area-inset-bottom, 20px) + 12px) env(safe-area-inset-left, 20px);
+  width: 100%;
+  height: 100%;
+}
+
+.pm-mobile-dpad {
+  pointer-events: auto;
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+
+.pm-mobile-actions {
+  pointer-events: auto;
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+
+/* Beautiful Glassmorphic Touch Buttons */
+.pm-touch-btn {
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  width: 66px;
+  height: 66px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(18, 24, 37, 0.5);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: #ffffff;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35), inset 0 2px 4px rgba(255, 255, 255, 0.05);
+  cursor: pointer;
+  transition: transform 0.05s ease, background 0.1s ease, border-color 0.1s ease, box-shadow 0.1s ease;
+  padding: 0;
+  margin: 0;
+  outline: none;
+}
+
+/* Active Pressed Feedback */
+.pm-touch-btn:active {
+  transform: scale(0.9);
+  background: var(--theme-accent-semi, rgba(0, 229, 153, 0.25));
+  border-color: var(--theme-accent, #00E599);
+  box-shadow: 0 0 16px var(--theme-accent, #00E599), inset 0 1px 2px rgba(255, 255, 255, 0.1);
+}
+
+.pm-touch-btn svg {
+  width: 28px;
+  height: 28px;
+  fill: currentColor;
+  pointer-events: none;
+}
+
+/* Larger Action Button for Jump */
+.pm-touch-btn--jump {
+  width: 78px;
+  height: 78px;
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.pm-touch-btn--jump svg {
+  width: 32px;
+  height: 32px;
+}
+
+/* Combat buttons stacked/aligned layout styling */
+.pm-mobile-actions-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.pm-mobile-actions-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+}
