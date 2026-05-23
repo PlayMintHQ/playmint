@@ -120,7 +120,10 @@ function App() {
   }, []);
 
   const handleRestartGame = () => {
-    setGameKey(k => k + 1);
+    if (document.activeElement && typeof document.activeElement.blur === 'function') {
+      document.activeElement.blur();
+    }
+    setIsGameOver(false);
     window.dispatchEvent(new CustomEvent('restart-game'));
   };
 
@@ -220,13 +223,13 @@ function App() {
     setIsMenuOpen(false);
   };
 
-  // Automatically blur active input element when the game starts or config updates
+  // Automatically blur active input element when the game starts, config updates, or game restarts
   // to ensure keyboard focus shifts back to the game/body.
   useEffect(() => {
     if (document.activeElement && typeof document.activeElement.blur === 'function') {
       document.activeElement.blur();
     }
-  }, [hasStarted, presetKey, liveParams]);
+  }, [hasStarted, presetKey, liveParams, isGameOver]);
 
   const handleGoHome = () => {
     setHasStarted(false);
@@ -234,6 +237,10 @@ function App() {
   };
 
   const handlePromptGenerate = (promptText) => {
+    // Synchronously blur active elements immediately before closing menu / updating config
+    if (document.activeElement && typeof document.activeElement.blur === 'function') {
+      document.activeElement.blur();
+    }
     const raw = promptText.trim();
     if (!raw) return;
 
@@ -243,7 +250,7 @@ function App() {
     // No keywords matched — nothing to change
     if (result.keywordsMatched === 0) return;
 
-    // Start from current liveParams to preserve game state
+    // Start from current liveParams to preserve game state and context
     const updatedConfig = { ...liveParams };
 
     // Apply theme change (if detected)
@@ -275,9 +282,9 @@ function App() {
       updatedConfig.actionGravity = 600;
     }
 
-    // Generate title from prompt
+    // Generate title from prompt based on current mode
     const currentMode = currentGameType === 'platformer' ? 'action_quest' : 'standard';
-    updatedConfig.gameName = generateTitle(raw, currentMode, result.themeKey || updatedConfig.themeKey);
+    updatedConfig.gameName = generateTitle(raw, currentMode, updatedConfig.themeKey);
 
     // Apply — no full remount, let Phaser handle live update
     setPresetKey('custom');

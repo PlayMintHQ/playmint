@@ -190,6 +190,12 @@ const CreatorPanel = ({
 
   const handlePromptSubmit = () => {
     if (!promptText.trim() || !onPromptGenerate) return;
+    
+    // Immediately blur the text input field synchronously before closing/unmounting the panel
+    if (document.activeElement && typeof document.activeElement.blur === 'function') {
+      document.activeElement.blur();
+    }
+
     setPromptBusy(true);
     setTimeout(() => {
       onPromptGenerate(promptText.trim());

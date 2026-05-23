@@ -616,8 +616,8 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
           }
         }
         @media (max-height: 480px) {
-          .pm-screenzero-hero {
-            display: none !important;
+          .pm-screenzero-logo {
+            height: 20px !important;
           }
         }
         @media (max-height: 600px) {

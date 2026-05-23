@@ -15,7 +15,7 @@ const GameSelectorModal = ({ isOpen, presetKey, onSelectPreset, onClose }) => {
   };
 
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 11000, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '60px 20px', overflowY: 'auto', background: 'rgba(11, 14, 20, 0.95)', backdropFilter: 'blur(10px)' }}>
+    <div style={{ position: 'fixed', inset: 0, zIndex: 11000, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '60px 20px', overflowY: 'auto', background: 'rgba(11, 14, 20, 0.95)', backdropFilter: 'blur(10px)', pointerEvents: 'auto' }}>
       <img src="/assets/Logo_PlayMint_(transparent).png" alt="PlayMint" style={{ height: '40px', marginBottom: '30px' }} />
       <h2 className="pm-heading" style={{ color: '#fff', fontSize: 'clamp(24px, 5vw, 36px)', margin: '0 0 40px 0', fontFamily: 'var(--font-game)', letterSpacing: '2px' }}>SELECT MODE</h2>
       

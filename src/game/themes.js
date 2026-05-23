@@ -113,7 +113,8 @@ export const THEMES = {
     ],
     floorHeight: 48,
     floorTileScale: 2.0,
-    collectibleTexture: 'crate',
+    collectibleTexture: 'fox',
+    collectibleAnim: 'star_spin',
     obstacleTexture: 'city_tile',
     moveSpeed: 330,
     jumpForce: 600,
@@ -123,7 +124,8 @@ export const THEMES = {
     platformHeight: 32,
     spawnX: 150,
     spawnY: -250,
-    enemyTexture: 'dude',
+    enemyTexture: 'fox',
+    enemyAnim: 'slug_walk',
     playerType: 'dude'
   },
   space: {
@@ -139,7 +141,8 @@ export const THEMES = {
     ],
     floorHeight: 48,
     floorTileScale: 2.0,
-    collectibleTexture: 'crate',
+    collectibleTexture: 'fox',
+    collectibleAnim: 'star_spin',
     obstacleTexture: 'space_tile',
     moveSpeed: 280,
     jumpForce: 500,
@@ -149,8 +152,9 @@ export const THEMES = {
     platformHeight: 32,
     spawnX: 150,
     spawnY: -250,
-    enemyTexture: 'dude',
-    playerType: 'dude'
+    enemyTexture: 'fox',
+    enemyAnim: 'yeti_walk',
+    playerType: 'fox'
   }
 };
 

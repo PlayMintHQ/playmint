@@ -95,7 +95,8 @@ const GameOverOverlay = ({ isWin, score, themeKey, gameType, onRestart, onTweakS
       backdropFilter: 'blur(16px)',
       WebkitBackdropFilter: 'blur(16px)',
       animation: 'fadeIn 0.35s ease-out',
-      boxSizing: 'border-box'
+      boxSizing: 'border-box',
+      pointerEvents: 'auto'
     }}>
       {/* Dynamic Keyframes Injection */}
       <style>{`
