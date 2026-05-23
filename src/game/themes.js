@@ -44,8 +44,9 @@ export const THEMES = {
     platformHeight: 32,
     spawnX: 150,
     spawnY: -250,
-    enemyTexture: 'dude',
-    playerType: 'dude'
+    enemyTexture: 'fox',
+    enemyAnim: 'yeti_walk',
+    playerType: 'fox'
   },
   ice: {
     key: 'ice',
@@ -71,8 +72,8 @@ export const THEMES = {
     spawnX: 150,
     spawnY: -200,
     enemyTexture: 'fox',
-    enemyAnim: 'yeti_walk',
-    playerType: 'fox'
+    enemyAnim: 'fox_run',
+    playerType: 'yeti'
   },
   forest: {
     key: 'forest',

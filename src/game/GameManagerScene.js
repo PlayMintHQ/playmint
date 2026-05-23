@@ -247,12 +247,19 @@ export default class GameManagerScene extends Phaser.Scene {
     const playerYOffset = 150;
     const playerX = 150;
     const playerType = this.activeTheme.playerType || 'dude';
-    this.player = this.physics.add.sprite(playerX, this.LOGICAL_FLOOR_Y - playerYOffset, playerType);
-    this.player.setScale(this.gameConfig.playerScale || (playerType === 'fox' ? 1.8 : 1.5));
-    // Theme-based character tint
-    if (this.activeTheme?.playerTint) {
-      this.player.setTint(this.activeTheme.playerTint);
+    
+    let playerTexture = playerType;
+    let playerFrame = undefined;
+    if (playerType === 'yeti') {
+      playerTexture = 'fox';
+      playerFrame = 'yeti-1';
+    } else if (playerType === 'fox') {
+      playerTexture = 'fox';
+      playerFrame = 'idle-1';
     }
+    
+    this.player = this.physics.add.sprite(playerX, this.LOGICAL_FLOOR_Y - playerYOffset, playerTexture, playerFrame);
+    this.player.setScale(this.gameConfig.playerScale || (playerType === 'fox' || playerType === 'yeti' ? 1.8 : 1.5));
     this.physics.add.collider(this.player, this.floor);
 
     // Core game mode handling
@@ -494,6 +501,16 @@ export default class GameManagerScene extends Phaser.Scene {
         this.player.play('fox_idle', true);
       } else if (animName === 'jump') {
         this.player.play('fox_jump', true);
+      }
+    } else if (playerType === 'yeti') {
+      if (animName === 'run') {
+        this.player.play('yeti_walk', true);
+      } else if (animName === 'idle') {
+        this.player.anims.stop();
+        this.player.setFrame('yeti-1');
+      } else if (animName === 'jump') {
+        this.player.anims.stop();
+        this.player.setFrame('yeti-6');
       }
     } else {
       // dude

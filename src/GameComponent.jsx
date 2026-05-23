@@ -6,6 +6,12 @@ const GameComponent = ({ isFullscreen }) => {
   const gameRef = useRef(null);
 
   useEffect(() => {
+    // Synchronously blur any active element from React UI inputs/buttons before game mounts
+    // to prevent browser "dead focus" states that trap keyboard spacebar inputs.
+    if (document.activeElement && typeof document.activeElement.blur === 'function') {
+      document.activeElement.blur();
+    }
+
     // Start the game instance once. Live tuning is handled via events.
     gameRef.current = startGame(gameContainerRef.current);
 

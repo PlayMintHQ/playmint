@@ -44,7 +44,7 @@ export default class RunnerMode extends BaseMode {
       const isDown = state === 'down';
       
       if (action === 'jump' && isDown) {
-        this.scene.jump();
+        this.jump();
       }
     };
     window.addEventListener('game-input', this.gameInputListener);

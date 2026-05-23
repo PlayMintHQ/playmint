@@ -329,7 +329,12 @@ function App() {
 
             <CreatorPanel
               isOpen={isMenuOpen}
-              onClose={() => setIsMenuOpen(false)}
+              onClose={() => {
+                if (document.activeElement && typeof document.activeElement.blur === 'function') {
+                  document.activeElement.blur();
+                }
+                setIsMenuOpen(false);
+              }}
               onOpenSelector={handleOpenSelector}
               liveParams={liveParams}
               setLiveParams={setLiveParams}
@@ -383,7 +388,12 @@ function App() {
         isOpen={isSelectorOpen}
         presetKey={presetKey}
         onSelectPreset={applyPreset}
-        onClose={() => setIsSelectorOpen(false)}
+        onClose={() => {
+          if (document.activeElement && typeof document.activeElement.blur === 'function') {
+            document.activeElement.blur();
+          }
+          setIsSelectorOpen(false);
+        }}
       />
 
       {/* ScreenZero rendered if NOT started */}
