@@ -293,91 +293,98 @@ function App() {
   };
 
   return (
-    <div ref={fullscreenContainerRef} style={{ position: 'relative', width: '100%', minHeight: '100dvh', overflow: 'hidden' }}>
+    <div ref={fullscreenContainerRef} style={{ position: 'relative', width: '100%', height: '100dvh', overflow: 'hidden' }}>
       
       {/* Game view rendered if started OR if transitioning */}
+      {/* Game view rendered if started OR if transitioning */}
       {(hasStarted || isTransitioning) && (
-        <div style={{
-          position: 'absolute',
-          inset: 0,
-          opacity: 1,
-          zIndex: 1,
-          pointerEvents: 'none'
-        }}>
-          {isGameOver && gameOverData && (
-            <GameOverOverlay
-              isWin={gameOverData.isWin}
-              score={gameOverData.score}
-              themeKey={gameOverData.themeKey}
-              gameType={gameOverData.gameType}
-              onRestart={handleRestartGame}
-              onTweakSettings={handleTweakSettings}
-            />
-          )}
-          <GameSelectorModal
-            isOpen={isSelectorOpen}
-            presetKey={presetKey}
-            onSelectPreset={applyPreset}
-            onClose={() => setIsSelectorOpen(false)}
-          />
-
-          <HudHeader
-            liveParams={liveParams}
-            score={score}
-            isFullscreen={isFullscreen}
-            isFullscreenSupported={isFullscreenSupported}
-            onFullscreen={handleFullscreen}
-            onExitFullscreen={handleExitFullscreen}
-            onMenuOpen={() => setIsMenuOpen(true)}
-            onLogoClick={handleReopenPrompt}
-          />
-
-          <CreatorPanel
-            isOpen={isMenuOpen}
-            onClose={() => setIsMenuOpen(false)}
-            onOpenSelector={handleOpenSelector}
-            liveParams={liveParams}
-            setLiveParams={setLiveParams}
-            presetKey={presetKey}
-            setPresetKey={setPresetKey}
-            onSliderChange={handleSliderChange}
-            onPromptGenerate={handlePromptGenerate}
-            onHomeClick={handleGoHome}
-          />
-
-          {/* Main Game Container */}
-          <div style={{ position: 'absolute', inset: 0, display: 'flex', justifyContent: 'center', alignItems: 'center', pointerEvents: 'auto' }}>
+        <>
+          {/* Main Game Container - Rendered at zIndex: 0 */}
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 0 }}>
             <div style={{ width: '100%', height: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
               <GameComponent key={gameKey} isFullscreen={isFullscreen} />
             </div>
           </div>
 
-          {/* Premium Virtual Mobile Controls Overlay */}
-          {isTouchDevice && hasStarted && !isGameOver && (
-            <MobileControls
-              gameType={liveParams.gameType}
-              themeKey={liveParams.themeKey}
-              projectilesEnabled={!!liveParams.actionProjectileEnabled}
+          {/* Premium UI Overlay Layer - Rendered at zIndex: 1 */}
+          <div style={{
+            position: 'absolute',
+            inset: 0,
+            height: '100%',
+            width: '100%',
+            opacity: 1,
+            zIndex: 1,
+            pointerEvents: 'none'
+          }}>
+            <HudHeader
+              liveParams={liveParams}
+              score={score}
+              isFullscreen={isFullscreen}
+              isFullscreenSupported={isFullscreenSupported}
+              onFullscreen={handleFullscreen}
+              onExitFullscreen={handleExitFullscreen}
+              onMenuOpen={() => setIsMenuOpen(true)}
+              onLogoClick={handleReopenPrompt}
             />
-          )}
 
-          {!isTouchDevice && liveParams.gameType === 'runner' && (
-            <div style={{ position: 'fixed', bottom: '30px', width: '100%', textAlign: 'center', zIndex: 10, pointerEvents: 'none' }}>
-              <p style={{ margin: 0, color: 'var(--pm-text-secondary)', fontSize: '14px', background: 'var(--pm-bg-panel)', padding: '8px 16px', display: 'inline-block', borderRadius: '20px', border: '1px solid var(--pm-border)', boxShadow: 'var(--pm-shadow-panel)' }}>
-                Press <span style={{ background: 'var(--pm-bg-input)', padding: '2px 8px', borderRadius: '4px', color: 'var(--pm-accent-teal)', fontFamily: 'monospace', fontWeight: 'bold' }}>SPACE</span> to jump
-              </p>
-            </div>
-          )}
+            <CreatorPanel
+              isOpen={isMenuOpen}
+              onClose={() => setIsMenuOpen(false)}
+              onOpenSelector={handleOpenSelector}
+              liveParams={liveParams}
+              setLiveParams={setLiveParams}
+              presetKey={presetKey}
+              setPresetKey={setPresetKey}
+              onSliderChange={handleSliderChange}
+              onPromptGenerate={handlePromptGenerate}
+              onHomeClick={handleGoHome}
+            />
 
-          {!isTouchDevice && liveParams.gameType === 'platformer' && (
-            <div style={{ position: 'fixed', bottom: '30px', width: '100%', textAlign: 'center', zIndex: 10, pointerEvents: 'none' }}>
-              <p style={{ margin: 0, color: 'var(--pm-text-secondary)', fontSize: '14px', background: 'var(--pm-bg-panel)', padding: '8px 16px', display: 'inline-block', borderRadius: '20px', border: '1px solid var(--pm-border)', boxShadow: 'var(--pm-shadow-panel)' }}>
-                <span style={{ background: 'var(--pm-bg-input)', padding: '2px 8px', borderRadius: '4px', color: 'var(--pm-accent-teal)', fontFamily: 'monospace', fontWeight: 'bold' }}>WASD / Arrows</span> Move · <span style={{ background: 'var(--pm-bg-input)', padding: '2px 8px', borderRadius: '4px', color: 'var(--pm-accent-teal)', fontFamily: 'monospace', fontWeight: 'bold' }}>SPACE</span> Jump · <span style={{ background: 'var(--pm-bg-input)', padding: '2px 8px', borderRadius: '4px', color: 'var(--pm-accent-purple)', fontFamily: 'monospace', fontWeight: 'bold' }}>E</span> Melee{liveParams.actionProjectileEnabled ? <> · <span style={{ background: 'var(--pm-bg-input)', padding: '2px 8px', borderRadius: '4px', color: 'var(--pm-accent-orange)', fontFamily: 'monospace', fontWeight: 'bold' }}>F</span> Shoot</> : ''}
-              </p>
-            </div>
-          )}
-        </div>
+            {/* Premium Virtual Mobile Controls Overlay */}
+            {isTouchDevice && hasStarted && !isGameOver && (
+              <MobileControls
+                gameType={liveParams.gameType}
+                themeKey={liveParams.themeKey}
+                projectilesEnabled={!!liveParams.actionProjectileEnabled}
+              />
+            )}
+
+            {!isTouchDevice && liveParams.gameType === 'runner' && (
+              <div style={{ position: 'fixed', bottom: '30px', width: '100%', textAlign: 'center', zIndex: 10, pointerEvents: 'none' }}>
+                <p style={{ margin: 0, color: 'var(--pm-text-secondary)', fontSize: '14px', background: 'var(--pm-bg-panel)', padding: '8px 16px', display: 'inline-block', borderRadius: '20px', border: '1px solid var(--pm-border)', boxShadow: 'var(--pm-shadow-panel)' }}>
+                  Press <span style={{ background: 'var(--pm-bg-input)', padding: '2px 8px', borderRadius: '4px', color: 'var(--pm-accent-teal)', fontFamily: 'monospace', fontWeight: 'bold' }}>SPACE</span> to jump
+                </p>
+              </div>
+            )}
+
+            {!isTouchDevice && liveParams.gameType === 'platformer' && (
+              <div style={{ position: 'fixed', bottom: '30px', width: '100%', textAlign: 'center', zIndex: 10, pointerEvents: 'none' }}>
+                <p style={{ margin: 0, color: 'var(--pm-text-secondary)', fontSize: '14px', background: 'var(--pm-bg-panel)', padding: '8px 16px', display: 'inline-block', borderRadius: '20px', border: '1px solid var(--pm-border)', boxShadow: 'var(--pm-shadow-panel)' }}>
+                  <span style={{ background: 'var(--pm-bg-input)', padding: '2px 8px', borderRadius: '4px', color: 'var(--pm-accent-teal)', fontFamily: 'monospace', fontWeight: 'bold' }}>WASD / Arrows</span> Move · <span style={{ background: 'var(--pm-bg-input)', padding: '2px 8px', borderRadius: '4px', color: 'var(--pm-accent-teal)', fontFamily: 'monospace', fontWeight: 'bold' }}>SPACE</span> Jump · <span style={{ background: 'var(--pm-bg-input)', padding: '2px 8px', borderRadius: '4px', color: 'var(--pm-accent-purple)', fontFamily: 'monospace', fontWeight: 'bold' }}>E</span> Melee{liveParams.actionProjectileEnabled ? <> · <span style={{ background: 'var(--pm-bg-input)', padding: '2px 8px', borderRadius: '4px', color: 'var(--pm-accent-orange)', fontFamily: 'monospace', fontWeight: 'bold' }}>F</span> Shoot</> : ''}
+                </p>
+              </div>
+            )}
+          </div>
+        </>
       )}
+
+      {/* Overlays rendered directly in App to avoid mobile Safari pointer-events and rotation clipping bugs */}
+      {isGameOver && gameOverData && (
+        <GameOverOverlay
+          isWin={gameOverData.isWin}
+          score={gameOverData.score}
+          themeKey={gameOverData.themeKey}
+          gameType={gameOverData.gameType}
+          onRestart={handleRestartGame}
+          onTweakSettings={handleTweakSettings}
+        />
+      )}
+      <GameSelectorModal
+        isOpen={isSelectorOpen}
+        presetKey={presetKey}
+        onSelectPreset={applyPreset}
+        onClose={() => setIsSelectorOpen(false)}
+      />
 
       {/* ScreenZero rendered if NOT started */}
       {!hasStarted && (

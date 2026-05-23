@@ -198,7 +198,7 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
       zIndex: 9999,
       overflowY: 'auto',
       overflowX: 'hidden',
-      padding: 'clamp(24px, 5vh, 64px) 0',
+      padding: 'clamp(24px, 5vh, 64px) clamp(16px, 4vw, 24px)',
       boxSizing: 'border-box',
       opacity: transitionPhase === 'fading' ? 0 : 1,
       transition: 'opacity 1.0s ease-in-out'
