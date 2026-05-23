@@ -434,7 +434,7 @@ export default class PlatformerMode extends BaseMode {
       const h = btn.height;
       btn.disableInteractive();
       btn.setInteractive(
-        new Phaser.Geom.Rectangle(-w / 2 - HIT_PAD, -h / 2 - HIT_PAD, w + HIT_PAD * 2, h + HIT_PAD * 2),
+        new Phaser.Geom.Rectangle(-HIT_PAD, -HIT_PAD, w + HIT_PAD * 2, h + HIT_PAD * 2),
         Phaser.Geom.Rectangle.Contains
       );
     });
