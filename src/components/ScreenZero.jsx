@@ -111,7 +111,7 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay }) => {
     applyDifficulty(config, mode);
     
     config.gameName = mode === 'action_quest' ? 'Random Quest' : 'Random Runner';
-    const themePool = ['forest', 'lava', 'ice', 'default'];
+    const themePool = ['forest', 'lava', 'ice', 'city', 'space', 'default'];
     config.themeKey = themePool[Math.floor(Math.random() * themePool.length)];
     
     showToast(message);
@@ -223,9 +223,11 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay }) => {
 
       {/* ===== MIDDLE: Logo + Slogan ===== */}
       <div style={{
-        position: 'absolute', top: '50%', left: '50%',
-        transform: 'translate(-50%, -50%)',
-        zIndex: 3, textAlign: 'center',
+        flex: 1,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        position: 'relative',
+        width: '100%',
+        zIndex: 3,
         pointerEvents: 'none',
         animation: transitionPhase === 'idle' ? 'sloganFade 0.8s ease-out' : undefined
       }}>
@@ -249,7 +251,7 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay }) => {
       </div>
 
       {/* ===== BOTTOM: Prompt dock ===== */}
-      <div style={{
+      <div className="pm-screenzero-dock" style={{
         width: '100%',
         marginTop: 'auto',
         padding: '0 clamp(16px, 4vw, 48px) clamp(24px, 4vh, 48px)',
@@ -262,8 +264,10 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay }) => {
         pointerEvents: transitionPhase === 'done' ? 'none' : undefined,
         transition: 'all 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)'
       }}>
-        <div ref={formRef} style={{
+        <div ref={formRef} className="pm-screenzero-content" style={{
           width: 'min(640px, 100%)',
+          maxHeight: 'min(60vh, 500px)',
+          overflowY: 'auto',
           transition: 'all 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)',
           transform: transitionPhase === 'expanding' ? 'scale(1.6)' : 'scale(1)',
           opacity: transitionPhase === 'expanding' ? 0 : 1
@@ -400,7 +404,7 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay }) => {
           </div>
 
           <div className="pm-screenzero-chips" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '14px', justifyContent: 'center' }}>
-            {['lava runner', 'ice quest', 'forest sprint'].map((example, i) => (
+            {['lava runner', 'ice quest', 'forest sprint', 'city runner', 'space quest'].map((example, i) => (
               <button
                 key={i}
                 type="button"
@@ -457,8 +461,8 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay }) => {
             100% { opacity: 1; transform: translateY(0); }
           }
           @keyframes sloganFade {
-            0% { opacity: 0; transform: translate(-50%, -40%); }
-            100% { opacity: 1; transform: translate(-50%, -50%); }
+            0% { opacity: 0; transform: translateY(10px); }
+            100% { opacity: 1; transform: translateY(0); }
           }
           @media (max-width: 640px) {
             .pm-screenzero-form {
@@ -479,6 +483,27 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay }) => {
             .pm-screenzero-chips {
               display: none;
             }
+          }
+          @media (max-height: 600px) {
+            .pm-screenzero-dock {
+              padding-bottom: 12px;
+            }
+            .pm-screenzero-modes {
+              margin-top: 8px;
+            }
+            .pm-screenzero-chips {
+              margin-top: 6px;
+            }
+          }
+          .pm-screenzero-content::-webkit-scrollbar {
+            width: 4px;
+          }
+          .pm-screenzero-content::-webkit-scrollbar-track {
+            background: transparent;
+          }
+          .pm-screenzero-content::-webkit-scrollbar-thumb {
+            background: rgba(255,255,255,0.15);
+            border-radius: 4px;
           }
         `}</style>
     </div>

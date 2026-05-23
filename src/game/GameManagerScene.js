@@ -44,6 +44,18 @@ export default class GameManagerScene extends Phaser.Scene {
     this.load.image('winter_bg_3', 'assets/themes/winter/bg-3.png');
     this.load.image('winter_ground_1', 'assets/themes/winter/winter_ground_1.png');
     this.load.image('pine_snow', 'assets/themes/winter/pine-snow.gif');
+    // City theme
+    this.load.image('city_ground', 'assets/themes/city/city_tile.png');
+    this.load.image('city_tile', 'assets/themes/city/city_tile.png');
+    this.load.image('city_bg_far', 'assets/themes/city/bg_far.png');
+    this.load.image('city_bg_mid', 'assets/themes/city/bg_mid.png');
+    this.load.image('city_bg_near', 'assets/themes/city/bg_near.png');
+    // Space theme
+    this.load.image('space_ground', 'assets/scifi_tileset.png');
+    this.load.image('space_tile', 'assets/scifi_tileset.png');
+    this.load.image('space_bg_stars', 'assets/themes/space/bg_stars.png');
+    this.load.image('space_bg_nebula', 'assets/themes/space/bg_nebula.png');
+    this.load.image('space_bg_planet', 'assets/themes/space/bg_planet.png');
   }
 
   init(data) {
@@ -194,7 +206,7 @@ export default class GameManagerScene extends Phaser.Scene {
     this.input.on('pointerdown', (pointer) => {
       if (this.isGameOver) {
         this.scene.restart();
-      } else {
+      } else if (this.gameConfig.gameType === 'runner') {
         this.gameModeManager.jump();
       }
     }, this);
@@ -394,7 +406,9 @@ export default class GameManagerScene extends Phaser.Scene {
     const tints = {
       lava: '#FF6B3D',
       ice: '#66AAFF',
-      forest: '#66CC66'
+      forest: '#66CC66',
+      city: '#4488CC',
+      space: '#AA66FF'
     };
     return tints[this.activeTheme?.key] || '#00E599';
   }

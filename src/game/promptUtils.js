@@ -28,6 +28,12 @@ export function parsePromptKeywords(text) {
   } else if (lower.match(/(forest|jungle|wood|trees|verdant)/)) {
     themeKey = 'forest';
     keywordsMatched++;
+  } else if (lower.match(/(city|urban|town|building|skyscraper|street|sidewalk|neon)/)) {
+    themeKey = 'city';
+    keywordsMatched++;
+  } else if (lower.match(/(space|cosmic|galaxy|nebula|planet|asteroid|star|solar|alien)/)) {
+    themeKey = 'space';
+    keywordsMatched++;
   }
 
   if (lower.match(/(fast|speed|quick|rush)/)) {
@@ -63,6 +69,8 @@ export function generateTitle(text, mode, themeKey) {
     lava: ['Ashfall', 'Molten', 'Cinder', 'Inferno', 'Ember', 'Scorch'],
     ice: ['Glacier', 'Frost', 'Arctic', 'Snowfall', 'Permafrost', 'Hoarfrost'],
     forest: ['Verdant', 'Wildwood', 'Grove', 'Emerald', 'Fern', 'Canopy'],
+    city: ['Urban', 'Metro', 'Concrete', 'Skyline', 'Asphalt', 'Neon'],
+    space: ['Stellar', 'Cosmic', 'Astral', 'Orbit', 'Nebula', 'Void'],
     default: ['Prime', 'Core', 'Nova', 'Omega', 'Apex', 'Flux'],
   };
   const modeWords =

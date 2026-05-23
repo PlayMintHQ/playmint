@@ -301,6 +301,10 @@ export default class PlatformerMode extends BaseMode {
         btn.setAlpha(0.65);
         if (onRelease) onRelease(pointer);
       })
+      .on('pointerupoutside', (pointer) => {
+        btn.setAlpha(0.65);
+        if (onRelease) onRelease(pointer);
+      })
       .on('pointerout', () => {
         btn.setAlpha(0.65);
       });
@@ -409,8 +413,10 @@ export default class PlatformerMode extends BaseMode {
     const HIT_PAD = 12;
     this.mobileControls.forEach((btn) => {
       if (!btn) return;
-      const w = btn.displayWidth;
-      const h = btn.displayHeight;
+      // Use unscaled dimensions (btn.width & btn.height) for custom hit area shapes.
+      // Phaser applies the scale factor to custom hit areas automatically during input detection.
+      const w = btn.width;
+      const h = btn.height;
       btn.disableInteractive();
       btn.setInteractive(
         new Phaser.Geom.Rectangle(-w / 2 - HIT_PAD, -h / 2 - HIT_PAD, w + HIT_PAD * 2, h + HIT_PAD * 2),

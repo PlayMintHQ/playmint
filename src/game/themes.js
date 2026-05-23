@@ -93,6 +93,56 @@ export const THEMES = {
     spawnX: 48,
     spawnY: -48,
     enemyTexture: 'pine_snow'
+  },
+  city: {
+    key: 'city',
+    label: 'City',
+    floorTexture: 'city_ground',
+    platformTexture: 'city_tile',
+    playerTint: 0x4488cc,
+    backgroundLayers: [
+      { key: 'city_bg_far', speed: 0.02, scale: 1.0, alpha: 0.85 },
+      { key: 'city_bg_mid', speed: 0.1, scale: 1.0, alpha: 0.9 },
+      { key: 'city_bg_near', speed: 0.3, scale: 1.0, alpha: 1.0 }
+    ],
+    floorHeight: 48,
+    floorTileScale: 2.0,
+    collectibleTexture: 'crate',
+    obstacleTexture: 'city_tile',
+    moveSpeed: 330,
+    jumpForce: 600,
+    gravity: 1600,
+    worldWidth: 4000,
+    tileWidth: 32,
+    platformHeight: 32,
+    spawnX: 150,
+    spawnY: -250,
+    enemyTexture: 'dude'
+  },
+  space: {
+    key: 'space',
+    label: 'Space',
+    floorTexture: 'space_ground',
+    platformTexture: 'space_tile',
+    playerTint: 0xaa66ff,
+    backgroundLayers: [
+      { key: 'space_bg_stars', speed: 0.005, scale: 1.0, alpha: 1.0 },
+      { key: 'space_bg_nebula', speed: 0.02, scale: 1.0, alpha: 0.8 },
+      { key: 'space_bg_planet', speed: 0.08, scale: 1.0, alpha: 0.7 }
+    ],
+    floorHeight: 48,
+    floorTileScale: 2.0,
+    collectibleTexture: 'crate',
+    obstacleTexture: 'space_tile',
+    moveSpeed: 280,
+    jumpForce: 500,
+    gravity: 800,
+    worldWidth: 4000,
+    tileWidth: 64,
+    platformHeight: 32,
+    spawnX: 150,
+    spawnY: -250,
+    enemyTexture: 'dude'
   }
 };
 
