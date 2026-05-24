@@ -253,7 +253,11 @@ export default class PlatformerMode extends BaseMode {
       if (!p.hasEnemy && index % 2 === 0) {
         const collectible = this.collectibles.create(p.x, p.y - 80, collectibleTexture);
         if (collectibleTexture === 'fox') {
-          collectible.play('star_spin', true);
+          if (this.scene.anims.exists('star_spin')) {
+            collectible.play('star_spin', true);
+          } else {
+            collectible.setFrame('idle-1');
+          }
           collectible.setScale(1.5); // stars are 16x16, scale to 24px
         } else {
           collectible.setScale(0.5);
@@ -507,7 +511,7 @@ export default class PlatformerMode extends BaseMode {
   }
 
   update(time, delta) {
-    if (this.scene.isGameOver) return;
+    if (this.scene.isGameOver || this.scene.isGamePaused) return;
 
     if (this.isInputFocused()) {
       this.scene.player.setVelocityX(0);
@@ -522,17 +526,35 @@ export default class PlatformerMode extends BaseMode {
     const { player } = this.scene;
     let isMoving = false;
 
-    // Movement Logic
+    // Movement Logic with organic acceleration and friction deceleration
+    const accel = 1200;      // px/s^2 acceleration rate
+    const drag = 1600;       // px/s^2 friction/drag rate
+    const dt = delta / 1000; // delta time in seconds
+
     if (this.cursors.left.isDown || this.keys.A.isDown || this.movingLeft) {
-      player.setVelocityX(-this.moveSpeed);
+      let vx = player.body.velocity.x;
+      vx = Math.max(-this.moveSpeed, vx - accel * dt);
+      player.setVelocityX(vx);
       player.setFlipX(true);
       isMoving = true;
     } else if (this.cursors.right.isDown || this.keys.D.isDown || this.movingRight) {
-      player.setVelocityX(this.moveSpeed);
+      let vx = player.body.velocity.x;
+      vx = Math.min(this.moveSpeed, vx + accel * dt);
+      player.setVelocityX(vx);
       player.setFlipX(false);
       isMoving = true;
     } else {
-      player.setVelocityX(0);
+      // Smooth friction drag deceleration when active steering input is released
+      let vx = player.body.velocity.x;
+      if (vx > 0) {
+        vx = Math.max(0, vx - drag * dt);
+      } else if (vx < 0) {
+        vx = Math.min(0, vx + drag * dt);
+      }
+      player.setVelocityX(vx);
+      if (vx !== 0) {
+        isMoving = true; // Still drifting, keep playing the movement animation
+      }
     }
 
     // Jump Input Polling
@@ -767,11 +789,15 @@ export default class PlatformerMode extends BaseMode {
       
       if (enemyTexture === 'fox') {
         enemy.setScale(1.5);
+        enemy.body.setSize(24, 25);
+        enemy.body.setOffset(14, 18);
         const enemyAnim = theme?.enemyAnim || 'slug_walk';
         enemy.play(enemyAnim, true);
       } else {
         enemy.setFrame(5);
         enemy.setTint(0xff0000);
+        enemy.body.setSize(20, 42);
+        enemy.body.setOffset(6, 6);
       }
       
       enemy.setVelocityX(50);

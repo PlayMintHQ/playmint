@@ -95,7 +95,7 @@ export default class RunnerMode extends BaseMode {
   }
 
   update(time, delta) {
-    if (this.scene.isGameOver) return;
+    if (this.scene.isGameOver || this.scene.isGamePaused) return;
 
     // Check keyboard jump if input is not focused
     const spaceJustDown = (this.keys?.SPACE && Phaser.Input.Keyboard.JustDown(this.keys.SPACE)) || 

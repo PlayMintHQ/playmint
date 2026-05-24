@@ -101,6 +101,11 @@ function App() {
     return () => window.removeEventListener('update-score', handleScoreUpdate);
   }, []);
 
+  // Dispatch pause game custom event to Phaser when the Creator Panel opens/closes
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('toggle-pause-game', { detail: { isPaused: isMenuOpen } }));
+  }, [isMenuOpen]);
+
   // Game Over listener from Phaser
   useEffect(() => {
     const handleGameOver = (e) => {

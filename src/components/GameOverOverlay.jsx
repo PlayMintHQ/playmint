@@ -111,7 +111,7 @@ const GameOverOverlay = ({ isWin, score, themeKey, gameType, onRestart, onTweakS
           display: flex;
           justify-content: center;
           align-items: center;
-          background-color: rgba(5, 7, 12, 0.45);
+          background-color: rgba(5, 7, 12, 0.9);
           backdrop-filter: blur(16px);
           -webkit-backdrop-filter: blur(16px);
           animation: fadeIn 0.35s ease-out;
@@ -124,9 +124,9 @@ const GameOverOverlay = ({ isWin, score, themeKey, gameType, onRestart, onTweakS
           width: min(420px, 90%);
           padding: 40px 32px;
           border-radius: 24px;
-          background: rgba(18, 24, 37, 0.82);
-          border: 1px solid ${accentColor}2c;
-          box-shadow: 0 24px 50px rgba(0, 0, 0, 0.55), 0 0 35px ${accentColor}12;
+          background: rgba(18, 24, 37, 0.96);
+          border: 1px solid ${accentColor}44;
+          box-shadow: 0 24px 50px rgba(0, 0, 0, 0.65), 0 0 35px ${accentColor}18;
           text-align: center;
           position: relative;
           overflow: hidden;
@@ -146,7 +146,7 @@ const GameOverOverlay = ({ isWin, score, themeKey, gameType, onRestart, onTweakS
           width: 240px;
           height: 240px;
           border-radius: 50%;
-          background: radial-gradient(circle, ${accentColor}1c 0%, transparent 70%);
+          background: radial-gradient(circle, ${accentColor}2c 0%, transparent 70%);
           pointer-events: none;
           filter: blur(20px);
           z-index: 0;
@@ -163,7 +163,7 @@ const GameOverOverlay = ({ isWin, score, themeKey, gameType, onRestart, onTweakS
           font-size: clamp(28px, 6vw, 38px);
           letter-spacing: 3px;
           color: ${isWin ? '#00FF99' : '#FF4B4B'};
-          text-shadow: 0 0 20px ${isWin ? 'rgba(0, 255, 153, 0.35)' : 'rgba(255, 75, 75, 0.35)'};
+          text-shadow: 0 0 20px ${isWin ? 'rgba(0, 255, 153, 0.45)' : 'rgba(255, 75, 75, 0.45)'};
           margin: 0;
           text-transform: uppercase;
         }
@@ -188,7 +188,7 @@ const GameOverOverlay = ({ isWin, score, themeKey, gameType, onRestart, onTweakS
         .go-score-label {
           font-family: var(--font-primary);
           font-size: 12px;
-          color: var(--pm-text-secondary);
+          color: #a0aec0;
           font-weight: 600;
           text-transform: uppercase;
           letter-spacing: 1.5px;
@@ -207,7 +207,7 @@ const GameOverOverlay = ({ isWin, score, themeKey, gameType, onRestart, onTweakS
         .go-score-best {
           font-family: var(--font-primary);
           font-size: 13px;
-          color: var(--pm-text-tertiary);
+          color: #a0aec0;
           font-weight: 500;
         }
 
@@ -223,7 +223,7 @@ const GameOverOverlay = ({ isWin, score, themeKey, gameType, onRestart, onTweakS
           z-index: 1;
           font-family: var(--font-primary);
           font-size: 12px;
-          color: var(--pm-text-tertiary);
+          color: #cbd5e0;
           letter-spacing: 0.5px;
           animation: blinkText 1.4s infinite alternate;
           user-select: none;

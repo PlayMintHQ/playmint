@@ -19,20 +19,33 @@ export function parsePromptKeywords(text) {
     keywordsMatched++;
   }
 
-  if (lower.match(/(lava|volcano|molten|inferno|ash)/)) {
-    themeKey = 'lava';
+  const themeDefs = [
+    { key: 'lava', regex: /(lava|volcano|molten|inferno|ash)/ },
+    { key: 'ice', regex: /(ice|snow|frost|glacier|winter)/ },
+    { key: 'forest', regex: /(forest|jungle|wood|trees|verdant)/ },
+    { key: 'city', regex: /(city|urban|town|building|skyscraper|street|sidewalk|neon)/ },
+    { key: 'space', regex: /(space|cosmic|galaxy|nebula|planet|asteroid|star|solar|alien)/ }
+  ];
+
+  const matchedThemes = [];
+  themeDefs.forEach(t => {
+    const match = lower.match(t.regex);
+    if (match) {
+      matchedThemes.push({ key: t.key, index: match.index });
+    }
+  });
+
+  matchedThemes.sort((a, b) => a.index - b.index);
+
+  themeKey = null;
+  let secondaryThemeKey = null;
+
+  if (matchedThemes.length > 0) {
+    themeKey = matchedThemes[0].key;
     keywordsMatched++;
-  } else if (lower.match(/(ice|snow|frost|glacier|winter)/)) {
-    themeKey = 'ice';
-    keywordsMatched++;
-  } else if (lower.match(/(forest|jungle|wood|trees|verdant)/)) {
-    themeKey = 'forest';
-    keywordsMatched++;
-  } else if (lower.match(/(city|urban|town|building|skyscraper|street|sidewalk|neon)/)) {
-    themeKey = 'city';
-    keywordsMatched++;
-  } else if (lower.match(/(space|cosmic|galaxy|nebula|planet|asteroid|star|solar|alien)/)) {
-    themeKey = 'space';
+  }
+  if (matchedThemes.length > 1) {
+    secondaryThemeKey = matchedThemes[1].key;
     keywordsMatched++;
   }
 
@@ -53,7 +66,7 @@ export function parsePromptKeywords(text) {
     keywordsMatched++;
   }
 
-  return { mode, themeKey, modifiers, keywordsMatched };
+  return { mode, themeKey, secondaryThemeKey, modifiers, keywordsMatched };
 }
 
 export function generateTitle(text, mode, themeKey) {

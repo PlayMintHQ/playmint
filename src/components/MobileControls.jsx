@@ -34,6 +34,21 @@ const MobileControls = ({ gameType, themeKey, projectilesEnabled }) => {
     triggerInput(action, 'up');
   };
 
+  React.useEffect(() => {
+    const handleGlobalTouchEnd = (e) => {
+      if (e.touches.length === 0) {
+        triggerInput('left', 'up');
+        triggerInput('right', 'up');
+      }
+    };
+    window.addEventListener('touchend', handleGlobalTouchEnd);
+    window.addEventListener('touchcancel', handleGlobalTouchEnd);
+    return () => {
+      window.removeEventListener('touchend', handleGlobalTouchEnd);
+      window.removeEventListener('touchcancel', handleGlobalTouchEnd);
+    };
+  }, []);
+
   const cssVariables = {
     '--theme-accent': accent.primary,
     '--theme-accent-semi': accent.semi
@@ -48,6 +63,7 @@ const MobileControls = ({ gameType, themeKey, projectilesEnabled }) => {
             className="pm-touch-btn"
             onTouchStart={(e) => handleTouchStart('left', e)}
             onTouchEnd={(e) => handleTouchEnd('left', e)}
+            onTouchCancel={(e) => handleTouchEnd('left', e)}
             onMouseDown={() => triggerInput('left', 'down')}
             onMouseUp={() => triggerInput('left', 'up')}
             onMouseLeave={() => triggerInput('left', 'up')}
@@ -62,6 +78,7 @@ const MobileControls = ({ gameType, themeKey, projectilesEnabled }) => {
             className="pm-touch-btn"
             onTouchStart={(e) => handleTouchStart('right', e)}
             onTouchEnd={(e) => handleTouchEnd('right', e)}
+            onTouchCancel={(e) => handleTouchEnd('right', e)}
             onMouseDown={() => triggerInput('right', 'down')}
             onMouseUp={() => triggerInput('right', 'up')}
             onMouseLeave={() => triggerInput('right', 'up')}

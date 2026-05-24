@@ -75,6 +75,7 @@ export default class GameManagerScene extends Phaser.Scene {
     this.score = 0;
     window.dispatchEvent(new CustomEvent('update-score', { detail: this.score }));
     this.activeTheme = getTheme(this.gameConfig.themeKey);
+    this.secondaryTheme = this.gameConfig.secondaryThemeKey ? getTheme(this.gameConfig.secondaryThemeKey) : null;
 
     // Enable multitouch for mobile controls (movement + jumping)
     this.input.addPointer(2);
@@ -83,7 +84,7 @@ export default class GameManagerScene extends Phaser.Scene {
     const height = this.scale.height;
 
     this.LOGICAL_FLOOR_Y = 1000;
-    const floorHeight = this.activeTheme.floorHeight || this.gameConfig.floorHeight || 100;
+    const floorHeight = this.secondaryTheme?.floorHeight || this.activeTheme.floorHeight || this.gameConfig.floorHeight || 100;
 
     // Create a smooth background gradient
     this.bgGraphics = this.add.graphics();
@@ -98,7 +99,7 @@ export default class GameManagerScene extends Phaser.Scene {
       this.scoreTimer = this.time.addEvent({
         delay: this.gameConfig.scoreTimerDelay || 100,
         callback: () => {
-          if (!this.isGameOver) {
+          if (!this.isGameOver && !this.isGamePaused) {
             this.score += 1;
             window.dispatchEvent(new CustomEvent('update-score', { detail: this.score }));
           }
@@ -109,8 +110,8 @@ export default class GameManagerScene extends Phaser.Scene {
 
     // Floor - Make it wide enough to cover the world width if we are in platformer mode.
     const floorWidth = this.gameConfig.gameType === 'platformer' ? 4000 : Math.max(width * 2, 4000);
-    const floorTexture = this.activeTheme.floorTexture || 'ground';
-    const floorFrameIndex = this.activeTheme.floorFrame !== undefined ? this.activeTheme.floorFrame : 0;
+    const floorTexture = this.secondaryTheme?.floorTexture || this.activeTheme.floorTexture || 'ground';
+    const floorFrameIndex = this.secondaryTheme?.floorFrame !== undefined ? this.secondaryTheme.floorFrame : (this.activeTheme.floorFrame !== undefined ? this.activeTheme.floorFrame : 0);
     const textureObj = this.textures.get(floorTexture);
     const frame = textureObj?.get(floorFrameIndex);
 
@@ -132,7 +133,7 @@ export default class GameManagerScene extends Phaser.Scene {
       this.floor.setOrigin(0, 0);
     } else {
       this.floor = this.add.tileSprite(0, this.LOGICAL_FLOOR_Y, floorWidth, floorHeight, floorTexture, floorFrameIndex).setOrigin(0, 0);
-      const themeTileScale = this.activeTheme.floorTileScale || 0.15;
+      const themeTileScale = this.secondaryTheme?.floorTileScale || this.activeTheme.floorTileScale || 0.15;
       this.floor.tileScaleX = this.gameConfig.floorTileScale || themeTileScale;
       this.floor.tileScaleY = this.gameConfig.floorTileScale || themeTileScale;
     }
@@ -260,6 +261,20 @@ export default class GameManagerScene extends Phaser.Scene {
     
     this.player = this.physics.add.sprite(playerX, this.LOGICAL_FLOOR_Y - playerYOffset, playerTexture, playerFrame);
     this.player.setScale(this.gameConfig.playerScale || (playerType === 'fox' || playerType === 'yeti' ? 1.8 : 1.5));
+
+    // Set precise hitbox size and offsets to resolve asset alignment issue (floating/clipping)
+    if (playerType === 'fox') {
+      this.player.body.setSize(24, 25);
+      this.player.body.setOffset(14, 18);
+    } else if (playerType === 'yeti') {
+      this.player.body.setSize(26, 28);
+      this.player.body.setOffset(4, 5);
+    } else {
+      // dude
+      this.player.body.setSize(20, 42);
+      this.player.body.setOffset(6, 6);
+    }
+
     this.physics.add.collider(this.player, this.floor);
 
     // Core game mode handling
@@ -345,7 +360,37 @@ export default class GameManagerScene extends Phaser.Scene {
     };
     window.addEventListener('restart-game', this.restartGameListener);
 
+    // Pause integration
+    this.togglePauseListener = (e) => {
+      const isPaused = e.detail.isPaused;
+      if (isPaused) {
+        this.physics.pause();
+        if (this.scoreTimer) this.scoreTimer.paused = true;
+        this.anims.pauseAll();
+        this.tweens.pauseAll();
+        if (this.gameModeManager && this.gameModeManager.activeMode) {
+          const mode = this.gameModeManager.activeMode;
+          if (mode.obstacleTimer) mode.obstacleTimer.paused = true;
+        }
+        this.isGamePaused = true;
+      } else {
+        if (!this.isGameOver) {
+          this.physics.resume();
+          if (this.scoreTimer) this.scoreTimer.paused = false;
+          this.anims.resumeAll();
+          this.tweens.resumeAll();
+          if (this.gameModeManager && this.gameModeManager.activeMode) {
+            const mode = this.gameModeManager.activeMode;
+            if (mode.obstacleTimer) mode.obstacleTimer.paused = false;
+          }
+        }
+        this.isGamePaused = false;
+      }
+    };
+    window.addEventListener('toggle-pause-game', this.togglePauseListener);
+
     this.events.on('shutdown', () => {
+      window.removeEventListener('toggle-pause-game', this.togglePauseListener);
       window.removeEventListener('update-game-config', this.updateConfigListener);
       window.removeEventListener('keydown', this.preventKeyScrollListener);
       window.removeEventListener('orientationchange', this.orientationHandler);
@@ -579,7 +624,7 @@ export default class GameManagerScene extends Phaser.Scene {
   }
 
   update(time, delta) {
-    if (this.isGameOver) return;
+    if (this.isGameOver || this.isGamePaused) return;
     
     if (this.gameConfig.gameType === 'runner') {
        this.virtualScrollX = (this.virtualScrollX || 0) + (this.gameModeManager?.activeMode?.runSpeed || this.gameConfig.runSpeed) * (delta / 1000);
@@ -587,8 +632,13 @@ export default class GameManagerScene extends Phaser.Scene {
     const scrollX = this.gameConfig.gameType === 'runner' ? this.virtualScrollX : (this.cameras?.main?.scrollX || 0);
 
     if (this.bgLayers && this.bgLayers.length) {
+      const screenWidth = this.scale.width;
       this.bgLayers.forEach((layer) => {
-        layer.tilePositionX = scrollX * (layer.__scrollSpeed || 0.1);
+        if (this.gameConfig.gameType === 'runner') {
+          layer.x = screenWidth / 2;
+        } else {
+          layer.x = (screenWidth / 2) - (scrollX * (layer.__scrollSpeed || 0.1));
+        }
       });
     }
     this.gameModeManager.update(time, delta);
