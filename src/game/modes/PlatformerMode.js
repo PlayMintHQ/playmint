@@ -194,15 +194,11 @@ export default class PlatformerMode extends BaseMode {
     const theme = this.scene.activeTheme || {};
     const isSmallWorld = (theme.worldWidth || 4000) < 2000;
     const layout = isSmallWorld ? [
-      { x: 80, y: floorY - 16, scaleX: 6, hasEnemy: false },
-      { x: 160, y: floorY - 32, scaleX: 6, hasEnemy: true },
-      { x: 240, y: floorY - 16, scaleX: 5, hasEnemy: false },
-      { x: 320, y: floorY - 40, scaleX: 6, hasEnemy: true },
-      { x: 400, y: floorY - 56, scaleX: 6, hasEnemy: false },
-      { x: 480, y: floorY - 32, scaleX: 5, hasEnemy: true },
-      { x: 560, y: floorY - 16, scaleX: 6, hasEnemy: false },
-      { x: 640, y: floorY - 32, scaleX: 5, hasEnemy: true },
-      { x: 720, y: floorY - 48, scaleX: 12, hasEnemy: false }, // Big finish block
+      { x: 180, y: floorY - 20, scaleX: 5, hasEnemy: false },
+      { x: 350, y: floorY - 35, scaleX: 5, hasEnemy: true },
+      { x: 520, y: floorY - 20, scaleX: 5, hasEnemy: false },
+      { x: 690, y: floorY - 35, scaleX: 5, hasEnemy: true },
+      { x: 850, y: floorY - 25, scaleX: 8, hasEnemy: false }, // Big finish block
     ] : [
       { x: 400, y: floorY - 80, scaleX: 1.5, hasEnemy: false },
       { x: 800, y: floorY - 150, scaleX: 2.0, hasEnemy: true },
@@ -783,15 +779,25 @@ export default class PlatformerMode extends BaseMode {
 
     const spawnOnBlock = (block) => {
       if (!block || enemiesCreated >= maxEnemies) return;
+      
+      // Safety guard: do not spawn enemies on top of or too close to the player starting spawn point
+      const spawnX = theme?.spawnX || 150;
+      if (block.x < spawnX + 120) return;
+
       const enemy = this.enemies.create(block.x, block.y - 40, enemyTexture);
       enemy.health = 3;
       enemy.setGravityY(this.gravity);
       
       if (enemyTexture === 'fox') {
         enemy.setScale(1.5);
-        enemy.body.setSize(24, 25);
-        enemy.body.setOffset(14, 18);
         const enemyAnim = theme?.enemyAnim || 'slug_walk';
+        if (enemyAnim === 'yeti_walk') {
+          enemy.body.setSize(26, 28);
+          enemy.body.setOffset(4, 5);
+        } else {
+          enemy.body.setSize(24, 25);
+          enemy.body.setOffset(14, 18);
+        }
         enemy.play(enemyAnim, true);
       } else {
         enemy.setFrame(5);

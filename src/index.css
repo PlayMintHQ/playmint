@@ -37,7 +37,7 @@
   --pm-safe-area-left: env(safe-area-inset-left);
 }
 
-body {
+html, body {
   margin: 0;
   background-color: var(--pm-bg-main);
   color: var(--pm-text-primary);

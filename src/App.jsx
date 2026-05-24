@@ -305,8 +305,8 @@ function App() {
       {(hasStarted || isTransitioning) && (
         <>
           {/* Main Game Container - Rendered at zIndex: 0 */}
-          <div style={{ position: 'absolute', inset: 0, display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 0 }}>
-            <div style={{ width: '100%', height: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 0, overflow: 'hidden' }}>
+            <div style={{ width: '100%', height: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' }}>
               <GameComponent key={gameKey} isFullscreen={isFullscreen} />
             </div>
           </div>

@@ -26,6 +26,7 @@ const GameSelectorModal = ({ isOpen, presetKey, onSelectPreset, onClose }) => {
           align-items: center;
           padding: 60px 20px;
           overflow-y: auto;
+          overflow-x: hidden;
           background: rgba(11, 14, 20, 0.95);
           backdrop-filter: blur(10px);
           pointer-events: auto;
@@ -143,13 +144,13 @@ const GameSelectorModal = ({ isOpen, presetKey, onSelectPreset, onClose }) => {
             margin-bottom: 12px;
           }
           .gsm-playable-container {
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-            margin-bottom: 16px;
+            grid-template-columns: 1fr;
+            gap: 12px;
+            margin-bottom: 24px;
           }
           .gsm-playable-card {
-            padding: 16px 8px;
-            height: 70px;
+            padding: 20px 16px;
+            height: 80px;
           }
           .gsm-playable-card h4 {
             font-size: 13px !important;
@@ -161,22 +162,13 @@ const GameSelectorModal = ({ isOpen, presetKey, onSelectPreset, onClose }) => {
             margin-top: 4px;
           }
           .gsm-coming-soon-container {
-            display: flex;
-            flex-direction: row;
-            overflow-x: auto;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
             gap: 12px;
             padding: 8px 4px;
-            scroll-snap-type: x mandatory;
-            scrollbar-width: none;
-            -ms-overflow-style: none;
             width: 100%;
           }
-          .gsm-coming-soon-container::-webkit-scrollbar {
-            display: none;
-          }
           .gsm-coming-soon-card {
-            flex: 0 0 160px;
-            scroll-snap-align: start;
             padding: 10px 12px !important;
             height: 48px;
             box-sizing: border-box;
@@ -230,15 +222,13 @@ const GameSelectorModal = ({ isOpen, presetKey, onSelectPreset, onClose }) => {
             display: none;
           }
           .gsm-coming-soon-container {
-            display: flex;
-            flex-direction: row;
-            overflow-x: auto;
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
             gap: 8px;
             padding: 4px;
             width: 100%;
           }
           .gsm-coming-soon-card {
-            flex: 0 0 130px;
             padding: 8px !important;
             height: 38px;
           }

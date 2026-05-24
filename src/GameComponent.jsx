@@ -32,7 +32,7 @@ const GameComponent = ({ isFullscreen }) => {
 
   return (
     <div 
-      style={{ position: 'relative', width: '100%', height: '100%', display: 'block' }}
+      style={{ position: 'relative', width: '100%', height: '100%', display: 'block', overflow: 'hidden' }}
       onPointerDown={handlePointerDown}
     >
       <div

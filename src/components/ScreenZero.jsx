@@ -347,8 +347,7 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
                 <div className="cityscape-scroll" />
                 <div className="ground-scroll" />
                 <div className="runner-sprite" />
-                <div className="floating-collectible" style={{ right: '25%', top: '55%' }} />
-                <div className="floating-obstacle" style={{ right: '5%', bottom: '24%' }} />
+                <div className="floating-obstacle" />
                 <div className="preview-label">RUNNER MODE PREVIEW</div>
               </div>
             )}
@@ -382,13 +381,34 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
             {activePreview === 'rpg' && (
               <div className="prev-rpg" style={{ width: '100%', height: '100%', position: 'relative' }}>
                 <div className="rpg-grid" />
-                <div className="node node-visited" style={{ left: '20%', bottom: '25%' }} />
-                <div className="node node-visited" style={{ left: '40%', bottom: '45%' }} />
-                <div className="node node-active" style={{ left: '60%', bottom: '35%' }} />
-                <div className="node node-future" style={{ left: '80%', bottom: '60%' }} />
-                <div className="rpg-player" />
-                <div className="chest-sparkle" />
-                <div className="lvl-up">LEVEL UP!</div>
+                
+                {/* SVG Journey Paths */}
+                <svg className="rpg-path-svg" viewBox="0 0 100 100" preserveAspectRatio="none" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 1 }}>
+                  <path d="M 20 75 L 40 55 L 60 65 L 80 40" fill="none" stroke="rgba(170, 102, 255, 0.2)" strokeWidth="1.5" strokeLinecap="round" />
+                  <path d="M 20 75 L 40 55 L 60 65 L 80 40" fill="none" stroke="#aa66ff" strokeWidth="1.5" strokeDasharray="3 3" strokeLinecap="round" />
+                </svg>
+
+                {/* Overworld Nodes */}
+                <div className="node node-1" style={{ left: '20%', bottom: '25%', zIndex: 2 }} />
+                <div className="node node-2" style={{ left: '40%', bottom: '45%', zIndex: 2 }} />
+                <div className="node node-3" style={{ left: '60%', bottom: '35%', zIndex: 2 }} />
+                <div className="node node-4" style={{ left: '80%', bottom: '60%', zIndex: 2 }} />
+
+                {/* Ambient Biome Decors / Entities */}
+                <div className="rpg-enemy" style={{ zIndex: 2 }} />
+                <div className="rpg-slash" style={{ zIndex: 3 }} />
+                <div className="exp-float" style={{ zIndex: 4 }}>+50 EXP</div>
+                
+                <div className="rpg-chest" style={{ zIndex: 2 }} />
+                <div className="chest-sparkle" style={{ zIndex: 3 }} />
+                <div className="lvl-up" style={{ zIndex: 4 }}>LEVEL UP!</div>
+
+                <div className="rpg-portal" style={{ zIndex: 2 }} />
+                <div className="portal-ripple" style={{ zIndex: 3 }} />
+
+                {/* Animated Hero Player */}
+                <div className="rpg-player" style={{ zIndex: 5 }} />
+
                 <div className="preview-label">RPG ADVENTURE (LOCKED)</div>
               </div>
             )}
@@ -769,8 +789,8 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
 
         .pm-theater {
           order: 2; /* Sits below controls on mobile */
-          height: 160px;
-          min-height: 160px;
+          height: 200px;
+          min-height: 200px;
           padding: 12px;
           display: flex;
           flex-direction: column;
@@ -1020,15 +1040,7 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
           background: #00e599;
           border-radius: 6px;
           box-shadow: 0 0 10px #00e59960;
-          animation: runnerJump 1.2s infinite ease-in-out;
-        }
-        .floating-collectible {
-          position: absolute;
-          width: 14px; height: 14px;
-          background: #ffd700;
-          border-radius: 50%;
-          box-shadow: 0 0 8px #ffd700b0;
-          animation: floatCollect 2.0s infinite linear;
+          animation: runnerJump 6.0s infinite ease-in-out;
         }
         .floating-obstacle {
           position: absolute;
@@ -1037,7 +1049,9 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
           border-radius: 4px;
           border: 1px solid #ff0000;
           box-shadow: 0 0 8px #ff4b4bb0;
-          animation: scrollObstacle 2.0s infinite linear;
+          animation: scrollObstacle 6.0s infinite linear;
+          left: 100%;
+          bottom: 24%;
         }
 
         @keyframes scrollBg {
@@ -1045,16 +1059,49 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
           100% { transform: translateX(-50%); }
         }
         @keyframes runnerJump {
-          0%, 100% { transform: translateY(0); }
-          50% { transform: translateY(-40px); }
-        }
-        @keyframes floatCollect {
-          0% { transform: translateX(120px) translateY(0); }
-          100% { transform: translateX(-350px) translateY(0); }
+          0%, 16.6% { transform: translateY(0) rotate(0) scale(1) translateX(0); opacity: 1; }
+          /* Jump 1: Clean */
+          21.6% { transform: translateY(-45px) rotate(0) scale(1) translateX(0); }
+          28.3% { transform: translateY(0) rotate(0) scale(1) translateX(0); }
+          
+          /* Jump 2: Clean Jump */
+          50.0% { transform: translateY(0) rotate(0) scale(1) translateX(0); }
+          55.0% { transform: translateY(-45px) rotate(0) scale(1) translateX(0); }
+          61.6% { transform: translateY(0) rotate(0) scale(1) translateX(0); }
+          
+          /* Jump 3: Crash */
+          83.3% { transform: translateY(0) rotate(0) scale(1) translateX(0); opacity: 1; }
+          86.6% { transform: translateY(-20px) rotate(-15deg) scale(1) translateX(0); opacity: 1; } /* Collision point! */
+          93.3% { transform: translateY(30px) rotate(-180deg) scale(0.6) translateX(-50px); opacity: 0; } /* Tumbles off */
+          100% { transform: translateY(0) rotate(0) scale(1) translateX(0); opacity: 0; }
         }
         @keyframes scrollObstacle {
-          0% { transform: translateX(20px); }
-          100% { transform: translateX(-400px); }
+          /* Obstacle 1: Clean Jump */
+          0%, 8.3% { left: 100%; transform: rotate(0) scale(1) translateY(0); opacity: 1; }
+          21.6% { left: 15%; transform: rotate(0) scale(1) translateY(0); opacity: 1; }
+          30.0% { left: -20%; transform: rotate(0) scale(1) translateY(0); opacity: 1; }
+          
+          /* Reset 1: Hide return trip */
+          30.1% { left: -20%; opacity: 0; }
+          34.9% { left: 100%; opacity: 0; }
+          
+          /* Obstacle 2: Clean Jump */
+          35.0%, 41.6% { left: 100%; transform: rotate(0) scale(1) translateY(0); opacity: 1; }
+          55.0% { left: 15%; transform: rotate(0) scale(1) translateY(0); opacity: 1; }
+          63.3% { left: -20%; transform: rotate(0) scale(1) translateY(0); opacity: 1; }
+          
+          /* Reset 2: Hide return trip */
+          63.4% { left: -20%; opacity: 0; }
+          68.2% { left: 100%; opacity: 0; }
+          
+          /* Obstacle 3: Collision */
+          68.3%, 75.0% { left: 100%; transform: rotate(0) scale(1) translateY(0); opacity: 1; }
+          86.6% { left: 15%; transform: rotate(0) scale(1) translateY(0); opacity: 1; } /* Collision point! */
+          93.3% { left: 8%; transform: rotate(45deg) scale(0.6) translateY(-15px); opacity: 0; } /* Tumbles off */
+          
+          /* Reset 3: Hide return trip */
+          93.4% { left: 100%; transform: rotate(0) scale(1) translateY(0); opacity: 0; }
+          100% { left: 100%; transform: rotate(0) scale(1) translateY(0); opacity: 0; }
         }
 
         /* 2. ACTION QUEST PREVIEW */
@@ -1088,13 +1135,17 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
           border-radius: 50%;
           opacity: 0;
           animation: meleeSlash 6s infinite ease-in-out;
+          left: 54% !important;
+          bottom: 50% !important;
         }
         .enemy-slug {
           position: absolute;
-          left: 60%; bottom: 48%; width: 18px; height: 14px;
+          width: 18px; height: 14px;
           background: #ff4444;
           border-radius: 12px 12px 0 0;
           animation: enemyWalk 6s infinite ease-in-out;
+          left: 58% !important;
+          bottom: 47% !important;
         }
         .laser-bolt {
           position: absolute;
@@ -1104,35 +1155,45 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
           box-shadow: 0 0 6px #00ffff;
           opacity: 0;
           animation: laserShoot 6s infinite linear;
+          left: 52% !important;
+          bottom: 51% !important;
         }
 
         @keyframes questWalk {
-          0%, 100% { left: 15%; bottom: 26%; }
-          15% { left: 24%; bottom: 26%; }
-          22% { left: 48%; bottom: 50%; }
-          40% { left: 52%; bottom: 50%; }
-          50% { left: 55%; bottom: 50%; }
-          70% { left: 80%; bottom: 33%; }
-          85% { left: 40%; bottom: 26%; }
+          0% { left: 15%; bottom: 26%; }
+          10% { left: 18%; bottom: 26%; }
+          16.6% { left: 20%; bottom: 26%; }
+          21.6% { left: 32%; bottom: 58%; } /* Parabolic jump peak */
+          26.6% { left: 44%; bottom: 47%; } /* Lands on platform 2 */
+          36.6% { left: 48%; bottom: 47%; } /* Walks forward */
+          41.6% { left: 48%; bottom: 47%; } /* Slashes! */
+          53.3% { left: 48%; bottom: 47%; }
+          58.3% { left: 48%; bottom: 47%; } /* Shoots laser! */
+          66.6% { left: 48%; bottom: 47%; } /* Leaves platform 2 */
+          73.3% { left: 60%; bottom: 62%; } /* Parabolic jump peak */
+          80.0% { left: 72%; bottom: 32%; } /* Lands on platform 3 */
+          90.0% { left: 78%; bottom: 32%; } /* Walks forward */
+          100% { left: 15%; bottom: 26%; } /* Resets to start */
         }
         @keyframes enemyWalk {
-          0%, 100% { left: 58%; opacity: 1; }
-          42% { left: 54%; opacity: 1; }
-          44% { left: 54%; opacity: 0.1; transform: scale(0.1); }
-          46% { left: 58%; opacity: 0; }
-          90% { left: 58%; opacity: 0; }
-          95% { left: 58%; opacity: 1; }
+          0% { left: 58%; opacity: 1; transform: translateY(0) scale(1); }
+          20% { left: 54%; opacity: 1; transform: translateY(0) scale(1); }
+          40% { left: 56%; opacity: 1; transform: translateY(0) scale(1); }
+          41.6% { left: 56%; opacity: 0; transform: translateY(20px) scale(0.1); } /* Hit & Die! */
+          90% { left: 58%; opacity: 0; transform: translateY(20px) scale(0.1); }
+          95% { left: 58%; opacity: 1; transform: translateY(0) scale(1); } /* Respawn! */
+          100% { left: 58%; opacity: 1; }
         }
         @keyframes meleeSlash {
-          0%, 38%, 45%, 100% { opacity: 0; transform: scale(0.1); }
-          41% { opacity: 1; left: 48%; bottom: 44%; transform: scale(1); }
+          0%, 40% { opacity: 0; transform: scale(0.1); }
+          41.6% { opacity: 1; transform: scale(1); }
+          45%, 100% { opacity: 0; transform: scale(1.3); }
         }
         @keyframes laserShoot {
-          0%, 100% { opacity: 0; left: 15%; bottom: 26%; }
-          16% { opacity: 0; }
-          18% { opacity: 1; left: 24%; bottom: 30%; }
-          35% { opacity: 1; left: 90%; bottom: 30%; }
-          37% { opacity: 0; left: 90%; bottom: 30%; }
+          0%, 55% { opacity: 0; left: 52%; bottom: 51%; transform: scale(0.1); }
+          58.3% { opacity: 1; left: 52%; bottom: 51%; transform: scale(1); }
+          65% { opacity: 1; left: 95%; bottom: 51%; transform: scale(1); }
+          66.6%, 100% { opacity: 0; left: 95%; bottom: 51%; transform: scale(0.1); }
         }
 
         /* 3. EMPIRE PREVIEWS */
@@ -1206,70 +1267,246 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
           position: absolute;
           width: 12px; height: 12px;
           border-radius: 50%;
-          transform: translate(-50%, -50%);
+          transform: translate(-50%, 50%);
           border: 2px solid rgba(255,255,255,0.3);
         }
-        .node-visited {
-          background: #aa66ff;
-          border-color: #aa66ff;
-          box-shadow: 0 0 6px #aa66ff;
+        
+        .node-1 {
+          animation: node1Act 8s infinite linear;
         }
-        .node-active {
-          background: #fff;
-          border-color: #00ffff;
-          box-shadow: 0 0 10px #00ffff;
-          animation: pulseNode 1s infinite alternate;
+        .node-2 {
+          animation: node2Act 8s infinite linear;
         }
-        .node-future {
-          background: rgba(255,255,255,0.1);
+        .node-3 {
+          animation: node3Act 8s infinite linear;
         }
+        .node-4 {
+          animation: node4Act 8s infinite linear;
+        }
+
         .rpg-player {
           position: absolute;
           width: 16px; height: 16px;
           background: #00ffff;
           border-radius: 50%;
-          transform: translate(-50%, -50%);
+          transform: translate(-50%, 50%);
           box-shadow: 0 0 12px #00ffff;
-          animation: rpgMove 8s infinite steps(4);
+          animation: rpgMove 8s infinite ease-in-out;
+        }
+        .rpg-enemy {
+          position: absolute;
+          left: 40%; bottom: 45%;
+          width: 14px; height: 14px;
+          background: #ff4b4b;
+          border-radius: 3px;
+          transform: translate(-50%, 50%);
+          box-shadow: 0 0 8px #ff4b4b;
+          animation: rpgEnemyAnim 8s infinite ease-in-out;
+        }
+        .rpg-slash {
+          position: absolute;
+          left: 40%; bottom: 45%;
+          width: 24px; height: 24px;
+          background: radial-gradient(circle, #ffffff 0%, #ffff00 50%, transparent 100%);
+          transform: translate(-50%, 50%) rotate(45deg) scale(0);
+          opacity: 0;
+          pointer-events: none;
+          animation: rpgSlashAnim 8s infinite ease-out;
+        }
+        .exp-float {
+          position: absolute;
+          left: 40%; bottom: 50%;
+          color: #00ff66;
+          font-family: 'Courier New', monospace;
+          font-size: 10px;
+          font-weight: bold;
+          text-shadow: 0 0 5px #00ff6690;
+          transform: translate(-50%, 0);
+          opacity: 0;
+          animation: expFloatAnim 8s infinite ease-out;
+        }
+        .rpg-chest {
+          position: absolute;
+          left: 60%; bottom: 35%;
+          width: 16px; height: 14px;
+          background: #ffd700;
+          border: 1.5px solid #b8860b;
+          border-radius: 2px;
+          transform: translate(-50%, 50%);
+          box-shadow: 0 0 6px rgba(255,215,0,0.5);
+          animation: rpgChestAnim 8s infinite ease-in-out;
         }
         .chest-sparkle {
           position: absolute;
           left: 60%; bottom: 35%; width: 30px; height: 30px;
           background: radial-gradient(circle, #ffd700 0%, transparent 60%);
           opacity: 0;
-          transform: translate(-50%, -50%);
+          transform: translate(-50%, 50%) scale(0.1);
           animation: chestOpen 8s infinite ease-in-out;
         }
         .lvl-up {
           position: absolute;
-          left: 60%; bottom: 55%;
+          left: 60%; bottom: 43%;
           font-family: 'Arial Black', sans-serif;
-          font-size: 16px;
+          font-size: 13px;
           color: #ffd700;
-          text-shadow: 0 0 10px #ffd700;
+          text-shadow: 0 0 8px #ffd700, 0 0 15px #ffaa00;
           font-weight: 900;
           opacity: 0;
-          transform: translate(-50%, -50%);
+          transform: translate(-50%, 0);
           animation: lvlUpText 8s infinite ease-out;
         }
+        .rpg-portal {
+          position: absolute;
+          left: 80%; bottom: 60%;
+          width: 20px; height: 22px;
+          border: 2px solid #aa66ff;
+          border-bottom: none;
+          border-radius: 50% 50% 0 0;
+          transform: translate(-50%, 50%);
+          box-shadow: 0 0 10px #aa66ff;
+          animation: rpgPortalAnim 8s infinite ease-in-out;
+          background: radial-gradient(circle, #3a0066 0%, transparent 80%);
+        }
+        .portal-ripple {
+          position: absolute;
+          left: 80%; bottom: 60%;
+          width: 24px; height: 24px;
+          border: 2px solid #00ffff;
+          border-radius: 50%;
+          transform: translate(-50%, 50%) scale(0.5);
+          opacity: 0;
+          pointer-events: none;
+          animation: portalRippleAnim 8s infinite ease-out;
+        }
 
-        @keyframes pulseNode {
-          0% { transform: translate(-50%, -50%) scale(1); }
-          100% { transform: translate(-50%, -50%) scale(1.3); }
+        /* RPG Nodes Color Shifts */
+        @keyframes node1Act {
+          0%, 12.5% { background: #fff; border-color: #00ffff; box-shadow: 0 0 10px #00ffff; }
+          12.6%, 93.7% { background: #aa66ff; border-color: #aa66ff; box-shadow: 0 0 6px #aa66ff; }
+          93.8%, 100% { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.3); box-shadow: none; }
         }
+        @keyframes node2Act {
+          0%, 12.5% { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.3); box-shadow: none; }
+          12.6%, 40.0% { background: #fff; border-color: #00ffff; box-shadow: 0 0 10px #00ffff; }
+          40.1%, 93.7% { background: #aa66ff; border-color: #aa66ff; box-shadow: 0 0 6px #aa66ff; }
+          93.8%, 100% { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.3); box-shadow: none; }
+        }
+        @keyframes node3Act {
+          0%, 40.0% { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.3); box-shadow: none; }
+          40.1%, 72.5% { background: #fff; border-color: #00ffff; box-shadow: 0 0 10px #00ffff; }
+          72.6%, 93.7% { background: #aa66ff; border-color: #aa66ff; box-shadow: 0 0 6px #aa66ff; }
+          93.8%, 100% { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.3); box-shadow: none; }
+        }
+        @keyframes node4Act {
+          0%, 72.5% { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.3); box-shadow: none; }
+          72.6%, 93.7% { background: #fff; border-color: #00ffff; box-shadow: 0 0 10px #00ffff; }
+          93.8%, 100% { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.3); box-shadow: none; }
+        }
+
+        /* Player Smooth Overworld Walking & Step Bounce */
         @keyframes rpgMove {
-          0%, 100% { left: 20%; top: 75%; }
-          25% { left: 40%; top: 55%; }
-          50% { left: 60%; top: 65%; }
-          75% { left: 80%; top: 40%; }
+          0% { left: 20%; bottom: 25%; transform: translate(-50%, 50%) scale(1); opacity: 0; }
+          4% { left: 20%; bottom: 25%; transform: translate(-50%, 50%) scale(1); opacity: 1; }
+          12.5% { left: 20%; bottom: 25%; transform: translate(-50%, 50%) scale(1); opacity: 1; }
+          
+          /* Walk to Node 2 (with bob up) */
+          18.75% { left: 30%; bottom: 35%; transform: translate(-50%, 65%) scale(1.05); opacity: 1; }
+          25.0% { left: 40%; bottom: 45%; transform: translate(-50%, 50%) scale(1.1); opacity: 1; }
+          
+          /* Battle Hit Back */
+          26.0% { left: 39%; bottom: 44%; transform: translate(-50%, 50%) scale(1.1) rotate(-15deg); opacity: 1; }
+          28.0% { left: 40%; bottom: 45%; transform: translate(-50%, 50%) scale(1.1) rotate(0); opacity: 1; }
+          40.0% { left: 40%; bottom: 45%; transform: translate(-50%, 50%) scale(1); opacity: 1; }
+          
+          /* Walk to Node 3 (with bob up) */
+          48.1% { left: 50%; bottom: 40%; transform: translate(-50%, 65%) scale(1.05); opacity: 1; }
+          56.25% { left: 60%; bottom: 35%; transform: translate(-50%, 50%) scale(1); opacity: 1; }
+          
+          /* Joy Jump */
+          59.0% { left: 60%; bottom: 38%; transform: translate(-50%, 50%) scale(1.2, 0.8); opacity: 1; }
+          61.0% { left: 60%; bottom: 35%; transform: translate(-50%, 50%) scale(0.9, 1.2); opacity: 1; }
+          63.0% { left: 60%; bottom: 35%; transform: translate(-50%, 50%) scale(1); opacity: 1; }
+          72.5% { left: 60%; bottom: 35%; transform: translate(-50%, 50%) scale(1); opacity: 1; }
+          
+          /* Walk to Node 4 (with bob up) */
+          80.0% { left: 70%; bottom: 48%; transform: translate(-50%, 65%) scale(1.05); opacity: 1; }
+          87.5% { left: 80%; bottom: 60%; transform: translate(-50%, 50%) scale(1) rotate(0); opacity: 1; }
+          
+          /* Teleport Out */
+          91.0% { left: 80%; bottom: 60%; transform: translate(-50%, 50%) scale(0) rotate(180deg); opacity: 0; }
+          93.75% { left: 20%; bottom: 25%; transform: translate(-50%, 50%) scale(1) rotate(0); opacity: 0; }
+          100% { left: 20%; bottom: 25%; transform: translate(-50%, 50%) scale(1) rotate(0); opacity: 0; }
         }
+
+        /* Red Slime Animation */
+        @keyframes rpgEnemyAnim {
+          0%, 12.5% { transform: translate(-50%, 50%) scale(1); opacity: 1; }
+          18.75% { transform: translate(-50%, 45%) scale(1.1, 0.9); opacity: 1; }
+          25.0% { transform: translate(-50%, 50%) scale(1); opacity: 1; }
+          25.5% { transform: translate(-50%, 50%) scale(1.4); background: #ffffff; opacity: 1; }
+          27.0% { transform: translate(-50%, 30%) scale(0.6) rotate(45deg); opacity: 0.5; }
+          30.0% { transform: translate(-50%, 0px) scale(0) rotate(90deg); opacity: 0; }
+          93.7% { transform: translate(-50%, 50%) scale(0); opacity: 0; }
+          93.8%, 100% { transform: translate(-50%, 50%) scale(1); opacity: 1; }
+        }
+
+        /* Combat Melee Slash impact */
+        @keyframes rpgSlashAnim {
+          0%, 25.0% { transform: translate(-50%, 50%) rotate(45deg) scale(0); opacity: 0; }
+          25.5% { transform: translate(-50%, 50%) rotate(135deg) scale(1.6); opacity: 1; }
+          27.0% { transform: translate(-50%, 50%) rotate(200deg) scale(1); opacity: 0; }
+          100% { transform: translate(-50%, 50%) rotate(200deg) scale(0); opacity: 0; }
+        }
+
+        /* EXP Float Indicator */
+        @keyframes expFloatAnim {
+          0%, 25.5% { transform: translate(-50%, 0); opacity: 0; }
+          28.0% { transform: translate(-50%, -10px); opacity: 1; }
+          38.0% { transform: translate(-50%, -25px); opacity: 0; }
+          100% { transform: translate(-50%, 0); opacity: 0; }
+        }
+
+        /* Golden Loot Chest Animation */
+        @keyframes rpgChestAnim {
+          0%, 40.0% { background: #ffd700; transform: translate(-50%, 50%) scale(1); box-shadow: 0 0 6px rgba(255,215,0,0.5); opacity: 1; }
+          56.25% { background: #ffea70; transform: translate(-50%, 50%) scale(1.1); box-shadow: 0 0 15px rgba(255,215,0,0.9); }
+          72.5% { background: #8b7500; transform: translate(-50%, 50%) scale(1); box-shadow: none; }
+          93.7% { opacity: 0; }
+          93.8%, 100% { background: #ffd700; transform: translate(-50%, 50%) scale(1); box-shadow: 0 0 6px rgba(255,215,0,0.5); opacity: 1; }
+        }
+
+        /* Golden loot sparkles */
         @keyframes chestOpen {
-          0%, 48%, 68%, 100% { opacity: 0; transform: translate(-50%, -50%) scale(0.1); }
-          50%, 65% { opacity: 1; transform: translate(-50%, -50%) scale(1.5); }
+          0%, 56.25% { opacity: 0; transform: translate(-50%, 50%) scale(0.1); }
+          58.0% { opacity: 1; transform: translate(-50%, 50%) scale(1.5); }
+          68.0% { opacity: 0; transform: translate(-50%, 50%) scale(2.0); }
+          100% { opacity: 0; transform: translate(-50%, 50%) scale(0.1); }
         }
+
+        /* LEVEL UP floating indicators */
         @keyframes lvlUpText {
-          0%, 52%, 78%, 100% { opacity: 0; transform: translate(-50%, 0px); }
-          55%, 72% { opacity: 1; transform: translate(-50%, -30px); }
+          0%, 56.25% { opacity: 0; transform: translate(-50%, 0); }
+          59.0% { opacity: 1; transform: translate(-50%, -10px); }
+          68.0% { opacity: 1; transform: translate(-50%, -20px); }
+          75.0% { opacity: 0; transform: translate(-50%, -30px); }
+          100% { opacity: 0; transform: translate(-50%, 0); }
+        }
+
+        /* Portal Swirling Gate */
+        @keyframes rpgPortalAnim {
+          0%, 72.5% { border-color: #aa66ff; box-shadow: 0 0 10px #aa66ff; background: radial-gradient(circle, #3a0066 0%, transparent 80%); }
+          87.5%, 91.0% { border-color: #00ffff; box-shadow: 0 0 18px #00ffff, inset 0 0 10px #00ffff; background: radial-gradient(circle, #004d4d 0%, transparent 90%); }
+          93.7% { border-color: #aa66ff; box-shadow: 0 0 10px #aa66ff; background: radial-gradient(circle, #3a0066 0%, transparent 80%); }
+          100% { border-color: #aa66ff; box-shadow: 0 0 10px #aa66ff; }
+        }
+
+        /* Portal ripple flash */
+        @keyframes portalRippleAnim {
+          0%, 87.5% { transform: translate(-50%, 50%) scale(0.5); opacity: 0; }
+          88.0% { opacity: 1; }
+          93.0% { transform: translate(-50%, 50%) scale(2.2); opacity: 0; }
+          100% { transform: translate(-50%, 50%) scale(0.5); opacity: 0; }
         }
 
         /* 5. FIGHTING PREVIEW */

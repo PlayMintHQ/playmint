@@ -300,7 +300,7 @@ const CreatorPanel = ({
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--pm-text-secondary)', fontSize: '24px', cursor: 'pointer' }}>✕</button>
         </div>
 
-      <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px', overflowY: 'auto', flex: 1 }}>
+      <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px', overflowY: 'auto', overflowX: 'hidden', flex: 1 }}>
 
         {/* 1. Game Name */}
         <div>
