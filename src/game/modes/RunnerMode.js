@@ -12,18 +12,12 @@ export default class RunnerMode extends BaseMode {
     // Mobile control and keyboard state
     this.mobileControls = [];
     this.uiContainer = null;
-    this.keys = null;
-    this.cursors = null;
   }
 
   create() {
     const theme = this.scene.activeTheme || {};
     this.scene.player.setGravityY(this.scene.gameConfig.gravity || (theme.gravity || 1800));
     this.scene.playPlayerAnim('run');
-
-    // Register SPACE key and cursors exactly like in PlatformerMode
-    this.keys = this.scene.input.keyboard.addKeys('SPACE');
-    this.cursors = this.scene.input.keyboard.createCursorKeys();
 
     this.obstacles = this.scene.physics.add.group();
 
@@ -37,12 +31,11 @@ export default class RunnerMode extends BaseMode {
     this.scene.physics.add.collider(this.obstacles, this.scene.floor);
     this.scene.physics.add.collider(this.scene.player, this.obstacles, this.scene.hitObstacle, null, this.scene);
 
-    // Listen for custom virtual controls input events from the React overlay
     this.gameInputListener = (e) => {
       if (!e.detail) return;
       const { action, state } = e.detail;
       const isDown = state === 'down';
-      
+
       if (action === 'jump' && isDown) {
         this.jump();
       }
@@ -86,23 +79,8 @@ export default class RunnerMode extends BaseMode {
     obstacle.body.setVelocityX(-this.runSpeed);
   }
 
-  isInputFocused() {
-    const el = document.activeElement;
-    if (!el) return false;
-    if (el.tagName === 'TEXTAREA') return true;
-    if (el.tagName === 'INPUT' && (el.type === 'text' || el.type === 'number')) return true;
-    return false;
-  }
-
   update(time, delta) {
     if (this.scene.isGameOver || this.scene.isGamePaused) return;
-
-    // Check keyboard jump if input is not focused
-    const spaceJustDown = (this.keys?.SPACE && Phaser.Input.Keyboard.JustDown(this.keys.SPACE)) || 
-                          (this.cursors?.space && Phaser.Input.Keyboard.JustDown(this.cursors.space));
-    if (!this.isInputFocused() && spaceJustDown) {
-      this.jump();
-    }
 
     if (this.scene.player.body.touching.down || this.scene.player.body.blocked.down) {
       this.scene.playPlayerAnim('run');
@@ -138,7 +116,7 @@ export default class RunnerMode extends BaseMode {
   }
 
   jump() {
-    if (this.scene.isGameOver || this.isInputFocused()) return;
+    if (this.scene.isGameOver) return;
     
     if (this.scene.player.body.touching.down || this.scene.player.body.blocked.down) {
       this.scene.player.body.setVelocityY(-(this.scene.gameConfig.jumpForce || 750));

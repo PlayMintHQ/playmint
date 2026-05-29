@@ -2,7 +2,7 @@ import React from 'react';
 import { GAME_PRESETS } from '../gameConfig';
 
 const COMING_SOON_MODES = [
-  'Empire Builder', 'RPG Adventure', 'Fighting Arena',
+  'RPG Adventure', 'Empire Builder', 'Fighting Arena',
   'Racing Rush', 'Shooter Arena', 'Survival Mode', 'Simulator World'
 ];
 

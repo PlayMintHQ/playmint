@@ -99,7 +99,7 @@ export default class GameManagerScene extends Phaser.Scene {
       this.scoreTimer = this.time.addEvent({
         delay: this.gameConfig.scoreTimerDelay || 100,
         callback: () => {
-          if (!this.isGameOver && !this.isGamePaused) {
+          if (!this.isGameOver) {
             this.score += 1;
             window.dispatchEvent(new CustomEvent('update-score', { detail: this.score }));
           }
@@ -281,36 +281,43 @@ export default class GameManagerScene extends Phaser.Scene {
     this.gameModeManager.setMode(this.gameConfig.gameType);
     this.gameModeManager.create();
 
-    // Generic Input for runner or generic jumps
-    this.input.keyboard.on('keydown-SPACE', () => {
+    // DOM-level keyboard handling — bypasses Phaser KeyboardPlugin entirely
+    this.keyStates = {};
+    this.domKeyDown = (e) => {
       const el = document.activeElement;
       const isTextInput = el && (el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && (el.type === 'text' || el.type === 'number')));
       if (isTextInput) return;
-      if (this.isGameOver) {
-        this.scene.restart();
-      } else {
+      if (e.repeat) return;
+
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) {
+        e.preventDefault();
+      }
+
+      if (this.isGameOver || this.isGamePaused) return;
+
+      this.keyStates[e.code] = true;
+
+      if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') {
         this.gameModeManager.jump();
       }
-    });
-
-    // Prevent default browser scrolling, except inside input fields
-    this.preventKeyScrollListener = (e) => {
-      if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
-        const el = document.activeElement;
-        const isTextInput = el && (el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && (el.type === 'text' || el.type === 'number')));
-        if (!isTextInput) {
-          e.preventDefault();
-        }
+      if (e.code === 'KeyE') {
+        this.keyStates._meleeTrigger = true;
+      }
+      if (e.code === 'KeyF') {
+        this.keyStates._shootTrigger = true;
       }
     };
-    window.addEventListener('keydown', this.preventKeyScrollListener, { passive: false });
+    window.addEventListener('keydown', this.domKeyDown);
 
-    // Mobile/pointer input for jumping (primarily for Runner mode)
-    this.input.on('pointerdown', (pointer) => {
+    this.domKeyUp = (e) => {
+      this.keyStates[e.code] = false;
+    };
+    window.addEventListener('keyup', this.domKeyUp);
+
+    // Click/tap: restarts on game-over only. Gameplay input is keyboard or MobileControls.
+    this.input.on('pointerdown', () => {
       if (this.isGameOver) {
         this.scene.restart();
-      } else if (this.gameConfig.gameType === 'runner') {
-        this.gameModeManager.jump();
       }
     }, this);
 
@@ -360,7 +367,7 @@ export default class GameManagerScene extends Phaser.Scene {
     };
     window.addEventListener('restart-game', this.restartGameListener);
 
-    // Pause integration
+    this.isGamePaused = false;
     this.togglePauseListener = (e) => {
       const isPaused = e.detail.isPaused;
       if (isPaused) {
@@ -368,9 +375,8 @@ export default class GameManagerScene extends Phaser.Scene {
         if (this.scoreTimer) this.scoreTimer.paused = true;
         this.anims.pauseAll();
         this.tweens.pauseAll();
-        if (this.gameModeManager && this.gameModeManager.activeMode) {
-          const mode = this.gameModeManager.activeMode;
-          if (mode.obstacleTimer) mode.obstacleTimer.paused = true;
+        if (this.gameModeManager?.activeMode?.obstacleTimer) {
+          this.gameModeManager.activeMode.obstacleTimer.paused = true;
         }
         this.isGamePaused = true;
       } else {
@@ -379,9 +385,8 @@ export default class GameManagerScene extends Phaser.Scene {
           if (this.scoreTimer) this.scoreTimer.paused = false;
           this.anims.resumeAll();
           this.tweens.resumeAll();
-          if (this.gameModeManager && this.gameModeManager.activeMode) {
-            const mode = this.gameModeManager.activeMode;
-            if (mode.obstacleTimer) mode.obstacleTimer.paused = false;
+          if (this.gameModeManager?.activeMode?.obstacleTimer) {
+            this.gameModeManager.activeMode.obstacleTimer.paused = false;
           }
         }
         this.isGamePaused = false;
@@ -390,9 +395,10 @@ export default class GameManagerScene extends Phaser.Scene {
     window.addEventListener('toggle-pause-game', this.togglePauseListener);
 
     this.events.on('shutdown', () => {
+      window.removeEventListener('keydown', this.domKeyDown);
+      window.removeEventListener('keyup', this.domKeyUp);
       window.removeEventListener('toggle-pause-game', this.togglePauseListener);
       window.removeEventListener('update-game-config', this.updateConfigListener);
-      window.removeEventListener('keydown', this.preventKeyScrollListener);
       window.removeEventListener('orientationchange', this.orientationHandler);
       window.removeEventListener('restart-game', this.restartGameListener);
       if (screen.orientation) {
@@ -406,7 +412,9 @@ export default class GameManagerScene extends Phaser.Scene {
         this.floorSegments.forEach((segment) => segment.destroy());
         this.floorSegments = [];
       }
-      this.gameModeManager.cleanup();
+      if (this.gameModeManager) {
+        this.gameModeManager.cleanup();
+      }
     });
   }
 
@@ -479,7 +487,6 @@ export default class GameManagerScene extends Phaser.Scene {
           const source = texture.getSourceImage();
           const textureWidth = source?.width || width;
           const textureHeight = source?.height || height;
-          // Calculate scale to cover the logical viewport (which is smaller when zoomed in)
           const logicalWidth = width / zoomFactor;
           const logicalHeight = height / zoomFactor;
           const baseScaleX = logicalWidth / textureWidth;

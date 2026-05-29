@@ -18,8 +18,6 @@ export default class PlatformerMode extends BaseMode {
     this.worldWidth = theme.worldWidth || 4000;
     
     // We will track input state directly
-    this.cursors = null;
-    this.keys = null;
     this.movingLeft = false;
     this.movingRight = false;
     
@@ -125,16 +123,11 @@ export default class PlatformerMode extends BaseMode {
       });
     }
 
-    // Keyboard inputs
-    this.cursors = this.scene.input.keyboard.createCursorKeys();
-    this.keys = this.scene.input.keyboard.addKeys('W,A,S,D,E,F,SPACE');
-
-    // Listen for custom virtual controls input events from the React overlay
     this.gameInputListener = (e) => {
       if (!e.detail) return;
       const { action, state } = e.detail;
       const isDown = state === 'down';
-      
+
       if (action === 'left') {
         this.movingLeft = isDown;
       } else if (action === 'right') {
@@ -498,26 +491,8 @@ export default class PlatformerMode extends BaseMode {
     }
   }
 
-  isInputFocused() {
-    const el = document.activeElement;
-    if (!el) return false;
-    if (el.tagName === 'TEXTAREA') return true;
-    if (el.tagName === 'INPUT' && (el.type === 'text' || el.type === 'number')) return true;
-    return false;
-  }
-
   update(time, delta) {
     if (this.scene.isGameOver || this.scene.isGamePaused) return;
-
-    if (this.isInputFocused()) {
-      this.scene.player.setVelocityX(0);
-      this.scene.playPlayerAnim('idle');
-      this.movingLeft = false;
-      this.movingRight = false;
-      this.leftPointerId = null;
-      this.rightPointerId = null;
-      return;
-    }
 
     const { player } = this.scene;
     let isMoving = false;
@@ -527,20 +502,19 @@ export default class PlatformerMode extends BaseMode {
     const drag = 1600;       // px/s^2 friction/drag rate
     const dt = delta / 1000; // delta time in seconds
 
-    if (this.cursors.left.isDown || this.keys.A.isDown || this.movingLeft) {
+    if (this.scene.keyStates.ArrowLeft || this.scene.keyStates.KeyA || this.movingLeft) {
       let vx = player.body.velocity.x;
       vx = Math.max(-this.moveSpeed, vx - accel * dt);
       player.setVelocityX(vx);
       player.setFlipX(true);
       isMoving = true;
-    } else if (this.cursors.right.isDown || this.keys.D.isDown || this.movingRight) {
+    } else if (this.scene.keyStates.ArrowRight || this.scene.keyStates.KeyD || this.movingRight) {
       let vx = player.body.velocity.x;
       vx = Math.min(this.moveSpeed, vx + accel * dt);
       player.setVelocityX(vx);
       player.setFlipX(false);
       isMoving = true;
     } else {
-      // Smooth friction drag deceleration when active steering input is released
       let vx = player.body.velocity.x;
       if (vx > 0) {
         vx = Math.max(0, vx - drag * dt);
@@ -549,18 +523,19 @@ export default class PlatformerMode extends BaseMode {
       }
       player.setVelocityX(vx);
       if (vx !== 0) {
-        isMoving = true; // Still drifting, keep playing the movement animation
+        isMoving = true;
       }
     }
 
-    // Jump Input Polling
-    const spaceJustDown = (this.keys?.SPACE && Phaser.Input.Keyboard.JustDown(this.keys.SPACE)) || 
-                          (this.cursors?.space && Phaser.Input.Keyboard.JustDown(this.cursors.space));
-    if (spaceJustDown) this.jump();
-
-    // Combat Input Polling (keys)
-    if (Phaser.Input.Keyboard.JustDown(this.keys.E)) this.melee();
-    if (this.projectilesEnabled && Phaser.Input.Keyboard.JustDown(this.keys.F)) this.shoot();
+    // Combat Input — via keyStates from domKeyDown
+    if (this.scene.keyStates._meleeTrigger) {
+      this.scene.keyStates._meleeTrigger = false;
+      this.melee();
+    }
+    if (this.projectilesEnabled && this.scene.keyStates._shootTrigger) {
+      this.scene.keyStates._shootTrigger = false;
+      this.shoot();
+    }
 
     // Tick down melee cooldown
     if (this.meleeCooldown > 0) this.meleeCooldown -= delta;
@@ -625,7 +600,7 @@ export default class PlatformerMode extends BaseMode {
   }
 
   jump() {
-    if (this.scene.isGameOver || this.isInputFocused()) return;
+    if (this.scene.isGameOver) return;
 
     const touchingDown = this.scene.player.body.touching.down || this.scene.player.body.blocked.down;
     if (touchingDown) {
@@ -634,7 +609,7 @@ export default class PlatformerMode extends BaseMode {
   }
 
   melee() {
-    if (this.scene.isGameOver || this.isInputFocused()) return;
+    if (this.scene.isGameOver) return;
     if (this.meleeCooldown > 0) return;   // Respect cooldown
 
     this.meleeCooldown = this.MELEE_COOLDOWN_MS;
@@ -658,7 +633,7 @@ export default class PlatformerMode extends BaseMode {
   }
 
   shoot() {
-    if (this.scene.isGameOver || this.isInputFocused() || !this.projectilesEnabled) return;
+    if (this.scene.isGameOver || !this.projectilesEnabled) return;
     
     // Retrieve an inactive projectile from the pool
     const projectile = this.projectiles.get();

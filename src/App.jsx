@@ -101,12 +101,12 @@ function App() {
     return () => window.removeEventListener('update-score', handleScoreUpdate);
   }, []);
 
-  // Dispatch pause game custom event to Phaser when the Creator Panel opens/closes
+  // Pause game when CreatorPanel menu is open
   useEffect(() => {
     window.dispatchEvent(new CustomEvent('toggle-pause-game', { detail: { isPaused: isMenuOpen } }));
   }, [isMenuOpen]);
 
-  // Game Over listener from Phaser
+  // Score listener from Phaser
   useEffect(() => {
     const handleGameOver = (e) => {
       setGameOverData(e.detail);
@@ -131,11 +131,6 @@ function App() {
     setIsGameOver(false);
     window.dispatchEvent(new CustomEvent('restart-game'));
   };
-
-  // Force game remount when gameType or themeKey changes so assets are cleanly loaded
-  useEffect(() => {
-    setGameKey(k => k + 1);
-  }, [liveParams.gameType, liveParams.themeKey]);
 
   const handleTweakSettings = () => {
     setIsGameOver(false);
@@ -212,6 +207,7 @@ function App() {
 
   const handleGenerate = (key, customConfig) => {
     setPresetKey(key);
+    setGameKey(k => k + 1);
     setLiveParams(customConfig);
     setHasStarted(true);
     setIsPromptOpen(false);
@@ -219,6 +215,7 @@ function App() {
 
   const handleOverlayGenerate = (key, customConfig) => {
     setPresetKey(key);
+    setGameKey(k => k + 1);
     setLiveParams(customConfig);
     setIsPromptOpen(false);
   };
@@ -239,6 +236,8 @@ function App() {
   const handleGoHome = () => {
     setHasStarted(false);
     setIsMenuOpen(false);
+    setIsGameOver(false);
+    setGameOverData(null);
   };
 
   const handlePromptGenerate = (promptText) => {
@@ -291,7 +290,8 @@ function App() {
     const currentMode = currentGameType === 'platformer' ? 'action_quest' : 'standard';
     updatedConfig.gameName = generateTitle(raw, currentMode, updatedConfig.themeKey);
 
-    // Apply — no full remount, let Phaser handle live update
+    // Apply — force fresh Phaser instance
+    setGameKey(k => k + 1);
     setPresetKey('custom');
     setLiveParams(updatedConfig);
     setIsMenuOpen(false);
@@ -405,6 +405,7 @@ function App() {
       {!hasStarted && (
         <ScreenZero
           onStartTransition={(config) => {
+            setGameKey(k => k + 1);
             setIsTransitioning(true);
             setLiveParams(config);
           }}
