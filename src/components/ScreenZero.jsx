@@ -16,6 +16,7 @@ const COMING_SOON_MODES = [
   { key: 'racing', label: 'Racing Rush', desc: 'Speed through scrolling highways, drift around turns, and top the leaderboards.' },
   { key: 'shooter', label: 'Shooter Arena', desc: 'Dodge bullet hell waves, fire plasma bursts, and survive boss arenas.' },
   { key: 'survival', label: 'Survival Mode', desc: 'Scavenge supplies in dark woods, build campfires, and outlast the night waves.' },
+  { key: 'simulator', label: 'Simulator World', desc: 'Design, manage, and optimize complex simulated environments and ecosystems.' }
 ];
 
 const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompleteTransition, isTransitioning }) => {
@@ -26,14 +27,25 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
   const [hoveredMode, setHoveredMode] = useState(null);
   const [terminalLogs, setTerminalLogs] = useState([]);
   const [progress, setProgress] = useState(0);
+  const [toastMessage, setToastMessage] = useState('');
   const formRef = useRef(null);
+
+  const showToast = (msg) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(''), 3000);
+  };
 
   const getBackgroundStyle = (baseOpacity, depthScale, assetUrl) => {
     let scale = 1.0;
     let filter = 'none';
     let opacity = baseOpacity;
+    let animation = 'none';
 
-    if (transitionPhase === 'compiling') {
+    if (transitionPhase === 'idle') {
+      if (depthScale === 1) animation = 'parallaxFar 24s ease-in-out infinite alternate';
+      else if (depthScale === 2) animation = 'parallaxMid 16s ease-in-out infinite alternate';
+      else if (depthScale === 3) animation = 'parallaxNear 10s ease-in-out infinite alternate';
+    } else if (transitionPhase === 'compiling') {
       scale = 1.0 + (depthScale * 0.05); // dynamic subtle depth scale zoom
       filter = 'blur(4px) saturate(1.2)';
     } else if (transitionPhase === 'fading') {
@@ -51,6 +63,7 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
       opacity,
       transform: `scale(${scale})`,
       filter,
+      animation,
       transition: 'all 2.0s cubic-bezier(0.25, 1, 0.5, 1)',
       pointerEvents: 'none'
     };
@@ -519,42 +532,48 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
                   })}
 
                   {/* Coming Soon Locked Modes */}
-                  {COMING_SOON_MODES.map((mode) => (
-                    <div
-                      key={mode.key}
-                      onMouseEnter={() => setHoveredMode(mode.key)}
-                      onMouseLeave={() => setHoveredMode(null)}
-                      style={{
-                        background: 'rgba(255, 255, 255, 0.01)',
-                        border: '1px solid rgba(255, 255, 255, 0.04)',
-                        borderRadius: '14px',
-                        padding: '10px 16px',
-                        opacity: 0.5,
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        cursor: 'default',
-                        transition: 'opacity 0.2s'
-                      }}
-                      onMouseEnter={() => {
-                        setHoveredMode(mode.key);
-                      }}
-                    >
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', textAlign: 'left', maxWidth: '80%' }}>
-                        <span style={{ color: 'var(--pm-text-secondary)', fontWeight: '600', fontSize: '13px' }}>{mode.label}</span>
-                        <span style={{ fontSize: '10px', color: 'var(--pm-text-tertiary)', lineHeight: '1.4' }}>{mode.desc}</span>
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+                    gap: '12px'
+                  }}>
+                    {COMING_SOON_MODES.map((mode) => (
+                      <div
+                        key={mode.key}
+                        onMouseEnter={() => setHoveredMode(mode.key)}
+                        onMouseLeave={() => setHoveredMode(null)}
+                        onClick={() => showToast('Coming soon')}
+                        style={{
+                          background: 'rgba(255, 255, 255, 0.01)',
+                          border: '1px solid rgba(255, 255, 255, 0.04)',
+                          borderRadius: '14px',
+                          padding: '12px 16px',
+                          opacity: 0.6,
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s ease',
+                          textAlign: 'left'
+                        }}
+                      >
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', maxWidth: '80%' }}>
+                          <span style={{ color: 'var(--pm-text-secondary)', fontWeight: '600', fontSize: '13px' }}>{mode.label}</span>
+                          <span style={{ fontSize: '10px', color: 'var(--pm-text-tertiary)', lineHeight: '1.4' }}>{mode.desc}</span>
+                        </div>
+                        <span style={{
+                          fontSize: '8px',
+                          fontWeight: '700',
+                          padding: '2px 6px',
+                          borderRadius: '5px',
+                          background: 'rgba(255, 255, 255, 0.05)',
+                          color: 'var(--pm-text-tertiary)',
+                          border: '1px solid rgba(255,255,255,0.08)',
+                          whiteSpace: 'nowrap'
+                        }}>COMING SOON</span>
                       </div>
-                      <span style={{
-                        fontSize: '8px',
-                        fontWeight: '700',
-                        padding: '2px 6px',
-                        borderRadius: '5px',
-                        background: 'rgba(255, 255, 255, 0.05)',
-                        color: 'var(--pm-text-tertiary)',
-                        border: '1px solid rgba(255,255,255,0.08)'
-                      }}>LOCKED</span>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
               </div>
             </>
@@ -563,8 +582,47 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
 
       </div>
 
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div style={{
+          position: 'fixed',
+          bottom: '30px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: 'rgba(0, 0, 0, 0.85)',
+          color: 'var(--pm-accent-teal)',
+          padding: '10px 24px',
+          borderRadius: '999px',
+          fontSize: '14px',
+          fontWeight: 'bold',
+          border: '1px solid var(--pm-accent-teal)',
+          boxShadow: '0 0 15px rgba(0, 229, 153, 0.25)',
+          zIndex: 100000,
+          backdropFilter: 'blur(8px)',
+          animation: 'toastFadeIn 0.3s ease-out'
+        }}>
+          {toastMessage}
+        </div>
+      )}
+
       {/* Retro preview theater keyframes and styling */}
       <style>{`
+        @keyframes parallaxFar {
+          0% { background-position-x: 50%; }
+          100% { background-position-x: 48%; }
+        }
+        @keyframes parallaxMid {
+          0% { background-position-x: 50%; }
+          100% { background-position-x: 46%; }
+        }
+        @keyframes parallaxNear {
+          0% { background-position-x: 50%; }
+          100% { background-position-x: 42%; }
+        }
+        @keyframes toastFadeIn {
+          from { opacity: 0; transform: translate(-50%, 20px); }
+          to { opacity: 1; transform: translate(-50%, 0); }
+        }
         @keyframes scanlineSweep {
           0% { top: -5%; }
           100% { top: 105%; }

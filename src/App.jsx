@@ -266,19 +266,39 @@ function App() {
     const diff = result.modifiers.isHard ? 9 : result.modifiers.isSlow ? 2 : liveParams.difficulty || 5;
     updatedConfig.difficulty = diff;
 
-    // Apply mode-specific physics
+    // Apply mode-specific physics & modifiers
     if (currentGameType === 'runner') {
-      updatedConfig.runSpeed = 200 + (diff * 40);
-      updatedConfig.obstacleDelay = 2000 - (diff * 120);
-      if (result.modifiers.isFast) updatedConfig.runSpeed = 600;
-      if (result.modifiers.isSlow) { updatedConfig.runSpeed = 200; updatedConfig.gravity = 1200; }
-      if (result.modifiers.isHard) { updatedConfig.runSpeed = 800; updatedConfig.gravity = 2500; updatedConfig.obstacleDelay = 600; }
+      // Base values for runner mode
+      if (result.mode || result.themeKey) {
+        updatedConfig.runSpeed = 200 + (diff * 40);
+        updatedConfig.obstacleDelay = 2000 - (diff * 120);
+      }
+      
+      if (result.modifiers.highJump) updatedConfig.jumpForce = (updatedConfig.jumpForce || 750) + 200;
+      if (result.modifiers.moreSpeed || result.modifiers.isFast) updatedConfig.runSpeed = Math.min((updatedConfig.runSpeed || 400) + 150, 900);
+      if (result.modifiers.lessSpeed || result.modifiers.isSlow) updatedConfig.runSpeed = Math.max((updatedConfig.runSpeed || 400) - 150, 150);
+      if (result.modifiers.hardcore || result.modifiers.isHard) {
+        updatedConfig.runSpeed = 800;
+        updatedConfig.gravity = 2500;
+        updatedConfig.obstacleDelay = 600;
+      }
     } else if (currentGameType === 'platformer') {
-      updatedConfig.actionEnemyCount = Math.floor(diff * 1.5);
-      updatedConfig.actionJumpHeight = 400 + (diff * 30);
-      if (result.modifiers.isFast) updatedConfig.actionJumpHeight = 800;
-      if (result.modifiers.isSlow) { updatedConfig.actionEnemyCount = 1; updatedConfig.actionGravity = 1000; }
-      if (result.modifiers.isHard) { updatedConfig.actionEnemyCount = 12; updatedConfig.actionGravity = 2000; }
+      // Base values for platformer mode
+      if (result.mode || result.themeKey) {
+        updatedConfig.actionEnemyCount = Math.floor(diff * 1.5);
+        updatedConfig.actionJumpHeight = 400 + (diff * 30);
+      }
+      
+      if (result.modifiers.highJump) updatedConfig.actionJumpHeight = (updatedConfig.actionJumpHeight || 550) + 150;
+      if (result.modifiers.moreSpeed || result.modifiers.isFast) updatedConfig.actionJumpHeight = Math.min((updatedConfig.actionJumpHeight || 550) + 100, 900);
+      if (result.modifiers.lessSpeed || result.modifiers.isSlow) {
+        updatedConfig.actionEnemyCount = Math.max((updatedConfig.actionEnemyCount || 5) - 2, 1);
+        updatedConfig.actionGravity = Math.max((updatedConfig.actionGravity || 1400) - 300, 800);
+      }
+      if (result.modifiers.hardcore || result.modifiers.isHard) {
+        updatedConfig.actionEnemyCount = 12;
+        updatedConfig.actionGravity = 2000;
+      }
     }
 
     if (result.modifiers.isLowGravity) {

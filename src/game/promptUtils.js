@@ -8,6 +8,10 @@ export function parsePromptKeywords(text) {
     isSlow: false,
     isHard: false,
     isLowGravity: false,
+    highJump: false,
+    lessSpeed: false,
+    moreSpeed: false,
+    hardcore: false,
   };
   let keywordsMatched = 0;
 
@@ -49,18 +53,26 @@ export function parsePromptKeywords(text) {
     keywordsMatched++;
   }
 
-  if (lower.match(/(fast|speed|quick|rush)/)) {
-    modifiers.isFast = true;
+  if (lower.match(/(high(er)? jump|big jump|jump higher)/)) {
+    modifiers.highJump = true;
     keywordsMatched++;
   }
-  if (lower.match(/(slow|easy|relax|chill)/)) {
+  if (lower.match(/(less speed|slow(er)?|less speed|chill)/)) {
+    modifiers.lessSpeed = true;
     modifiers.isSlow = true;
     keywordsMatched++;
   }
-  if (lower.match(/(hard|difficult|impossible|insane|chaos|crazy)/)) {
+  if (lower.match(/(more speed|fast(er)?|speed up)/)) {
+    modifiers.moreSpeed = true;
+    modifiers.isFast = true;
+    keywordsMatched++;
+  }
+  if (lower.match(/(hardcore|insane|extreme|impossible|chaos)/)) {
+    modifiers.hardcore = true;
     modifiers.isHard = true;
     keywordsMatched++;
   }
+
   if (lower.match(/(moon|float|space|fly|low gravity|zero gravity)/)) {
     modifiers.isLowGravity = true;
     keywordsMatched++;
