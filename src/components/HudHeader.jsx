@@ -57,6 +57,42 @@ const HudHeader = ({
           {liveParams.gameName}
         </h1>
       )}
+
+      {/* Temporary Debug Info Row */}
+      <div style={{
+        display: 'flex',
+        gap: '12px',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: '6px 14px',
+        background: 'rgba(10, 15, 24, 0.9)',
+        border: '1px solid rgba(255,255,255,0.08)',
+        borderRadius: '20px',
+        fontSize: '11px',
+        fontFamily: 'monospace',
+        color: 'var(--pm-text-secondary)',
+        marginTop: '8px',
+        pointerEvents: 'auto',
+        width: 'fit-content',
+        margin: '8px auto 0 auto',
+        boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
+      }}>
+        {liveParams.gameType === 'runner' ? (
+          <>
+            <span>Speed: <strong style={{ color: 'var(--pm-accent-teal)' }}>{Math.round(liveParams.runSpeed || 350)}</strong></span>
+            <span>Jump: <strong style={{ color: 'var(--pm-accent-teal)' }}>{Math.round(liveParams.jumpForce || 750)}</strong></span>
+            <span>Gravity: <strong style={{ color: 'var(--pm-accent-teal)' }}>{Math.round(liveParams.gravity || 1800)}</strong></span>
+          </>
+        ) : (
+          <>
+            <span>Speed: <strong style={{ color: 'var(--pm-accent-teal)' }}>{Math.round(liveParams.actionWalkSpeed || 300)}</strong></span>
+            <span>Jump: <strong style={{ color: 'var(--pm-accent-teal)' }}>{Math.round(liveParams.actionJumpHeight || 600)}</strong></span>
+            <span>Gravity: <strong style={{ color: 'var(--pm-accent-teal)' }}>{Math.round(liveParams.actionGravity || 1500)}</strong></span>
+            <span>Enemies: <strong style={{ color: 'var(--pm-accent-teal)' }}>{Math.round(liveParams.actionEnemyCount || 3)}</strong></span>
+          </>
+        )}
+        <span>Diff: <strong style={{ color: 'var(--pm-accent-purple)' }}>{liveParams.difficulty || 5}</strong></span>
+      </div>
     </div>
   );
 };

@@ -6,9 +6,10 @@ import MeleeAttack from '../objects/MeleeAttack';
 export default class PlatformerMode extends BaseMode {
   init() {
     const theme = this.scene.activeTheme || {};
-    this.moveSpeed = theme.moveSpeed || 300;
-    this.jumpForce = theme.jumpForce || (this.scene.gameConfig.actionJumpHeight || 600);
-    this.gravity = theme.gravity || (this.scene.gameConfig.actionGravity || 1500);
+    // Prioritize gameConfig (prompt modifiers) -> theme defaults -> hardcoded fallback
+    this.moveSpeed = this.scene.gameConfig.actionWalkSpeed || theme.moveSpeed || 300;
+    this.jumpForce = this.scene.gameConfig.actionJumpHeight || theme.jumpForce || 600;
+    this.gravity = this.scene.gameConfig.actionGravity || theme.gravity || 1500;
     
     // Feature hooks for future combat implementation
     this.enemyCount = this.scene.gameConfig.actionEnemyCount || 5;
@@ -712,6 +713,7 @@ export default class PlatformerMode extends BaseMode {
     this.jumpForce = newConfig.actionJumpHeight || 600;
     this.enemyCount = newConfig.actionEnemyCount || 5;
     this.projectilesEnabled = !!newConfig.actionProjectileEnabled;
+    this.moveSpeed = newConfig.actionWalkSpeed || 300;
     
     if (newConfig.actionGravity !== oldConfig.actionGravity) {
       this.gravity = newConfig.actionGravity || 1500;

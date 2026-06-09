@@ -19,12 +19,21 @@ const COMING_SOON_MODES = [
   { key: 'simulator', label: 'Simulator World', desc: 'Design, manage, and optimize complex simulated environments and ecosystems.' }
 ];
 
-const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompleteTransition, isTransitioning }) => {
+const getRandomMode = (selectedMode) => {
+  return selectedMode || (Math.random() > 0.5 ? 'action_quest' : 'standard');
+};
+
+const getRandomDifficulty = () => {
+  return Math.floor(Math.random() * 10) + 1;
+};
+
+const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompleteTransition, isTransitioning, currentConfig }) => {
   const [prompt, setPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [transitionPhase, setTransitionPhase] = useState('idle'); // idle | expanding | compiling | fading | done
   const [selectedMode, setSelectedMode] = useState(null); // null | 'standard' | 'action_quest'
   const [hoveredMode, setHoveredMode] = useState(null);
+  const [showInfoModal, setShowInfoModal] = useState(false);
   const [terminalLogs, setTerminalLogs] = useState([]);
   const [progress, setProgress] = useState(0);
   const [toastMessage, setToastMessage] = useState('');
@@ -148,33 +157,89 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
     }
 
     const result = parsePromptKeywords(text);
-    const mode = selectedMode || result.mode || (Math.random() > 0.5 ? 'action_quest' : 'standard');
-    const themeKey = result.themeKey || 'default';
+    const mode = getRandomMode(selectedMode || result.mode);
+    const themeKey = result.themeKey || 'ice';
     const secondaryThemeKey = result.secondaryThemeKey || null;
 
-    const newConfig = { ...GAME_PRESETS[mode] };
-    newConfig.themeKey = themeKey;
-    newConfig.secondaryThemeKey = secondaryThemeKey;
+    // Use currentConfig if overlay (to allow accumulation), otherwise start fresh from presets
+    const baseConfig = (isOverlay && currentConfig) ? currentConfig : GAME_PRESETS[mode];
+    const newConfig = { ...baseConfig };
 
-    const diff = result.modifiers.isHard ? 9 : result.modifiers.isSlow ? 2 : 5;
-    newConfig.difficulty = diff;
-    applyDifficulty(newConfig, mode);
+    // Set theme (only if matched or if not using overlay config)
+    if (result.themeKey || !(isOverlay && currentConfig)) {
+      newConfig.themeKey = themeKey;
+      newConfig.secondaryThemeKey = secondaryThemeKey;
+    }
 
-    if (result.modifiers.isFast) {
-      if (mode === 'standard') newConfig.runSpeed = 600;
-      if (mode === 'action_quest') newConfig.actionJumpHeight = 800;
-    }
-    if (result.modifiers.isSlow) {
-      if (mode === 'standard') { newConfig.runSpeed = 200; newConfig.gravity = 1200; }
-      if (mode === 'action_quest') { newConfig.actionEnemyCount = 1; newConfig.actionGravity = 1000; }
-    }
+    // Apply difficulty cumulatively
+    let diff = baseConfig.difficulty || 5;
     if (result.modifiers.isHard) {
-      if (mode === 'standard') { newConfig.runSpeed = 800; newConfig.gravity = 2500; newConfig.obstacleDelay = 600; }
-      if (mode === 'action_quest') { newConfig.actionEnemyCount = 12; newConfig.actionGravity = 2000; }
+      diff = Math.min(diff + 2, 10);
+    } else if (result.modifiers.isSlow) {
+      diff = Math.max(diff - 2, 1);
     }
+    newConfig.difficulty = diff;
+
+    const currentGameType = newConfig.gameType;
+
+    // Apply mode-specific physics & modifiers (Sync with App.jsx logic)
+    if (currentGameType === 'runner') {
+      const isModeChanging = result.mode && result.mode !== 'standard';
+      const isThemeChanging = result.themeKey && result.themeKey !== baseConfig.themeKey;
+      if (isModeChanging || isThemeChanging || !(isOverlay && currentConfig)) {
+        newConfig.runSpeed = 200 + (diff * 40);
+        newConfig.obstacleDelay = 2000 - (diff * 120);
+        newConfig.gravity = 1800;
+        newConfig.jumpForce = 750;
+      }
+
+      if (result.modifiers.highJump) {
+        newConfig.jumpForce = (newConfig.jumpForce || 750) + 250;
+      }
+      if (result.modifiers.isFast) {
+        newConfig.runSpeed = Math.min((newConfig.runSpeed || 400) + 200, 1000);
+      }
+      if (result.modifiers.isSlow) {
+        newConfig.runSpeed = Math.max((newConfig.runSpeed || 400) - 200, 150);
+      }
+      if (result.modifiers.isHard) {
+        newConfig.runSpeed = Math.min((newConfig.runSpeed || 850) + 150, 1000);
+        newConfig.gravity = (newConfig.gravity || 1800) + 500;
+        newConfig.obstacleDelay = Math.max((newConfig.obstacleDelay || 1200) - 400, 400);
+      }
+    } else if (currentGameType === 'action_quest' || currentGameType === 'platformer') {
+      const isModeChanging = result.mode && result.mode !== 'action_quest';
+      const isThemeChanging = result.themeKey && result.themeKey !== baseConfig.themeKey;
+      if (isModeChanging || isThemeChanging || !(isOverlay && currentConfig)) {
+        newConfig.actionEnemyCount = Math.floor(diff * 1.5);
+        newConfig.actionJumpHeight = 400 + (diff * 30);
+        newConfig.actionGravity = 1500;
+        newConfig.actionWalkSpeed = 300;
+      }
+
+      if (result.modifiers.highJump) {
+        newConfig.actionJumpHeight = (newConfig.actionJumpHeight || 550) + 200;
+      }
+      if (result.modifiers.isFast) {
+        newConfig.actionWalkSpeed = (newConfig.actionWalkSpeed || 300) + 100;
+      }
+      if (result.modifiers.isSlow) {
+        newConfig.actionEnemyCount = Math.max((newConfig.actionEnemyCount || 5) - 2, 0);
+        newConfig.actionGravity = Math.max((newConfig.actionGravity || 1400) - 300, 500);
+        newConfig.actionWalkSpeed = Math.max((newConfig.actionWalkSpeed || 300) - 80, 100);
+      }
+      if (result.modifiers.isHard) {
+        newConfig.actionEnemyCount = (newConfig.actionEnemyCount || 5) + 4;
+        newConfig.actionGravity = (newConfig.actionGravity || 1500) + 400;
+      }
+    }
+
     if (result.modifiers.isLowGravity) {
-      newConfig.gravity = 600;
-      newConfig.actionGravity = 600;
+      if (currentGameType === 'runner') {
+        newConfig.gravity = Math.max((newConfig.gravity || 1800) - 400, 400);
+      } else {
+        newConfig.actionGravity = Math.max((newConfig.actionGravity || 1500) - 300, 300);
+      }
     }
 
     if (result.keywordsMatched === 0) {
@@ -186,15 +251,16 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
   };
 
   const generateRandom = () => {
-    const mode = Math.random() > 0.5 ? 'action_quest' : 'standard';
+    const mode = getRandomMode(selectedMode);
     const config = { ...GAME_PRESETS[mode] };
-    config.difficulty = Math.floor(Math.random() * 10) + 1;
+    config.difficulty = getRandomDifficulty();
     
     applyDifficulty(config, mode);
     
-    config.gameName = mode === 'action_quest' ? 'Random Quest' : 'Random Runner';
-    const themePool = ['forest', 'lava', 'ice', 'city', 'space', 'default'];
-    config.themeKey = themePool[Math.floor(Math.random() * themePool.length)];
+    const theme = 'ice';
+    config.themeKey = theme;
+    
+    config.gameName = generateTitle("", mode, theme);
     
     startCompilationSequence(config, "Random Preset");
   };
@@ -255,6 +321,20 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
         <rect width="100%" height="100%" fill="url(#grid)" />
       </svg>
 
+      {/* Floating glow orbs */}
+      <div style={{
+        position: 'fixed', width: '400px', height: '400px',
+        background: 'radial-gradient(circle, rgba(13,180,185,0.12) 0%, transparent 70%)',
+        top: '-5%', left: '-5%', borderRadius: '50%', filter: 'blur(50px)',
+        animation: 'float 14s infinite alternate', zIndex: 2
+      }} />
+      <div style={{
+        position: 'fixed', width: '350px', height: '350px',
+        background: 'radial-gradient(circle, rgba(162,89,255,0.08) 0%, transparent 70%)',
+        bottom: '10%', right: '-5%', borderRadius: '50%', filter: 'blur(50px)',
+        animation: 'float 18s infinite alternate-reverse', zIndex: 2
+      }} />
+
       {/* Close button for overlay */}
       {isOverlay && (
         <div style={{ position: 'absolute', top: '16px', left: '16px', zIndex: 100 }}>
@@ -274,339 +354,218 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
         </div>
       )}
 
-      {/* Header Logo */}
-      <div className="pm-header-container" style={{ zIndex: 3, display: 'flex', flexDirection: 'column', alignItems: 'center', pointerEvents: 'none' }}>
+      {/* Hero logo and slogan */}
+      <div className="pm-screenzero-hero" style={{
+        flex: 1,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 3,
+        pointerEvents: 'none',
+        opacity: (transitionPhase === 'compiling' || transitionPhase === 'fading') ? 0.3 : 1,
+        transition: 'all 0.6s ease-in-out'
+      }}>
         <img
           src="/assets/Logo_PlayMint_(transparent).png"
           alt="PlayMint"
-          className="pm-header-logo"
+          className="pm-screenzero-logo"
+          style={{ height: '38px', marginBottom: '12px', opacity: 0.95 }}
         />
-        <p className="pm-header-slogan" style={{
+        <p className="pm-screenzero-slogan" style={{
           margin: 0,
           fontFamily: 'var(--font-heading)',
           fontWeight: '700',
           color: 'var(--pm-text-secondary)',
-          letterSpacing: '1px',
+          letterSpacing: '1.5px',
           opacity: 0.8,
-          textTransform: 'uppercase'
+          textTransform: 'uppercase',
+          fontSize: 'clamp(14px, 2.5vw, 18px)',
+          textAlign: 'center'
         }}>
           From words to worlds
         </p>
       </div>
 
-      {/* Main Content Grid */}
-      <div className="pm-screenzero-grid" style={{
-        width: '100%',
-        maxWidth: '700px',
-        zIndex: 3,
-        flex: 1,
-        alignItems: 'stretch',
-        boxSizing: 'border-box',
-        marginBottom: '20px',
-        margin: '0 auto'
-      }}>
-        
-        {/* ================= COLUMN: INTERACTIVE GENERATOR DECK ================= */}
-        <div className="pm-deck" style={{
-          boxSizing: 'border-box'
-        }}>
-          {/* Compiling Sequence overlay */}
-          {(transitionPhase === 'compiling' || transitionPhase === 'fading') ? (
-            <div style={{
-              flex: 1,
-              background: 'rgba(6, 10, 16, 0.92)',
-              border: '1px solid var(--pm-accent-teal)',
-              borderRadius: '24px',
-              padding: '24px',
-              boxShadow: '0 12px 40px rgba(0, 0, 0, 0.6), 0 0 25px rgba(0, 229, 153, 0.15)',
-              backdropFilter: 'blur(16px)',
-              fontFamily: 'monospace',
-              boxSizing: 'border-box',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '16px',
-              minHeight: '340px'
-            }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '8px' }}>
-                <div style={{ display: 'flex', gap: '6px' }}>
-                  <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#ff5f56' }} />
-                  <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#ffbd2e' }} />
-                  <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#27c93f' }} />
-                </div>
-                <span style={{ color: 'var(--pm-text-tertiary)', fontSize: '10px', fontWeight: 'bold', letterSpacing: '1px' }}>PLAYMINT COMPILER v2.0</span>
+      {/* ===== BOTTOM: Prompt dock ===== */}
+      <div className="pm-screenzero-dock">
+        {(transitionPhase === 'compiling' || transitionPhase === 'fading') ? (
+          /* ===== COMPILER TERMINAL (Bottom-Docked Version) ===== */
+          <div style={{
+            width: 'min(640px, 100%)',
+            background: 'rgba(6, 10, 16, 0.92)',
+            border: '1px solid var(--pm-accent-teal)',
+            borderRadius: '24px',
+            padding: '24px',
+            boxShadow: '0 12px 40px rgba(0, 0, 0, 0.6), 0 0 25px rgba(0, 229, 153, 0.15)',
+            backdropFilter: 'blur(16px)',
+            fontFamily: 'monospace',
+            boxSizing: 'border-box',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '16px',
+            minHeight: '280px'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '8px' }}>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#ff5f56' }} />
+                <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#ffbd2e' }} />
+                <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#27c93f' }} />
               </div>
+              <span style={{ color: 'var(--pm-text-tertiary)', fontSize: '10px', fontWeight: 'bold', letterSpacing: '1px' }}>PLAYMINT COMPILER v2.0</span>
+            </div>
 
-              <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                {terminalLogs.map((log, i) => {
-                  let color = '#fff';
-                  if (log.startsWith('[SYSTEM]')) color = 'var(--pm-accent-teal)';
-                  else if (log.startsWith('[PROMPT]')) color = 'var(--pm-accent-orange)';
-                  else if (log.startsWith('[THEME]')) color = '#8A2BE2';
-                  else if (log.startsWith('[PHYSIC]')) color = '#3182CE';
-                  else if (log.startsWith('[ENGINE]')) color = 'var(--pm-accent-teal)';
+            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '160px' }}>
+              {terminalLogs.map((log, i) => {
+                let color = '#fff';
+                if (log.startsWith('[SYSTEM]')) color = 'var(--pm-accent-teal)';
+                else if (log.startsWith('[PROMPT]')) color = 'var(--pm-accent-orange)';
+                else if (log.startsWith('[THEME]')) color = '#8A2BE2';
+                else if (log.startsWith('[PHYSIC]')) color = '#3182CE';
+                else if (log.startsWith('[ENGINE]')) color = 'var(--pm-accent-teal)';
 
-                  return (
-                    <div key={i} style={{
-                      color,
-                      fontSize: '12px',
-                      lineHeight: '1.5',
-                      textAlign: 'left',
-                      fontFamily: 'monospace',
-                      textShadow: `0 0 6px ${color}40`,
-                      whiteSpace: 'pre-wrap'
-                    }}>
-                      {log}
-                    </div>
-                  );
-                })}
+                return (
+                  <div key={i} style={{
+                    color,
+                    fontSize: '12px',
+                    lineHeight: '1.5',
+                    textAlign: 'left',
+                    fontFamily: 'monospace',
+                    textShadow: `0 0 6px ${color}40`,
+                    whiteSpace: 'pre-wrap'
+                  }}>
+                    {log}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: 'var(--pm-text-secondary)' }}>
+                <span>Compiling World Matrix</span>
+                <span style={{ color: 'var(--pm-accent-teal)', fontWeight: 'bold' }}>{Math.round(progress)}%</span>
               </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: 'var(--pm-text-secondary)' }}>
-                  <span>Compiling World Matrix</span>
-                  <span style={{ color: 'var(--pm-accent-teal)', fontWeight: 'bold' }}>{Math.round(progress)}%</span>
-                </div>
-                <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.06)', borderRadius: '3px', overflow: 'hidden' }}>
-                  <div style={{
-                    width: `${progress}%`,
-                    height: '100%',
-                    background: 'linear-gradient(90deg, var(--pm-accent-teal), #8A2BE2)',
-                    boxShadow: '0 0 8px var(--pm-accent-teal)',
-                    borderRadius: '3px',
-                    transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
-                  }} />
-                </div>
+              <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.06)', borderRadius: '3px', overflow: 'hidden' }}>
+                <div style={{
+                  width: `${progress}%`,
+                  height: '100%',
+                  background: 'linear-gradient(90deg, var(--pm-accent-teal), #8A2BE2)',
+                  boxShadow: '0 0 8px var(--pm-accent-teal)',
+                  borderRadius: '3px',
+                  transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
+                }} />
               </div>
             </div>
-          ) : (
-            <>
-              {/* Prompt generation form */}
-              <div ref={formRef} className="pm-prompt-card" style={{
-                background: 'rgba(10, 15, 24, 0.85)',
-                border: '1px solid rgba(255,255,255,0.08)',
-                borderRadius: '20px',
-                boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
-                boxSizing: 'border-box'
-              }}>
-                <form onSubmit={handleGenerate} style={{
-                  display: 'grid',
-                  gridTemplateColumns: '1fr auto auto',
-                  gap: '8px',
-                  background: 'rgba(0,0,0,0.3)',
-                  border: '1px solid rgba(255,255,255,0.06)',
-                  borderRadius: '12px',
-                  padding: '6px'
-                }}>
-                  <input
-                    type="text"
-                    value={prompt}
-                    onChange={(e) => setPrompt(e.target.value)}
-                    placeholder="e.g. 'city runner lava' or 'forest quest'"
-                    style={{
-                      padding: '10px 14px', fontSize: '14px', borderRadius: '8px',
-                      backgroundColor: 'transparent', border: 'none', color: '#fff',
-                      outline: 'none', width: '100%', boxSizing: 'border-box'
-                    }}
-                    autoFocus
-                  />
-                  <button
-                    type="submit"
-                    className="pm-btn pm-btn-primary"
-                    disabled={isGenerating}
-                    style={{
-                      padding: '8px 16px', fontSize: '12px', borderRadius: '8px',
-                      fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s'
-                    }}
-                  >
-                    Generate
-                  </button>
+          </div>
+        ) : (
+          /* ===== PROMPT DOCK CONTENT ===== */
+          <div ref={formRef} className="pm-screenzero-content">
+            {/* Input card */}
+            <div className="pm-prompt-card">
+              <form onSubmit={handleGenerate}>
+                <input
+                  type="text"
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  placeholder="e.g. 'city runner lava' or 'forest quest'"
+                  autoFocus
+                />
+                <button
+                  type="submit"
+                  className="pm-btn pm-btn-primary"
+                  disabled={isGenerating}
+                >
+                  Generate
+                </button>
+                <button
+                  type="button"
+                  onClick={handleQuickStart}
+                  className="pm-btn pm-btn-outline"
+                  disabled={isGenerating}
+                >
+                  Quick Start
+                </button>
+              </form>
+
+              {/* Game Mode Bubbles Selector */}
+              <div className="pm-screenzero-modes">
+                <div className="modes-header">
+                  <p>Select game mode</p>
                   <button
                     type="button"
-                    onClick={handleQuickStart}
-                    className="pm-btn pm-btn-outline"
-                    disabled={isGenerating}
-                    style={{
-                      padding: '8px 12px', fontSize: '11px', borderRadius: '8px',
-                      cursor: 'pointer', transition: 'all 0.2s', background: 'rgba(255,255,255,0.05)'
-                    }}
+                    onClick={() => setShowInfoModal(true)}
+                    className="info-btn"
+                    title="View Game Mode Details"
                   >
-                    Quick Start
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="10" />
+                      <line x1="12" y1="16" x2="12" y2="12" />
+                      <line x1="12" y1="8" x2="12.01" y2="8" />
+                    </svg>
                   </button>
-                </form>
+                </div>
+                <div className="mode-bubbles-row playable-row">
+                  {AVAILABLE_MODES.map((mode) => {
+                    const isActive = selectedMode === mode.key;
+                    return (
+                      <button
+                        key={mode.key}
+                        type="button"
+                        disabled={isGenerating}
+                        onClick={() => setSelectedMode(isActive ? null : mode.key)}
+                        onMouseEnter={() => setHoveredMode(mode.key)}
+                        onMouseLeave={() => setHoveredMode(null)}
+                        className={`mode-bubble playable ${isActive ? 'active' : ''}`}
+                      >
+                        <span className="dot" />
+                        {mode.label}
+                      </button>
+                    );
+                  })}
+                </div>
 
-                {/* Suggested prompt chips */}
-                <div className="pm-prompt-chips" style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-start' }}>
-                  {['lava runner', 'ice quest', 'forest sprint', 'city runner lava', 'space quest'].map((example, i) => (
+                <div className="section-divider">
+                  <span>Coming Soon</span>
+                </div>
+
+                <div className="mode-bubbles-row soon-row">
+                  {COMING_SOON_MODES.map((mode) => (
                     <button
-                      key={i}
+                      key={mode.key}
                       type="button"
-                      onClick={() => handleExampleClick(example)}
-                      style={{
-                        background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
-                        color: 'var(--pm-text-secondary)', padding: '4px 10px', borderRadius: '999px',
-                        fontSize: '10px', cursor: 'pointer', transition: 'all 0.2s ease',
-                        opacity: 0.8
-                      }}
-                      onMouseEnter={(e) => { e.target.style.background = 'rgba(255,255,255,0.1)'; e.target.style.color = '#fff'; e.target.style.opacity = '1'; }}
-                      onMouseLeave={(e) => { e.target.style.background = 'rgba(255,255,255,0.04)'; e.target.style.color = 'var(--pm-text-secondary)'; e.target.style.opacity = '0.8'; }}
+                      onClick={() => showToast(`${mode.label} is coming soon!`)}
+                      onMouseEnter={() => setHoveredMode(mode.key)}
+                      onMouseLeave={() => setHoveredMode(null)}
+                      className="mode-bubble locked"
                     >
-                      {example}
+                      {mode.label}
                     </button>
                   ))}
                 </div>
               </div>
 
-              {/* ================= VERTICAL MODE SELECTION DECK ================= */}
-              <div className="pm-selection-card" style={{
-                background: 'rgba(10, 15, 24, 0.85)',
-                border: '1px solid rgba(255,255,255,0.08)',
-                borderRadius: '24px',
-                display: 'flex',
-                flexDirection: 'column',
-                flex: 1,
-                minHeight: 0,
-                boxSizing: 'border-box'
-              }}>
-                <h3 style={{
-                  margin: '0 0 12px 0',
-                  fontSize: '12px',
-                  fontWeight: '700',
-                  color: 'var(--pm-text-secondary)',
-                  letterSpacing: '1px',
-                  textTransform: 'uppercase'
-                }}>
-                  CHOOSE YOUR WORLD PROTOCOL
-                </h3>
-                
-                {/* Scrollable vertical list */}
-                <div className="vertical-scroll-deck" style={{
-                  flex: 1,
-                  minHeight: 0,
-                  overflowY: 'auto',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '8px',
-                  paddingRight: '6px'
-                }}>
-                  {/* Active Playable Modes */}
-                  {AVAILABLE_MODES.map((mode) => {
-                    const isSelected = selectedMode === mode.key;
-                    return (
-                      <div
-                        key={mode.key}
-                        onMouseEnter={() => setHoveredMode(mode.key)}
-                        onMouseLeave={() => setHoveredMode(null)}
-                        onClick={() => setSelectedMode(isSelected ? null : mode.key)}
-                        style={{
-                          background: isSelected ? 'rgba(0, 229, 153, 0.08)' : 'rgba(255, 255, 255, 0.03)',
-                          border: isSelected ? '1px solid var(--pm-accent-teal)' : '1px solid rgba(255, 255, 255, 0.08)',
-                          borderRadius: '14px',
-                          padding: '12px 16px',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          transition: 'all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-                          boxShadow: isSelected ? '0 0 15px rgba(0, 229, 153, 0.1)' : 'none'
-                        }}
-                      >
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', textAlign: 'left', maxWidth: '80%' }}>
-                          <span style={{
-                            color: isSelected ? 'var(--pm-accent-teal)' : '#fff',
-                            fontWeight: '700',
-                            fontSize: '14px'
-                          }}>{mode.label}</span>
-                          <span style={{ fontSize: '11px', color: 'var(--pm-text-secondary)', lineHeight: '1.4' }}>{mode.desc}</span>
-                        </div>
-                        <span style={{
-                          fontSize: '9px',
-                          fontWeight: '800',
-                          padding: '3px 8px',
-                          borderRadius: '6px',
-                          background: 'rgba(0, 229, 153, 0.15)',
-                          color: 'var(--pm-accent-teal)',
-                          border: '1px solid rgba(0, 229, 153, 0.25)'
-                        }}>PLAYABLE</span>
-                      </div>
-                    );
-                  })}
-
-                  {/* Coming Soon Locked Modes */}
-                  <div style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-                    gap: '12px'
-                  }}>
-                    {COMING_SOON_MODES.map((mode) => (
-                      <div
-                        key={mode.key}
-                        onMouseEnter={() => setHoveredMode(mode.key)}
-                        onMouseLeave={() => setHoveredMode(null)}
-                        onClick={() => showToast('Coming soon')}
-                        style={{
-                          background: 'rgba(255, 255, 255, 0.01)',
-                          border: '1px solid rgba(255, 255, 255, 0.04)',
-                          borderRadius: '14px',
-                          padding: '12px 16px',
-                          opacity: 0.6,
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          cursor: 'pointer',
-                          transition: 'all 0.2s ease',
-                          textAlign: 'left'
-                        }}
-                      >
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', maxWidth: '80%' }}>
-                          <span style={{ color: 'var(--pm-text-secondary)', fontWeight: '600', fontSize: '13px' }}>{mode.label}</span>
-                          <span style={{ fontSize: '10px', color: 'var(--pm-text-tertiary)', lineHeight: '1.4' }}>{mode.desc}</span>
-                        </div>
-                        <span style={{
-                          fontSize: '8px',
-                          fontWeight: '700',
-                          padding: '2px 6px',
-                          borderRadius: '5px',
-                          background: 'rgba(255, 255, 255, 0.05)',
-                          color: 'var(--pm-text-tertiary)',
-                          border: '1px solid rgba(255,255,255,0.08)',
-                          whiteSpace: 'nowrap'
-                        }}>COMING SOON</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+              {/* Suggestion Chips */}
+              <div className="pm-prompt-chips">
+                {['lava runner', 'ice quest', 'forest sprint', 'city runner lava', 'space quest'].map((example, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => handleExampleClick(example)}
+                  >
+                    {example}
+                  </button>
+                ))}
               </div>
-            </>
-          )}
-        </div>
-
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Toast Notification */}
-      {toastMessage && (
-        <div style={{
-          position: 'fixed',
-          bottom: '30px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          background: 'rgba(0, 0, 0, 0.85)',
-          color: 'var(--pm-accent-teal)',
-          padding: '10px 24px',
-          borderRadius: '999px',
-          fontSize: '14px',
-          fontWeight: 'bold',
-          border: '1px solid var(--pm-accent-teal)',
-          boxShadow: '0 0 15px rgba(0, 229, 153, 0.25)',
-          zIndex: 100000,
-          backdropFilter: 'blur(8px)',
-          animation: 'toastFadeIn 0.3s ease-out'
-        }}>
-          {toastMessage}
-        </div>
-      )}
-
-      {/* Retro preview theater keyframes and styling */}
       <style>{`
+        @keyframes scanlineSweep {
+          0% { top: -5%; }
+          100% { top: 105%; }
+        }
         @keyframes parallaxFar {
           0% { background-position-x: 50%; }
           100% { background-position-x: 48%; }
@@ -617,216 +576,575 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
         }
         @keyframes parallaxNear {
           0% { background-position-x: 50%; }
-          100% { background-position-x: 42%; }
+          100% { background-position-x: 44%; }
+        }
+        @keyframes float {
+          0% { transform: translateY(0) scale(1); }
+          100% { transform: translateY(-15px) scale(1.03); }
+        }
+        @keyframes dockRise {
+          0% { opacity: 0; transform: translateY(20px); }
+          100% { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes sloganFade {
+          0% { opacity: 0; transform: translateY(10px); }
+          100% { opacity: 1; transform: translateY(0); }
         }
         @keyframes toastFadeIn {
           from { opacity: 0; transform: translate(-50%, 20px); }
           to { opacity: 1; transform: translate(-50%, 0); }
         }
-        @keyframes scanlineSweep {
-          0% { top: -5%; }
-          100% { top: 105%; }
-        }
 
+        /* Default: Mobile first styles */
         .pm-screenzero-container {
           display: flex;
           flex-direction: column;
           align-items: center;
           overflow-y: auto;
           overflow-x: hidden;
-          padding: clamp(16px, 3vh, 48px) clamp(16px, 4vw, 24px);
+          padding: 12px 16px;
           box-sizing: border-box;
-        }
-        
-        .pm-header-container {
-          margin-bottom: 24px;
-          margin-top: 12px;
-          transition: all 0.3s;
+          height: 100vh;
         }
 
-        .pm-header-logo {
-          height: 36px;
-          margin-bottom: 6px;
-          opacity: 0.95;
-          transition: all 0.3s;
-        }
-
-        .pm-header-slogan {
-          margin: 0;
-          font-family: var(--font-heading);
-          font-size: clamp(14px, 2.5vw, 18px);
-          font-weight: 700;
-          color: var(--pm-text-secondary);
-          letter-spacing: 1px;
-          opacity: 0.8;
-          text-transform: uppercase;
-        }
-
-        .pm-screenzero-grid {
+        .pm-screenzero-hero {
+          flex: 1;
           display: flex;
           flex-direction: column;
-          gap: 16px;
+          align-items: center;
+          justify-content: center;
+          width: 100%;
+          animation: sloganFade 0.8s ease-out;
+        }
+
+        .pm-screenzero-logo {
+          height: 30px;
+          margin-bottom: 8px;
+          opacity: 0.95;
+        }
+
+        .pm-screenzero-slogan {
+          margin: 0;
+          font-family: var(--font-heading);
+          font-weight: 700;
+          color: var(--pm-text-secondary);
+          letter-spacing: 1.2px;
+          opacity: 0.8;
+          text-transform: uppercase;
+          font-size: 13px;
+          text-align: center;
+        }
+
+        .pm-screenzero-dock {
+          width: 100%;
+          margin-top: auto;
+          padding: 0 4px 16px 4px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          z-index: 3;
+          position: relative;
+          animation: dockRise 0.6s ease-out;
+          box-sizing: border-box;
+        }
+
+        .pm-screenzero-content {
           width: 100%;
           box-sizing: border-box;
         }
 
-        .pm-deck {
-          display: flex;
-          flex-direction: column;
-          gap: 16px;
-        }
-
         .pm-prompt-card {
-          padding: 16px;
-          transition: all 0.3s;
+          background: rgba(10, 15, 24, 0.85);
+          border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 16px;
+          box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+          padding: 12px;
+          box-sizing: border-box;
+          backdrop-filter: blur(16px);
         }
 
-        .pm-selection-card {
-          padding: 20px;
-          box-shadow: 0 12px 36px rgba(0,0,0,0.4);
-          min-height: 260px;
-          transition: all 0.3s;
+        .pm-prompt-card form {
+          display: grid;
+          grid-template-columns: 1fr auto;
+          gap: 6px;
+          background: rgba(0,0,0,0.3);
+          border: 1px solid rgba(255,255,255,0.06);
+          border-radius: 10px;
+          padding: 4px;
         }
 
-        .vertical-scroll-deck {
-          max-height: 180px;
-          overflow-y: auto;
-          -webkit-overflow-scrolling: touch;
-          transition: all 0.3s;
+        .pm-prompt-card input {
+          padding: 8px 12px;
+          font-size: 13px;
+          border-radius: 6px;
+          background-color: transparent;
+          border: none;
+          color: #fff;
+          outline: none;
+          width: 100%;
+          box-sizing: border-box;
         }
 
-        @media (min-width: 768px) {
+        .pm-prompt-card button.pm-btn-primary {
+          padding: 6px 14px;
+          font-size: 12px;
+          border-radius: 6px;
+          font-weight: bold;
+          cursor: pointer;
+        }
+
+        .pm-prompt-card button.pm-btn-outline {
+          display: none; /* Hide Quick Start on mobile form row to save width */
+        }
+
+        .pm-screenzero-modes {
+          margin-top: 12px;
+          text-align: center;
+        }
+
+        .pm-screenzero-modes p {
+          margin: 0 0 8px 0;
+          font-size: 10px;
+          font-weight: 700;
+          color: var(--pm-text-secondary);
+          letter-spacing: 0.8px;
+          text-transform: uppercase;
+        }
+
+        .mode-bubbles-row {
+          display: flex;
+          gap: 6px;
+          flex-wrap: wrap;
+          justify-content: center;
+          margin-bottom: 4px;
+        }
+
+        .mode-bubble {
+          padding: 5px 11px;
+          border-radius: 999px;
+          font-size: 10px;
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+          cursor: pointer;
+        }
+
+        .mode-bubble.playable {
+          font-weight: 700;
+          background: rgba(255, 255, 255, 0.04);
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          color: var(--pm-text-secondary);
+        }
+        .mode-bubble.playable:hover {
+          background: rgba(255, 255, 255, 0.1);
+          border-color: rgba(255, 255, 255, 0.2);
+          color: #fff;
+        }
+        .mode-bubble.playable.active {
+          background: rgba(0, 229, 153, 0.15);
+          border: 1px solid var(--pm-accent-teal);
+          color: var(--pm-accent-teal);
+          box-shadow: 0 0 12px rgba(0, 229, 153, 0.2);
+        }
+
+        .mode-bubble.playable .dot {
+          width: 5px;
+          height: 5px;
+          border-radius: 50%;
+          background: rgba(255, 255, 255, 0.3);
+          transition: background 0.2s ease;
+        }
+        .mode-bubble.playable.active .dot {
+          background: var(--pm-accent-teal);
+        }
+
+        .mode-bubble.locked {
+          font-weight: 500;
+          background: rgba(255, 255, 255, 0.01);
+          border: 1px dashed rgba(255, 255, 255, 0.06);
+          color: var(--pm-text-tertiary);
+          opacity: 0.5;
+        }
+        .mode-bubble.locked:hover {
+          opacity: 0.8;
+          border-color: rgba(255, 255, 255, 0.12);
+          color: var(--pm-text-secondary);
+        }
+
+        .section-divider {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          margin: 10px 0 6px 0;
+          width: 100%;
+        }
+        .section-divider::before,
+        .section-divider::after {
+          content: '';
+          flex: 1;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        }
+        .section-divider span {
+          padding: 0 8px;
+          font-size: 8px;
+          font-weight: 700;
+          color: var(--pm-text-tertiary);
+          text-transform: uppercase;
+          letter-spacing: 0.8px;
+        }
+
+        .mode-desc-bar {
+          min-height: 24px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          margin-top: 6px;
+          padding: 0 4px;
+        }
+
+        .mode-desc-bar p {
+          margin: 0;
+          font-size: 10px;
+          color: var(--pm-text-secondary);
+          line-height: 1.4;
+          transition: all 0.2s ease;
+          text-align: center;
+          font-style: italic;
+          opacity: 0.95;
+        }
+        .mode-desc-bar p.hovered {
+          color: var(--pm-text-primary);
+          font-style: normal;
+        }
+
+        .pm-prompt-chips {
+          display: none; /* Hide suggested chips on mobile by default to keep clean */
+        }
+
+        /* Desktop Layering: min-width: 641px */
+        @media (min-width: 641px) {
           .pm-screenzero-container {
-            height: 100vh;
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-            box-sizing: border-box;
+            padding: clamp(24px, 4vh, 48px) clamp(24px, 4vw, 48px);
           }
-          .pm-screenzero-grid {
-            display: flex;
-            flex-direction: column;
-            gap: 32px;
-            flex: 1;
-            min-height: 0;
-            overflow: hidden;
+          .pm-screenzero-logo {
+            height: 38px;
+            margin-bottom: 12px;
           }
-          .pm-deck {
-            height: 100%;
-            min-height: 0;
-            gap: 20px;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
+          .pm-screenzero-slogan {
+            font-size: clamp(14px, 2.5vw, 18px);
+            letter-spacing: 1.5px;
           }
-          .pm-selection-card {
-            flex: 1;
-            min-height: 0;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
+          .pm-screenzero-dock {
+            padding: 0 clamp(16px, 4vw, 48px) clamp(24px, 4vh, 48px);
           }
-          .vertical-scroll-deck {
-            flex: 1;
-            min-height: 0;
-            overflow-y: auto;
-            -webkit-overflow-scrolling: touch;
-            max-height: none;
-          }
-        }
-
-        /* Industry Standard Low-Height / Landscape Viewports Override */
-        @media (max-height: 550px) {
-          .pm-header-container {
-            margin-bottom: 6px !important;
-            margin-top: 2px !important;
-          }
-          .pm-header-logo {
-            height: 20px !important;
-            margin-bottom: 0px !important;
-          }
-          .pm-header-slogan {
-            display: none !important;
-          }
-          .pm-screenzero-grid {
-            gap: 12px !important;
-            margin-bottom: 4px !important;
-          }
-          .pm-deck {
-            gap: 12px !important;
+          .pm-screenzero-content {
+            width: min(640px, 100%);
           }
           .pm-prompt-card {
-            padding: 8px 12px !important;
-            border-radius: 12px !important;
+            padding: 16px;
+            border-radius: 20px;
           }
           .pm-prompt-card form {
-            padding: 4px !important;
-            border-radius: 8px !important;
-            gap: 6px !important;
+            grid-template-columns: 1fr auto auto;
+            gap: 8px;
+            padding: 6px;
+            border-radius: 12px;
           }
           .pm-prompt-card input {
-            padding: 6px 10px !important;
-            font-size: 13px !important;
+            padding: 10px 14px;
+            font-size: 14px;
           }
-          .pm-prompt-card button {
-            padding: 6px 12px !important;
-            font-size: 11px !important;
+          .pm-prompt-card button.pm-btn-primary {
+            padding: 8px 16px;
+            font-size: 12px;
+            border-radius: 8px;
+          }
+          .pm-prompt-card button.pm-btn-outline {
+            display: inline-block;
+            padding: 8px 12px;
+            font-size: 11px;
+            border-radius: 8px;
+          }
+          .pm-screenzero-modes {
+            margin-top: 16px;
+          }
+          .pm-screenzero-modes p {
+            font-size: 11px;
+            margin-bottom: 10px;
+          }
+          .mode-bubbles-row {
+            gap: 8px;
+            margin-bottom: 8px;
+          }
+          .mode-bubble {
+            padding: 6px 14px;
+            font-size: 11px;
+            gap: 6px;
+          }
+          .mode-bubble.playable .dot {
+            width: 6px;
+            height: 6px;
+          }
+          .mode-bubble.locked {
+            border-color: rgba(255, 255, 255, 0.08);
+          }
+          .section-divider {
+            margin: 12px 0 8px 0;
+          }
+          .section-divider span {
+            font-size: 9px;
+            padding: 0 10px;
+          }
+          .mode-desc-bar {
+            margin-top: 8px;
+            min-height: 26px;
+          }
+          .mode-desc-bar p {
+            font-size: 11px;
           }
           .pm-prompt-chips {
-            margin-top: 6px !important;
-            gap: 4px !important;
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            justify-content: center;
+            margin-top: 12px;
           }
           .pm-prompt-chips button {
-            padding: 2px 8px !important;
-            font-size: 9px !important;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            color: var(--pm-text-secondary);
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 10px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            opacity: 0.8;
           }
-          .pm-selection-card {
-            padding: 10px 16px !important;
-            border-radius: 16px !important;
-            min-height: auto !important;
+          .pm-prompt-chips button:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            opacity: 1;
           }
-          .pm-selection-card h3 {
-            font-size: 10px !important;
-            margin-bottom: 6px !important;
-          }
-          .vertical-scroll-deck > div {
-            padding: 6px 10px !important;
-            border-radius: 8px !important;
-          }
-          .vertical-scroll-deck span {
-            font-size: 11px !important;
-          }
-          .vertical-scroll-deck span[style*="lineHeight"] {
+        }
+
+        @media (max-height: 550px) {
+          .pm-screenzero-slogan {
             display: none !important;
           }
-        }
-
-        /* Constrain selection list height on narrow low-height screens (stacked layouts) */
-        @media (max-height: 550px) and (max-width: 767px) {
-          .vertical-scroll-deck {
-            max-height: 90px !important;
+          .pm-screenzero-logo {
+            height: 22px !important;
+            margin-bottom: 4px !important;
+          }
+          .pm-screenzero-hero {
+            flex: 0 0 auto !important;
+            margin-top: 8px !important;
+            margin-bottom: 8px !important;
+          }
+          .pm-screenzero-dock {
+            padding-bottom: 10px !important;
+          }
+          .pm-prompt-card {
+            padding: 8px 10px !important;
+            border-radius: 12px !important;
+          }
+          .pm-screenzero-modes {
+            margin-top: 6px !important;
+          }
+          .pm-prompt-chips {
+            display: none !important;
+          }
+          .section-divider {
+            margin: 6px 0 4px 0 !important;
           }
         }
 
-        .pm-screenzero-grid::-webkit-scrollbar {
-          width: 4px;
+        /* Modal styling */
+        .info-modal-backdrop {
+          position: fixed;
+          inset: 0;
+          background: rgba(4, 6, 10, 0.85);
+          backdrop-filter: blur(8px);
+          z-index: 100000;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 16px;
+          box-sizing: border-box;
+          animation: sloganFade 0.3s ease-out;
         }
 
-        .vertical-scroll-deck::-webkit-scrollbar {
-          width: 5px;
+        .info-modal-card {
+          background: rgba(16, 22, 34, 0.98);
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          border-radius: 20px;
+          width: 100%;
+          max-width: 500px;
+          max-height: 80vh;
+          box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6), 0 0 30px rgba(0, 229, 153, 0.05);
+          display: flex;
+          flex-direction: column;
+          box-sizing: border-box;
+          overflow: hidden;
         }
-        .vertical-scroll-deck::-webkit-scrollbar-track {
-          background: rgba(255, 255, 255, 0.01);
-          border-radius: 4px;
+
+        .info-modal-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 16px 20px;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.08);
         }
-        .vertical-scroll-deck::-webkit-scrollbar-thumb {
-          background: rgba(255, 255, 255, 0.1);
-          border-radius: 4px;
+
+        .info-modal-header h3 {
+          margin: 0;
+          font-family: var(--font-heading);
+          font-size: 13px;
+          font-weight: 800;
+          color: var(--pm-text-primary);
+          letter-spacing: 1.2px;
         }
-        .vertical-scroll-deck::-webkit-scrollbar-thumb:hover {
-          background: rgba(255, 255, 255, 0.2);
+
+        .info-modal-close {
+          background: none;
+          border: none;
+          color: var(--pm-text-secondary);
+          cursor: pointer;
+          font-size: 16px;
+          padding: 4px;
+          transition: color 0.2s;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .info-modal-close:hover {
+          color: #fff;
+        }
+
+        .info-modal-body {
+          padding: 16px 20px;
+          overflow-y: auto;
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+          text-align: left;
+        }
+
+        .info-modal-section-title {
+          font-size: 10px;
+          font-weight: 800;
+          color: var(--pm-accent-teal);
+          text-transform: uppercase;
+          letter-spacing: 0.8px;
+          margin-top: 4px;
+          margin-bottom: 2px;
+        }
+        .info-modal-section-title.soon {
+          color: var(--pm-text-tertiary);
+          margin-top: 12px;
+        }
+
+        .info-modal-item {
+          display: flex;
+          flex-direction: column;
+          gap: 3px;
+          background: rgba(255, 255, 255, 0.02);
+          border: 1px solid rgba(255, 255, 255, 0.04);
+          border-radius: 8px;
+          padding: 8px 12px;
+        }
+
+        .info-modal-item-title {
+          font-size: 12px;
+          font-weight: 700;
+        }
+        .info-modal-item-title.playable {
+          color: var(--pm-accent-teal);
+        }
+        .info-modal-item-title.locked {
+          color: var(--pm-text-secondary);
+        }
+
+        .info-modal-item-desc {
+          font-size: 10px;
+          color: var(--pm-text-secondary);
+          line-height: 1.4;
+        }
+
+        .modes-header {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+          margin-bottom: 8px;
+        }
+        .modes-header p {
+          margin: 0 !important;
+          font-size: 10px;
+          font-weight: 700;
+          color: var(--pm-text-secondary);
+          letter-spacing: 0.8px;
+          text-transform: uppercase;
+        }
+        .info-btn {
+          background: none;
+          border: none;
+          color: var(--pm-text-secondary);
+          cursor: pointer;
+          padding: 2px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          transition: all 0.2s;
+        }
+        .info-btn:hover {
+          color: var(--pm-accent-teal);
+          transform: scale(1.1);
+        }
+
+        /* Desktop Modal sizing */
+        @media (min-width: 641px) {
+          .info-modal-header h3 {
+            font-size: 14px;
+          }
+          .info-modal-item-title {
+            font-size: 13px;
+          }
+          .info-modal-item-desc {
+            font-size: 11px;
+          }
         }
       `}</style>
+
+      {/* Info Modal Dialog */}
+      {showInfoModal && (
+        <div className="info-modal-backdrop" onClick={() => setShowInfoModal(false)}>
+          <div className="info-modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="info-modal-header">
+              <h3>GAME PROTOCOLS REFERENCE</h3>
+              <button className="info-modal-close" onClick={() => setShowInfoModal(false)}>✕</button>
+            </div>
+            <div className="info-modal-body">
+              <div className="info-modal-section-title">Playable Protocols</div>
+              {AVAILABLE_MODES.map(mode => (
+                <div key={mode.key} className="info-modal-item">
+                  <div className="info-modal-item-title playable">{mode.label}</div>
+                  <div className="info-modal-item-desc">{mode.desc}</div>
+                </div>
+              ))}
+              
+              <div className="info-modal-section-title soon">Coming Soon</div>
+              {COMING_SOON_MODES.map(mode => (
+                <div key={mode.key} className="info-modal-item">
+                  <div className="info-modal-item-title locked">{mode.label}</div>
+                  <div className="info-modal-item-desc">{mode.desc}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -4,7 +4,8 @@ import BaseMode from './BaseMode';
 export default class RunnerMode extends BaseMode {
   init() {
     const theme = this.scene.activeTheme || {};
-    this.baseSpeed = this.scene.gameConfig.runSpeed || (theme.moveSpeed ? Math.round(theme.moveSpeed * 1.2) : 350);
+    // Prioritize gameConfig (prompt modifiers) -> theme defaults -> hardcoded fallback
+    this.baseSpeed = this.scene.gameConfig.runSpeed || theme.moveSpeed || 350;
     this.runSpeed = this.baseSpeed;
     this.obstacles = null;
     this.obstacleTimer = null;

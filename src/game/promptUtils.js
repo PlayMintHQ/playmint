@@ -18,7 +18,7 @@ export function parsePromptKeywords(text) {
   if (lower.match(/(action|quest|fight|platformer|enemies|shoot|kill|combat)/)) {
     mode = 'action_quest';
     keywordsMatched++;
-  } else if (lower.match(/(run|dash|jump|runner|dodge|sprint)/)) {
+  } else if (lower.match(/(run|dash|runner|dodge|sprint)/)) {
     mode = 'standard';
     keywordsMatched++;
   }
@@ -53,27 +53,27 @@ export function parsePromptKeywords(text) {
     keywordsMatched++;
   }
 
-  if (lower.match(/(high(er)? jump|big jump|jump higher)/)) {
+  if (lower.match(/(high(er)? jump|big jump|jump higher|super jump|leap)/)) {
     modifiers.highJump = true;
     keywordsMatched++;
   }
-  if (lower.match(/(less speed|slow(er)?|less speed|chill)/)) {
+  if (lower.match(/(less speed|slow(er)?|chill|relaxed|easy)/)) {
     modifiers.lessSpeed = true;
     modifiers.isSlow = true;
     keywordsMatched++;
   }
-  if (lower.match(/(more speed|fast(er)?|speed up)/)) {
+  if (lower.match(/(more speed|fast(er)?|speed up|quick|zoom|turbo|rapid)/)) {
     modifiers.moreSpeed = true;
     modifiers.isFast = true;
     keywordsMatched++;
   }
-  if (lower.match(/(hardcore|insane|extreme|impossible|chaos)/)) {
+  if (lower.match(/(hardcore|insane|extreme|impossible|chaos|death)/)) {
     modifiers.hardcore = true;
     modifiers.isHard = true;
     keywordsMatched++;
   }
 
-  if (lower.match(/(moon|float|space|fly|low gravity|zero gravity)/)) {
+  if (lower.match(/(moon|float|space|fly|low gravity|zero gravity|weightless)/)) {
     modifiers.isLowGravity = true;
     keywordsMatched++;
   }

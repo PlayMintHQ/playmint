@@ -196,8 +196,14 @@ function App() {
   };
 
   const applyPreset = (key) => {
+    const mode = key === 'action_quest' ? 'action_quest' : 'standard';
+
     setPresetKey(key);
-    setLiveParams(prev => ({ ...GAME_PRESETS[key], gameName: prev.gameName }));
+    setLiveParams({ 
+      ...GAME_PRESETS[key], 
+      themeKey: 'ice',
+      gameName: generateTitle("", mode, 'ice') 
+    });
   };
 
   const handleOpenSelector = () => {
@@ -262,48 +268,75 @@ function App() {
       updatedConfig.themeKey = result.themeKey;
     }
 
-    // Apply difficulty
-    const diff = result.modifiers.isHard ? 9 : result.modifiers.isSlow ? 2 : liveParams.difficulty || 5;
+    // Apply difficulty cumulatively
+    let diff = liveParams.difficulty || 5;
+    if (result.modifiers.isHard) {
+      diff = Math.min(diff + 2, 10);
+    } else if (result.modifiers.isSlow) {
+      diff = Math.max(diff - 2, 1);
+    }
     updatedConfig.difficulty = diff;
 
     // Apply mode-specific physics & modifiers
     if (currentGameType === 'runner') {
-      // Base values for runner mode
-      if (result.mode || result.themeKey) {
+      // Base values for runner mode (resets ONLY if mode or theme changes)
+      const isModeChanging = result.mode && result.mode !== 'standard';
+      const isThemeChanging = result.themeKey && result.themeKey !== liveParams.themeKey;
+      if (isModeChanging || isThemeChanging) {
         updatedConfig.runSpeed = 200 + (diff * 40);
         updatedConfig.obstacleDelay = 2000 - (diff * 120);
+        updatedConfig.gravity = 1800;
+        updatedConfig.jumpForce = 750;
       }
       
-      if (result.modifiers.highJump) updatedConfig.jumpForce = (updatedConfig.jumpForce || 750) + 200;
-      if (result.modifiers.moreSpeed || result.modifiers.isFast) updatedConfig.runSpeed = Math.min((updatedConfig.runSpeed || 400) + 150, 900);
-      if (result.modifiers.lessSpeed || result.modifiers.isSlow) updatedConfig.runSpeed = Math.max((updatedConfig.runSpeed || 400) - 150, 150);
+      if (result.modifiers.highJump) {
+        updatedConfig.jumpForce = (updatedConfig.jumpForce || 750) + 250;
+      }
+      if (result.modifiers.moreSpeed || result.modifiers.isFast) {
+        updatedConfig.runSpeed = Math.min((updatedConfig.runSpeed || 400) + 200, 1000);
+      }
+      if (result.modifiers.lessSpeed || result.modifiers.isSlow) {
+        updatedConfig.runSpeed = Math.max((updatedConfig.runSpeed || 400) - 200, 150);
+      }
       if (result.modifiers.hardcore || result.modifiers.isHard) {
-        updatedConfig.runSpeed = 800;
-        updatedConfig.gravity = 2500;
-        updatedConfig.obstacleDelay = 600;
+        updatedConfig.runSpeed = Math.min((updatedConfig.runSpeed || 850) + 150, 1000);
+        updatedConfig.gravity = (updatedConfig.gravity || 1800) + 500;
+        updatedConfig.obstacleDelay = Math.max((updatedConfig.obstacleDelay || 1200) - 400, 400);
       }
     } else if (currentGameType === 'platformer') {
-      // Base values for platformer mode
-      if (result.mode || result.themeKey) {
+      // Base values for platformer mode (resets ONLY if mode or theme changes)
+      const isModeChanging = result.mode && result.mode !== 'action_quest';
+      const isThemeChanging = result.themeKey && result.themeKey !== liveParams.themeKey;
+      if (isModeChanging || isThemeChanging) {
         updatedConfig.actionEnemyCount = Math.floor(diff * 1.5);
         updatedConfig.actionJumpHeight = 400 + (diff * 30);
+        updatedConfig.actionGravity = 1500;
+        updatedConfig.actionWalkSpeed = 300;
       }
       
-      if (result.modifiers.highJump) updatedConfig.actionJumpHeight = (updatedConfig.actionJumpHeight || 550) + 150;
-      if (result.modifiers.moreSpeed || result.modifiers.isFast) updatedConfig.actionJumpHeight = Math.min((updatedConfig.actionJumpHeight || 550) + 100, 900);
+      if (result.modifiers.highJump) {
+        updatedConfig.actionJumpHeight = (updatedConfig.actionJumpHeight || 550) + 200;
+      }
+      if (result.modifiers.moreSpeed || result.modifiers.isFast) {
+        updatedConfig.actionWalkSpeed = (updatedConfig.actionWalkSpeed || 300) + 100;
+      }
       if (result.modifiers.lessSpeed || result.modifiers.isSlow) {
-        updatedConfig.actionEnemyCount = Math.max((updatedConfig.actionEnemyCount || 5) - 2, 1);
-        updatedConfig.actionGravity = Math.max((updatedConfig.actionGravity || 1400) - 300, 800);
+        updatedConfig.actionEnemyCount = Math.max((updatedConfig.actionEnemyCount || 5) - 2, 0);
+        updatedConfig.actionGravity = Math.max((updatedConfig.actionGravity || 1400) - 300, 500);
+        updatedConfig.actionWalkSpeed = Math.max((updatedConfig.actionWalkSpeed || 300) - 80, 100);
       }
       if (result.modifiers.hardcore || result.modifiers.isHard) {
-        updatedConfig.actionEnemyCount = 12;
-        updatedConfig.actionGravity = 2000;
+        updatedConfig.actionEnemyCount = (updatedConfig.actionEnemyCount || 5) + 4;
+        updatedConfig.actionGravity = (updatedConfig.actionGravity || 1500) + 400;
       }
     }
 
     if (result.modifiers.isLowGravity) {
-      updatedConfig.gravity = 600;
-      updatedConfig.actionGravity = 600;
+      if (currentGameType === 'runner') {
+        updatedConfig.gravity = Math.max((updatedConfig.gravity || 1800) - 400, 400);
+      } else {
+        updatedConfig.actionGravity = Math.max((updatedConfig.actionGravity || 1500) - 300, 300);
+      }
     }
 
     // Generate title from prompt based on current mode
@@ -442,6 +475,7 @@ function App() {
           onGenerate={handleOverlayGenerate}
           onClose={() => setIsPromptOpen(false)}
           isOverlay
+          currentConfig={liveParams}
         />
       )}
 

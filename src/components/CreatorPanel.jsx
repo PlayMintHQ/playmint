@@ -134,7 +134,11 @@ const ConfigActions = ({ liveParams, setLiveParams, setPresetKey, onHomeClick })
       <button
         className="pm-btn pm-btn-muted"
         onClick={() => {
-          setLiveParams(() => ({ ...GAME_PRESETS['standard'], gameName: 'PlayMint Core' }));
+          setLiveParams(() => ({ 
+            ...GAME_PRESETS['standard'], 
+            themeKey: 'ice',
+            gameName: 'PlayMint Runner' 
+          }));
           setPresetKey('standard');
         }}
         style={{ marginTop: '4px', fontSize: '14px' }}
