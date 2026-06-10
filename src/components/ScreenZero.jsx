@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { GAME_PRESETS } from '../gameConfig';
 import { parsePromptKeywords, generateTitle } from '../game/promptUtils';
 
@@ -27,17 +27,99 @@ const getRandomDifficulty = () => {
   return Math.floor(Math.random() * 10) + 1;
 };
 
-const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompleteTransition, isTransitioning, currentConfig }) => {
+const WORLDS = [
+  {
+    name: 'Ice World',
+    filter: 'none',
+    layers: [
+      '/assets/themes/winter/bg-1.png',
+      '/assets/themes/winter/bg-2.png',
+      '/assets/themes/winter/bg-3.png'
+    ]
+  },
+  {
+    name: 'Lava World',
+    filter: 'none',
+    layers: [
+      '/assets/themes/lava/sky.png',
+      '/assets/themes/lava/bg.png',
+      '/assets/themes/lava/mountains.png',
+      '/assets/themes/lava/clouds.png'
+    ]
+  },
+  {
+    name: 'Forest World',
+    filter: 'none',
+    layers: [
+      '/assets/themes/forest/bg_far.png',
+      '/assets/themes/forest/bg_mid.png'
+    ]
+  },
+  {
+    name: 'Space World',
+    filter: 'none',
+    layers: [
+      '/assets/themes/space/bg_stars.png',
+      '/assets/themes/space/bg_nebula.png',
+      '/assets/themes/space/bg_planet.png'
+    ]
+  },
+  {
+    name: 'City World',
+    filter: 'none',
+    layers: [
+      '/assets/themes/city/bg_far.png',
+      '/assets/themes/city/bg_mid.png',
+      '/assets/themes/city/bg_near.png'
+    ]
+  },
+  {
+    name: 'Future RPG World',
+    filter: 'hue-rotate(70deg) saturate(1.4) brightness(0.9)',
+    layers: [
+      '/assets/themes/forest/bg_far.png',
+      '/assets/themes/forest/bg_mid.png'
+    ]
+  },
+  {
+    name: 'Future Shooter World',
+    filter: 'hue-rotate(285deg) saturate(1.5) brightness(0.9)',
+    layers: [
+      '/assets/themes/space/bg_stars.png',
+      '/assets/themes/space/bg_nebula.png',
+      '/assets/themes/space/bg_planet.png'
+    ]
+  },
+  {
+    name: 'Future Racing World',
+    filter: 'hue-rotate(190deg) saturate(1.4) contrast(1.1) brightness(0.85)',
+    layers: [
+      '/assets/themes/city/bg_far.png',
+      '/assets/themes/city/bg_mid.png',
+      '/assets/themes/city/bg_near.png'
+    ]
+  }
+];
+
+const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompleteTransition, currentConfig }) => {
   const [prompt, setPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [transitionPhase, setTransitionPhase] = useState('idle'); // idle | expanding | compiling | fading | done
   const [selectedMode, setSelectedMode] = useState(null); // null | 'standard' | 'action_quest'
-  const [hoveredMode, setHoveredMode] = useState(null);
   const [showInfoModal, setShowInfoModal] = useState(false);
   const [terminalLogs, setTerminalLogs] = useState([]);
   const [progress, setProgress] = useState(0);
   const [toastMessage, setToastMessage] = useState('');
+  const [currentWorldIndex, setCurrentWorldIndex] = useState(0);
   const formRef = useRef(null);
+
+  useEffect(() => {
+    if (transitionPhase !== 'idle') return;
+    const timer = setInterval(() => {
+      setCurrentWorldIndex(prev => (prev + 1) % WORLDS.length);
+    }, 8000);
+    return () => clearInterval(timer);
+  }, [transitionPhase]);
 
   const showToast = (msg) => {
     setToastMessage(msg);
@@ -53,12 +135,12 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
     if (transitionPhase === 'idle') {
       if (depthScale === 1) animation = 'parallaxFar 24s ease-in-out infinite alternate';
       else if (depthScale === 2) animation = 'parallaxMid 16s ease-in-out infinite alternate';
-      else if (depthScale === 3) animation = 'parallaxNear 10s ease-in-out infinite alternate';
+      else animation = 'parallaxNear 10s ease-in-out infinite alternate';
     } else if (transitionPhase === 'compiling') {
-      scale = 1.0 + (depthScale * 0.05); // dynamic subtle depth scale zoom
+      scale = 1.15 + (depthScale * 0.05); // dynamic subtle depth scale zoom
       filter = 'blur(4px) saturate(1.2)';
     } else if (transitionPhase === 'fading') {
-      scale = 1.35;
+      scale = 1.45;
       filter = 'blur(12px) saturate(1.5)';
       opacity = 0;
     }
@@ -70,7 +152,7 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
       backgroundPosition: 'center 30%',
       imageRendering: 'pixelated',
       opacity,
-      transform: `scale(${scale})`,
+      transform: transitionPhase === 'idle' ? 'none' : `scale(${scale})`,
       filter,
       animation,
       transition: 'all 2.0s cubic-bezier(0.25, 1, 0.5, 1)',
@@ -283,6 +365,12 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
       opacity: transitionPhase === 'fading' ? 0 : 1,
       transition: 'opacity 1.0s ease-in-out'
     }}>
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="pm-toast">
+          {toastMessage}
+        </div>
+      )}
       {/* Neon sweep scanline during compilation */}
       {(transitionPhase === 'compiling' || transitionPhase === 'fading') && (
         <div style={{
@@ -298,10 +386,47 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
         }} />
       )}
 
-      {/* Parallax layers */}
-      <div style={getBackgroundStyle(0.85, 1, '/assets/themes/winter/bg-1.png')} className="parallax-layer" />
-      <div style={getBackgroundStyle(1, 2, '/assets/themes/winter/bg-2.png')} className="parallax-layer" />
-      <div style={getBackgroundStyle(1, 3, '/assets/themes/winter/bg-3.png')} className="parallax-layer" />
+      {/* World Background Cycles */}
+      {WORLDS.map((world, worldIdx) => {
+        const isActive = worldIdx === currentWorldIndex;
+        return (
+          <div
+            key={world.name}
+            style={{
+              position: 'fixed',
+              inset: 0,
+              zIndex: 0,
+              opacity: isActive ? 1 : 0,
+              transition: 'opacity 1.5s ease-in-out',
+              pointerEvents: 'none',
+              filter: world.filter || 'none'
+            }}
+          >
+            {world.layers.map((layerUrl, layerIdx) => {
+              const depthScale = layerIdx + 1;
+              return (
+                <div
+                  key={layerUrl}
+                  style={getBackgroundStyle(
+                    layerIdx === 0 ? 0.85 : 1.0,
+                    depthScale,
+                    layerUrl
+                  )}
+                  className="parallax-layer"
+                />
+              );
+            })}
+          </div>
+        );
+      })}
+
+      {/* Ambient Previewed World Label */}
+      {transitionPhase === 'idle' && (
+        <div className="pm-ambient-world-label">
+          <span className="pm-ambient-label-title">Previewing World</span>
+          <span className="pm-ambient-label-name">{WORLDS[currentWorldIndex].name}</span>
+        </div>
+      )}
       
       {/* Dark gradient overlay */}
       <div style={{
@@ -354,211 +479,205 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
         </div>
       )}
 
-      {/* Hero logo and slogan */}
-      <div className="pm-screenzero-hero" style={{
-        flex: 1,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 3,
-        pointerEvents: 'none',
-        opacity: (transitionPhase === 'compiling' || transitionPhase === 'fading') ? 0.3 : 1,
-        transition: 'all 0.6s ease-in-out'
-      }}>
-        <img
-          src="/assets/Logo_PlayMint_(transparent).png"
-          alt="PlayMint"
-          className="pm-screenzero-logo"
-          style={{ height: '38px', marginBottom: '12px', opacity: 0.95 }}
-        />
-        <p className="pm-screenzero-slogan" style={{
-          margin: 0,
-          fontFamily: 'var(--font-heading)',
-          fontWeight: '700',
-          color: 'var(--pm-text-secondary)',
-          letterSpacing: '1.5px',
-          opacity: 0.8,
-          textTransform: 'uppercase',
-          fontSize: 'clamp(14px, 2.5vw, 18px)',
-          textAlign: 'center'
+      {/* Centered Grouped Layout Container */}
+      <div className="pm-screenzero-main">
+        {/* Hero logo and slogan */}
+        <div className="pm-screenzero-hero" style={{
+          zIndex: 3,
+          pointerEvents: 'none',
+          opacity: (transitionPhase === 'compiling' || transitionPhase === 'fading') ? 0.3 : 1,
+          transition: 'all 0.6s ease-in-out'
         }}>
-          From words to worlds
-        </p>
-      </div>
-
-      {/* ===== BOTTOM: Prompt dock ===== */}
-      <div className="pm-screenzero-dock">
-        {(transitionPhase === 'compiling' || transitionPhase === 'fading') ? (
-          /* ===== COMPILER TERMINAL (Bottom-Docked Version) ===== */
-          <div style={{
-            width: 'min(640px, 100%)',
-            background: 'rgba(6, 10, 16, 0.92)',
-            border: '1px solid var(--pm-accent-teal)',
-            borderRadius: '24px',
-            padding: '24px',
-            boxShadow: '0 12px 40px rgba(0, 0, 0, 0.6), 0 0 25px rgba(0, 229, 153, 0.15)',
-            backdropFilter: 'blur(16px)',
-            fontFamily: 'monospace',
-            boxSizing: 'border-box',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '16px',
-            minHeight: '280px'
+          <img
+            src="/assets/Logo_PlayMint_(transparent).png"
+            alt="PlayMint"
+            className="pm-screenzero-logo"
+            style={{ height: '38px', marginBottom: '12px', opacity: 0.95 }}
+          />
+          <p className="pm-screenzero-slogan" style={{
+            margin: 0,
+            fontFamily: 'var(--font-heading)',
+            fontWeight: '700',
+            color: 'var(--pm-text-secondary)',
+            letterSpacing: '1.5px',
+            opacity: 0.8,
+            textTransform: 'uppercase',
+            fontSize: 'clamp(14px, 2.5vw, 18px)',
+            textAlign: 'center'
           }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '8px' }}>
-              <div style={{ display: 'flex', gap: '6px' }}>
-                <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#ff5f56' }} />
-                <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#ffbd2e' }} />
-                <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#27c93f' }} />
+            From words to worlds
+          </p>
+        </div>
+
+        {/* ===== BOTTOM: Prompt dock ===== */}
+        <div className="pm-screenzero-dock">
+          {(transitionPhase === 'compiling' || transitionPhase === 'fading') ? (
+            /* ===== COMPILER TERMINAL (Bottom-Docked Version) ===== */
+            <div style={{
+              width: 'min(640px, 100%)',
+              background: 'rgba(6, 10, 16, 0.92)',
+              border: '1px solid var(--pm-accent-teal)',
+              borderRadius: '24px',
+              padding: '24px',
+              boxShadow: '0 12px 40px rgba(0, 0, 0, 0.6), 0 0 25px rgba(0, 229, 153, 0.15)',
+              backdropFilter: 'blur(16px)',
+              fontFamily: 'monospace',
+              boxSizing: 'border-box',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '16px',
+              minHeight: '280px'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '8px' }}>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#ff5f56' }} />
+                  <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#ffbd2e' }} />
+                  <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#27c93f' }} />
+                </div>
+                <span style={{ color: 'var(--pm-text-tertiary)', fontSize: '10px', fontWeight: 'bold', letterSpacing: '1px' }}>PLAYMINT COMPILER v2.0</span>
               </div>
-              <span style={{ color: 'var(--pm-text-tertiary)', fontSize: '10px', fontWeight: 'bold', letterSpacing: '1px' }}>PLAYMINT COMPILER v2.0</span>
-            </div>
 
-            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '160px' }}>
-              {terminalLogs.map((log, i) => {
-                let color = '#fff';
-                if (log.startsWith('[SYSTEM]')) color = 'var(--pm-accent-teal)';
-                else if (log.startsWith('[PROMPT]')) color = 'var(--pm-accent-orange)';
-                else if (log.startsWith('[THEME]')) color = '#8A2BE2';
-                else if (log.startsWith('[PHYSIC]')) color = '#3182CE';
-                else if (log.startsWith('[ENGINE]')) color = 'var(--pm-accent-teal)';
+              <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '160px' }}>
+                {terminalLogs.map((log, i) => {
+                  let color = '#fff';
+                  if (log.startsWith('[SYSTEM]')) color = 'var(--pm-accent-teal)';
+                  else if (log.startsWith('[PROMPT]')) color = 'var(--pm-accent-orange)';
+                  else if (log.startsWith('[THEME]')) color = '#8A2BE2';
+                  else if (log.startsWith('[PHYSIC]')) color = '#3182CE';
+                  else if (log.startsWith('[ENGINE]')) color = 'var(--pm-accent-teal)';
 
-                return (
-                  <div key={i} style={{
-                    color,
-                    fontSize: '12px',
-                    lineHeight: '1.5',
-                    textAlign: 'left',
-                    fontFamily: 'monospace',
-                    textShadow: `0 0 6px ${color}40`,
-                    whiteSpace: 'pre-wrap'
-                  }}>
-                    {log}
-                  </div>
-                );
-              })}
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: 'var(--pm-text-secondary)' }}>
-                <span>Compiling World Matrix</span>
-                <span style={{ color: 'var(--pm-accent-teal)', fontWeight: 'bold' }}>{Math.round(progress)}%</span>
+                  return (
+                    <div key={i} style={{
+                      color,
+                      fontSize: '12px',
+                      lineHeight: '1.5',
+                      textAlign: 'left',
+                      fontFamily: 'monospace',
+                      textShadow: `0 0 6px ${color}40`,
+                      whiteSpace: 'pre-wrap'
+                    }}>
+                      {log}
+                    </div>
+                  );
+                })}
               </div>
-              <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.06)', borderRadius: '3px', overflow: 'hidden' }}>
-                <div style={{
-                  width: `${progress}%`,
-                  height: '100%',
-                  background: 'linear-gradient(90deg, var(--pm-accent-teal), #8A2BE2)',
-                  boxShadow: '0 0 8px var(--pm-accent-teal)',
-                  borderRadius: '3px',
-                  transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
-                }} />
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: 'var(--pm-text-secondary)' }}>
+                  <span>Compiling World Matrix</span>
+                  <span style={{ color: 'var(--pm-accent-teal)', fontWeight: 'bold' }}>{Math.round(progress)}%</span>
+                </div>
+                <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.06)', borderRadius: '3px', overflow: 'hidden' }}>
+                  <div style={{
+                    width: `${progress}%`,
+                    height: '100%',
+                    background: 'linear-gradient(90deg, var(--pm-accent-teal), #8A2BE2)',
+                    boxShadow: '0 0 8px var(--pm-accent-teal)',
+                    borderRadius: '3px',
+                    transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
+                  }} />
+                </div>
               </div>
             </div>
-          </div>
-        ) : (
-          /* ===== PROMPT DOCK CONTENT ===== */
-          <div ref={formRef} className="pm-screenzero-content">
-            {/* Input card */}
-            <div className="pm-prompt-card">
-              <form onSubmit={handleGenerate}>
-                <input
-                  type="text"
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  placeholder="e.g. 'city runner lava' or 'forest quest'"
-                  autoFocus
-                />
-                <button
-                  type="submit"
-                  className="pm-btn pm-btn-primary"
-                  disabled={isGenerating}
-                >
-                  Generate
-                </button>
-                <button
-                  type="button"
-                  onClick={handleQuickStart}
-                  className="pm-btn pm-btn-outline"
-                  disabled={isGenerating}
-                >
-                  Quick Start
-                </button>
-              </form>
-
-              {/* Game Mode Bubbles Selector */}
-              <div className="pm-screenzero-modes">
-                <div className="modes-header">
-                  <p>Select game mode</p>
+          ) : (
+            /* ===== PROMPT DOCK CONTENT ===== */
+            <div ref={formRef} className="pm-screenzero-content">
+              {/* Input card */}
+              <div className="pm-prompt-card">
+                <form onSubmit={handleGenerate}>
+                  <input
+                    type="text"
+                    value={prompt}
+                    onChange={(e) => setPrompt(e.target.value)}
+                    placeholder="e.g. 'city runner lava' or 'forest quest'"
+                    autoFocus
+                  />
+                  <button
+                    type="submit"
+                    className="pm-btn pm-btn-primary"
+                    disabled={isGenerating}
+                  >
+                    Generate
+                  </button>
                   <button
                     type="button"
-                    onClick={() => setShowInfoModal(true)}
-                    className="info-btn"
-                    title="View Game Mode Details"
+                    onClick={handleQuickStart}
+                    className="pm-btn pm-btn-outline"
+                    disabled={isGenerating}
                   >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                      <circle cx="12" cy="12" r="10" />
-                      <line x1="12" y1="16" x2="12" y2="12" />
-                      <line x1="12" y1="8" x2="12.01" y2="8" />
-                    </svg>
+                    Quick Start
                   </button>
-                </div>
-                <div className="mode-bubbles-row playable-row">
-                  {AVAILABLE_MODES.map((mode) => {
-                    const isActive = selectedMode === mode.key;
-                    return (
+                </form>
+
+                {/* Game Mode Bubbles Selector */}
+                <div className="pm-screenzero-modes">
+                  <div className="modes-header">
+                    <p>Select game mode</p>
+                    <button
+                      type="button"
+                      onClick={() => setShowInfoModal(true)}
+                      className="info-btn"
+                      title="View Game Mode Details"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="10" />
+                        <line x1="12" y1="16" x2="12" y2="12" />
+                        <line x1="12" y1="8" x2="12.01" y2="8" />
+                      </svg>
+                    </button>
+                  </div>
+                  <div className="mode-bubbles-row playable-row">
+                    {AVAILABLE_MODES.map((mode) => {
+                      const isActive = selectedMode === mode.key;
+                      return (
+                        <button
+                          key={mode.key}
+                          type="button"
+                          disabled={isGenerating}
+                          onClick={() => setSelectedMode(isActive ? null : mode.key)}
+                          className={`mode-bubble playable ${isActive ? 'active' : ''}`}
+                        >
+                          <span className="dot" />
+                          {mode.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="section-divider">
+                    <span>Coming Soon</span>
+                  </div>
+
+                  <div className="mode-bubbles-row soon-row">
+                    {COMING_SOON_MODES.map((mode) => (
                       <button
                         key={mode.key}
                         type="button"
-                        disabled={isGenerating}
-                        onClick={() => setSelectedMode(isActive ? null : mode.key)}
-                        onMouseEnter={() => setHoveredMode(mode.key)}
-                        onMouseLeave={() => setHoveredMode(null)}
-                        className={`mode-bubble playable ${isActive ? 'active' : ''}`}
+                        onClick={() => showToast(`${mode.label} is coming soon!`)}
+                        className="mode-bubble locked"
                       >
-                        <span className="dot" />
                         {mode.label}
                       </button>
-                    );
-                  })}
+                    ))}
+                  </div>
                 </div>
 
-                <div className="section-divider">
-                  <span>Coming Soon</span>
-                </div>
-
-                <div className="mode-bubbles-row soon-row">
-                  {COMING_SOON_MODES.map((mode) => (
+                {/* Suggestion Chips */}
+                <div className="pm-prompt-chips">
+                  {['lava runner', 'ice quest', 'forest sprint', 'city runner lava', 'space quest'].map((example, i) => (
                     <button
-                      key={mode.key}
+                      key={i}
                       type="button"
-                      onClick={() => showToast(`${mode.label} is coming soon!`)}
-                      onMouseEnter={() => setHoveredMode(mode.key)}
-                      onMouseLeave={() => setHoveredMode(null)}
-                      className="mode-bubble locked"
+                      onClick={() => handleExampleClick(example)}
                     >
-                      {mode.label}
+                      {example}
                     </button>
                   ))}
                 </div>
               </div>
-
-              {/* Suggestion Chips */}
-              <div className="pm-prompt-chips">
-                {['lava runner', 'ice quest', 'forest sprint', 'city runner lava', 'space quest'].map((example, i) => (
-                  <button
-                    key={i}
-                    type="button"
-                    onClick={() => handleExampleClick(example)}
-                  >
-                    {example}
-                  </button>
-                ))}
-              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       <style>{`
@@ -567,16 +686,16 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
           100% { top: 105%; }
         }
         @keyframes parallaxFar {
-          0% { background-position-x: 50%; }
-          100% { background-position-x: 48%; }
+          0% { transform: scale(1.06) translateX(1%); }
+          100% { transform: scale(1.06) translateX(-1%); }
         }
         @keyframes parallaxMid {
-          0% { background-position-x: 50%; }
-          100% { background-position-x: 46%; }
+          0% { transform: scale(1.12) translateX(2%); }
+          100% { transform: scale(1.12) translateX(-2%); }
         }
         @keyframes parallaxNear {
-          0% { background-position-x: 50%; }
-          100% { background-position-x: 44%; }
+          0% { transform: scale(1.2) translateX(3.5%); }
+          100% { transform: scale(1.2) translateX(-3.5%); }
         }
         @keyframes float {
           0% { transform: translateY(0) scale(1); }
@@ -595,6 +714,68 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
           to { opacity: 1; transform: translate(-50%, 0); }
         }
 
+        .pm-screenzero-main {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          margin: auto;
+          width: 100%;
+          z-index: 3;
+          position: relative;
+          box-sizing: border-box;
+        }
+
+        .pm-ambient-world-label {
+          position: absolute;
+          top: 16px;
+          right: 16px;
+          z-index: 100;
+          display: flex;
+          flex-direction: column;
+          align-items: flex-end;
+          gap: 2px;
+          pointer-events: none;
+          text-align: right;
+        }
+
+        .pm-ambient-label-title {
+          font-size: 9px;
+          text-transform: uppercase;
+          letter-spacing: 1.5px;
+          color: var(--pm-text-tertiary);
+          font-weight: 700;
+          opacity: 0.65;
+        }
+
+        .pm-ambient-label-name {
+          font-size: 12px;
+          color: var(--pm-accent-teal);
+          font-weight: 800;
+          text-shadow: 0 0 10px rgba(0, 229, 153, 0.4);
+          text-transform: uppercase;
+          letter-spacing: 1px;
+        }
+
+        .pm-toast {
+          position: fixed;
+          bottom: 24px;
+          left: 50%;
+          transform: translateX(-50%);
+          background: rgba(10, 15, 24, 0.95);
+          border: 1px solid var(--pm-accent-teal);
+          color: #fff;
+          padding: 8px 16px;
+          border-radius: 999px;
+          font-size: 11px;
+          font-weight: 700;
+          z-index: 10000;
+          box-shadow: 0 8px 24px rgba(0,0,0,0.5), 0 0 12px rgba(0,229,153,0.25);
+          animation: toastFadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+          letter-spacing: 0.5px;
+          pointer-events: none;
+        }
+
         /* Default: Mobile first styles */
         .pm-screenzero-container {
           display: flex;
@@ -608,12 +789,12 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
         }
 
         .pm-screenzero-hero {
-          flex: 1;
           display: flex;
           flex-direction: column;
           align-items: center;
           justify-content: center;
           width: 100%;
+          margin-bottom: 24px;
           animation: sloganFade 0.8s ease-out;
         }
 
@@ -637,7 +818,7 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
 
         .pm-screenzero-dock {
           width: 100%;
-          margin-top: auto;
+          margin-top: 0;
           padding: 0 4px 16px 4px;
           display: flex;
           flex-direction: column;

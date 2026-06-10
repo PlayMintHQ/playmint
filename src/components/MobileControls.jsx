@@ -58,7 +58,7 @@ const MobileControls = ({ gameType, themeKey, projectilesEnabled }) => {
     <div className="pm-mobile-overlay" style={cssVariables}>
       {/* 1. Left D-Pad Cluster (only active in platformer mode) */}
       {gameType === 'platformer' ? (
-        <div className="pm-mobile-dpad">
+        <div className="pm-mobile-dpad" onPointerDown={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()}>
           <button
             className="pm-touch-btn"
             onTouchStart={(e) => handleTouchStart('left', e)}
@@ -94,7 +94,7 @@ const MobileControls = ({ gameType, themeKey, projectilesEnabled }) => {
       )}
 
       {/* 2. Right Actions Cluster (Jump and Combat actions) */}
-      <div className="pm-mobile-actions">
+      <div className="pm-mobile-actions" onPointerDown={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()}>
         {gameType === 'platformer' ? (
           <div className="pm-mobile-actions-stack">
             {/* Top row for attack actions */}

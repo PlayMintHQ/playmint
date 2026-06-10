@@ -12,7 +12,7 @@ const HudHeader = ({
   onLogoClick,
 }) => {
   return (
-    <div className="hud-header">
+    <div className="hud-header" onPointerDown={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()}>
       {/* Top row: Logo + Controls (always single line) */}
       <div className="hud-header__row">
         {/* LEFT: Logo (clickable) */}

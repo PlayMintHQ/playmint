@@ -314,10 +314,12 @@ export default class GameManagerScene extends Phaser.Scene {
     };
     window.addEventListener('keyup', this.domKeyUp);
 
-    // Click/tap: restarts on game-over only. Gameplay input is keyboard or MobileControls.
+    // Click/tap: restarts on game-over or jumps in Runner mode.
     this.input.on('pointerdown', () => {
       if (this.isGameOver) {
         this.scene.restart();
+      } else if (this.gameConfig.gameType === 'runner') {
+        this.gameModeManager.jump();
       }
     }, this);
 
