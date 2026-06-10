@@ -420,13 +420,6 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
         );
       })}
 
-      {/* Ambient Previewed World Label */}
-      {transitionPhase === 'idle' && (
-        <div className="pm-ambient-world-label">
-          <span className="pm-ambient-label-title">Previewing World</span>
-          <span className="pm-ambient-label-name">{WORLDS[currentWorldIndex].name}</span>
-        </div>
-      )}
       
       {/* Dark gradient overlay */}
       <div style={{
