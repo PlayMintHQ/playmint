@@ -14,6 +14,15 @@ export default class GameManagerScene extends Phaser.Scene {
   }
 
   preload() {
+    // Absolute asset root. Every load below is written as 'assets/…' (relative),
+    // which resolved against the PAGE path — fine while the app only lived at
+    // '/', broken under nested routes like /g/:id (→ /g/assets/…, which the SPA
+    // rewrite answers with index.html + 200: a silent decode failure). Phaser
+    // skips the path for data:, blob: and http(s) URLs, so dyn_*/cache art is
+    // unaffected. Do NOT use <base href> instead: it would retarget App's
+    // relative '#config=' replaceState.
+    this.load.setPath('/');
+
     // Configure Phaser loader to handle cross-origin image requests
     this.load.crossOrigin = 'anonymous';
 
@@ -605,6 +614,11 @@ export default class GameManagerScene extends Phaser.Scene {
           this.gameModeManager.activeMode.obstacleTimer.paused = true;
         }
         this.isGamePaused = true;
+        // A key held while a panel/dialog opens never delivers its keyup to us
+        // (App's capture guard swallows key events inside inputs and
+        // [data-pm-modal]), which left the key stuck "down" and the player
+        // walking on resume. Pausing drops all held keys.
+        this.keyStates = {};
       } else {
         if (!this.isGameOver) {
           this.physics.resume();

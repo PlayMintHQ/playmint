@@ -15,6 +15,10 @@ import GameOverOverlay from './components/GameOverOverlay';
 import RegenOverlay from './components/RegenOverlay';
 import MobileControls from './components/MobileControls';
 import * as metrics from './game/metrics';
+import AuthDialog from './auth/AuthDialog';
+import { useAuth } from './auth/authContext';
+import { useRoute, navigate } from './router';
+import { MyGamesPage, RouteStubPage } from './components/MyGamesPage';
 
 // Capture mode (2026-08-20): a chrome-free view for recording demos and
 // marketing footage. Driven by the URL so a recording setup is reproducible and
@@ -109,6 +113,13 @@ function App() {
   const [activeError, setActiveError] = useState(null);
   const [captureMode, setCaptureMode] = useState(readCaptureMode);
 
+  // Accounts + routes (2026-09-19). `route` only matters while no game is
+  // running: /my-games and the reserved /g/:id replace ScreenZero. The sign-in
+  // dialog pauses the game exactly like the Creator Panel does.
+  const route = useRoute();
+  const { dialog: authDialog } = useAuth();
+  const isSignInOpen = !!authDialog;
+
   // Timing telemetry (src/game/metrics.js). Two jobs, both of which have to be
   // set up before Phaser's first boot can land:
   //   1. A shared link's run starts at NAVIGATION, not at any click — that is
@@ -189,6 +200,35 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameKey, hasStarted]);
 
+  // Right before a full-page OAuth redirect the sign-in dialog asks for the
+  // FRESHEST config in the hash (the effect above is deliberately not keyed on
+  // liveParams), so slider tweaks survive the round trip to Google and back.
+  useEffect(() => {
+    if (!hasStarted) return undefined;
+    const flush = () => {
+      try {
+        const live = window.__GAME_LIVE_CONFIG;
+        if (live) window.history.replaceState(null, '', '#config=' + encodeShareConfig(live));
+      } catch { /* non-fatal */ }
+    };
+    window.addEventListener('pm-flush-share-hash', flush);
+    return () => window.removeEventListener('pm-flush-share-hash', flush);
+  }, [hasStarted]);
+
+  // Back/forward. Only the move between '/' and '/my-games' stays in-SPA (the
+  // router re-renders on popstate by itself). Anything involving a game — one
+  // is running, or the URL we landed on carries a share payload — reloads, which
+  // reuses the well-tested getInitialState share-link import path.
+  useEffect(() => {
+    const onPop = () => {
+      if (hasStarted || (window.location.hash || '').startsWith('#config=')) {
+        window.location.reload();
+      }
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, [hasStarted]);
+
   // Persist environment variables to localStorage on startup to prevent cached/stale build variables
   useEffect(() => {
     const geminiEnv = import.meta.env.VITE_GEMINI_API_KEY;
@@ -212,12 +252,16 @@ function App() {
   }, []);
 
   // Global capture-phase keyboard event interceptor.
-  // Stops keyboard event propagation if the target is an HTML input or textarea.
+  // Stops keyboard event propagation if the target is an HTML input or textarea,
+  // or sits inside a [data-pm-modal] surface (sign-in dialog, account menu) — so
+  // Space/Enter on a dialog BUTTON can't jump, restart the run, or be
+  // preventDefault-ed by the scene. Consequence: React onKeyDown never fires
+  // inside those surfaces; they use native window-capture listeners instead.
   // This guarantees Phaser never captures key events (preventing defaults) while typing.
   useEffect(() => {
     const handleCaptureKeyboard = (e) => {
       const el = e.target;
-      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.closest?.('[data-pm-modal]'))) {
         e.stopPropagation();
       }
     };
@@ -287,10 +331,22 @@ function App() {
     return () => window.removeEventListener('update-score', handleScoreUpdate);
   }, []);
 
-  // Pause game when CreatorPanel menu is open
+  // Pause game when the CreatorPanel menu OR the sign-in dialog is open. ONE
+  // derived flag on purpose: closing the panel must not resume the game under a
+  // still-open dialog.
+  const shouldPause = isMenuOpen || isSignInOpen;
   useEffect(() => {
-    window.dispatchEvent(new CustomEvent('toggle-pause-game', { detail: { isPaused: isMenuOpen } }));
-  }, [isMenuOpen]);
+    window.dispatchEvent(new CustomEvent('toggle-pause-game', { detail: { isPaused: shouldPause } }));
+    if (!shouldPause) return undefined;
+    // A gameKey remount (share-link art restore) boots a fresh scene with
+    // isGamePaused = false — re-assert the pause once that scene is up.
+    // Deferred: the event fires from the loader's 'complete', one step BEFORE
+    // create() registers the scene's pause listener.
+    const reassert = () => setTimeout(() =>
+      window.dispatchEvent(new CustomEvent('toggle-pause-game', { detail: { isPaused: true } })), 50);
+    window.addEventListener('phaser-load-complete', reassert);
+    return () => window.removeEventListener('phaser-load-complete', reassert);
+  }, [shouldPause]);
 
   // Score listener from Phaser
   useEffect(() => {
@@ -415,8 +471,12 @@ function App() {
   // Automatically blur active input element when the game starts, config updates, or game restarts
   // to ensure keyboard focus shifts back to the game/body.
   useEffect(() => {
-    if (document.activeElement && typeof document.activeElement.blur === 'function') {
-      document.activeElement.blur();
+    const active = document.activeElement;
+    // Never steal focus from the sign-in dialog / account menu (on iOS a blur
+    // also dismisses the keyboard mid-typing).
+    if (active && active.closest?.('[data-pm-modal]')) return;
+    if (active && typeof active.blur === 'function') {
+      active.blur();
     }
   }, [hasStarted, presetKey, liveParams, isGameOver]);
 
@@ -426,9 +486,18 @@ function App() {
     setIsGameOver(false);
     setGameOverData(null);
     // Leaving the game: drop the share hash so a reload lands on ScreenZero.
-    try {
-      window.history.replaceState(null, '', window.location.pathname + window.location.search);
-    } catch { /* non-fatal */ }
+    // Pinned to '/' (not the current pathname) now that the app has routes.
+    navigate('/', { replace: true });
+  };
+
+  // Account menu → My Games while a game is running: leave the game first.
+  const handleGoMyGames = () => {
+    setHasStarted(false);
+    setIsMenuOpen(false);
+    setIsPromptOpen(false);
+    setIsGameOver(false);
+    setGameOverData(null);
+    navigate('/my-games');
   };
 
   const handlePromptGenerate = async (promptText) => {
@@ -633,6 +702,7 @@ function App() {
               onExitFullscreen={handleExitFullscreen}
               onMenuOpen={() => setIsMenuOpen(true)}
               onLogoClick={handleReopenPrompt}
+              onMyGames={handleGoMyGames}
             />
 
             {captureMode && (
@@ -723,8 +793,14 @@ function App() {
         }}
       />
 
+      {/* Routes (only while no game is running and none is booting) */}
+      {!hasStarted && !isTransitioning && route.name === 'my-games' && <MyGamesPage />}
+      {!hasStarted && !isTransitioning && (route.name === 'game' || route.name === 'not-found') && (
+        <RouteStubPage kind={route.name} />
+      )}
+
       {/* ScreenZero rendered if NOT started */}
-      {!hasStarted && (
+      {!hasStarted && (route.name === 'home' || isTransitioning) && (
         <ScreenZero
           onStartTransition={(config) => {
             setGameKey(k => k + 1);
@@ -747,6 +823,10 @@ function App() {
           currentConfig={liveParams}
         />
       )}
+
+      {/* Sign-in dialog + auth toast. MUST stay inside the fullscreen container
+          (anything outside the fullscreen element is invisible in fullscreen). */}
+      <AuthDialog />
 
       {activeError && (
         <div style={{

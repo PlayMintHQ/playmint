@@ -35,3 +35,7 @@ CLAUDE.md
 *.njsproj
 *.sln
 *.sw?
+
+# Supabase CLI working dirs (migrations/ and drafts/ ARE tracked)
+supabase/.temp
+supabase/.branches

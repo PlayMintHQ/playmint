@@ -6,6 +6,7 @@ import { isGeminiConfigured, createCancelToken } from '../game/assetPipeline';
 import { generateOrRestoreAssets, makePromptKey, makePresetKey } from '../game/assetCache';
 import * as metrics from '../game/metrics';
 import { THEMES } from '../game/themes';
+import AccountButton from '../auth/AccountButton';
 
 const BANNED_WORDS = ['fuck', 'shit', 'bitch', 'cunt', 'ass', 'dick', 'pussy', 'cock', 'nigger', 'faggot'];
 
@@ -733,7 +734,7 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
       }} />
 
       {/* Top right: cache-only toggle + API key control */}
-      <div style={{ position: 'absolute', top: '16px', right: '16px', zIndex: 100, display: 'flex', gap: '12px', alignItems: 'center' }}>
+      <div style={{ position: 'absolute', top: 'max(16px, env(safe-area-inset-top))', right: 'max(16px, env(safe-area-inset-right))', zIndex: 100, display: 'flex', gap: '12px', alignItems: 'center' }}>
         <button
           onClick={toggleCacheOnly}
           disabled={isGenerating}
@@ -844,6 +845,10 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
                 </button>
               </form>
             )}
+            {/* Account entry point — LAST child so it holds the top-right
+                corner even when the dev toggles overflow leftward on phones.
+                Renders nothing when accounts are not configured. */}
+            <AccountButton />
       </div>
 
       {/* Close button for overlay */}

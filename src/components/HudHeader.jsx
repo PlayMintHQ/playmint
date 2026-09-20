@@ -1,5 +1,6 @@
 import React from 'react';
 import { IconFullscreen, IconFullscreenExit, IconMenu } from './Icons';
+import AccountButton from '../auth/AccountButton';
 
 const HudHeader = ({
   liveParams,
@@ -10,6 +11,7 @@ const HudHeader = ({
   onExitFullscreen,
   onMenuOpen,
   onLogoClick,
+  onMyGames,
 }) => {
   return (
     <div className="hud-header" onPointerDown={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()}>
@@ -44,6 +46,9 @@ const HudHeader = ({
               <IconFullscreenExit />
             </button>
           )}
+
+          {/* Renders nothing when accounts are not configured. */}
+          <AccountButton compact onMyGames={onMyGames} />
 
           <button className="pm-btn pm-btn-primary hud-header__icon-btn" onClick={onMenuOpen}>
             <IconMenu />

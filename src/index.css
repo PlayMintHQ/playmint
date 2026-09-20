@@ -623,3 +623,164 @@ body.pm-capture--clean .pm-mobile-overlay {
   0%, 65% { opacity: 1; }
   100% { opacity: 0; }
 }
+
+/* ────────────────────────────────────────────────────────────────────────────
+   Accounts (added 2026-09-19): account button + menu, sign-in dialog, toast,
+   and the /my-games route shell. Inputs are 16px on purpose — index.html sets
+   user-scalable=no and iOS zooms the page on focus for anything smaller.
+   ──────────────────────────────────────────────────────────────────────────── */
+.pm-account { position: relative; display: inline-flex; pointer-events: auto; }
+
+.pm-account-btn {
+  height: 32px;
+  max-width: 180px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(10, 13, 20, 0.72);
+  color: var(--pm-text-primary);
+  font-family: var(--font-primary);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+.pm-account-btn:hover { border-color: var(--pm-border-focus); background: rgba(18, 24, 37, 0.9); }
+.pm-account-btn:focus-visible { outline: 2px solid var(--pm-accent-teal); outline-offset: 2px; }
+.pm-account-btn:disabled { opacity: 0.55; cursor: default; }
+.pm-account-btn__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pm-account-btn--authed { padding-left: 4px; }
+.pm-account-btn__avatar {
+  width: 24px; height: 24px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #219B86, #D49D33);
+  color: #fff; font-size: 12px; font-weight: 800; flex-shrink: 0;
+}
+/* In the HUD the button matches the 40px icon buttons and drops its label on phones. */
+.pm-account-btn--compact { height: 40px; border-radius: 12px; }
+@media (max-width: 640px) {
+  .pm-account-btn--compact .pm-account-btn__label { display: none; }
+  .pm-account-btn--compact { padding: 0 10px; }
+  .pm-account-btn--compact.pm-account-btn--authed { padding: 0 7px; }
+}
+@media (max-width: 480px), (max-height: 480px) {
+  .pm-account-btn--compact { height: 34px; border-radius: 10px; }
+}
+
+.pm-account-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 200px;
+  max-width: min(280px, calc(100vw - 24px));
+  padding: 6px;
+  border-radius: 12px;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pm-account-menu__who { padding: 8px 10px 10px; border-bottom: 1px solid var(--pm-border); margin-bottom: 4px; }
+.pm-account-menu__name { font-weight: 700; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pm-account-menu__email { color: var(--pm-text-secondary); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pm-account-menu__item {
+  text-align: left; background: transparent; border: none; border-radius: 8px;
+  padding: 10px; min-height: 40px; color: var(--pm-text-primary);
+  font-family: var(--font-primary); font-size: 14px; font-weight: 600; cursor: pointer;
+}
+.pm-account-menu__item:hover, .pm-account-menu__item:focus-visible { background: rgba(255, 255, 255, 0.07); outline: none; }
+.pm-account-menu__item--danger { color: #f87171; }
+
+/* Capture mode: the HUD instance is hidden with .hud-header; this covers ScreenZero's. */
+body.pm-capture .pm-account-btn,
+body.pm-capture .pm-auth-toast { display: none !important; }
+
+.pm-auth-backdrop {
+  position: fixed; inset: 0; z-index: 13000; /* above capture-exit (12000), below the error modal (99999) */
+  display: flex; align-items: center; justify-content: center;
+  padding: max(12px, var(--pm-safe-area-top)) max(12px, var(--pm-safe-area-right)) max(12px, var(--pm-safe-area-bottom)) max(12px, var(--pm-safe-area-left));
+  box-sizing: border-box;
+  background: rgba(4, 6, 10, 0.72);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  pointer-events: auto;
+}
+.pm-auth {
+  position: relative;
+  width: 100%; max-width: 400px;
+  max-height: 100%;
+  overflow-y: auto; -webkit-overflow-scrolling: touch;
+  box-sizing: border-box;
+  padding: 24px;
+  border-radius: 16px;
+  background: rgba(15, 19, 29, 0.97);
+}
+.pm-auth__close {
+  position: absolute; top: 10px; right: 10px; width: 36px; height: 36px;
+  border-radius: 10px; border: none; background: transparent;
+  color: var(--pm-text-secondary); font-size: 16px; cursor: pointer;
+}
+.pm-auth__close:hover, .pm-auth__close:focus-visible { background: rgba(255, 255, 255, 0.08); color: #fff; outline: none; }
+.pm-auth__title { font-family: var(--font-heading); font-size: 22px; font-weight: 700; margin: 0 36px 6px 0; }
+.pm-auth__sub { color: var(--pm-text-secondary); font-size: 14px; line-height: 1.45; margin: 0 0 18px; }
+.pm-auth__field { margin-bottom: 14px; }
+.pm-auth .pm-input { font-size: 16px; }
+.pm-auth__hint { color: var(--pm-text-tertiary); font-size: 12px; margin: 6px 0 0; }
+.pm-auth__submit { width: 100%; margin-top: 4px; min-height: 46px; }
+.pm-auth__submit:disabled, .pm-auth__google:disabled { opacity: 0.6; cursor: default; }
+.pm-auth__google {
+  width: 100%; min-height: 46px; background: #fff; color: #1f2937; border: none;
+}
+.pm-auth__google:hover { filter: brightness(0.95); }
+.pm-auth__divider {
+  display: flex; align-items: center; gap: 12px; margin: 16px 0;
+  color: var(--pm-text-tertiary); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;
+}
+.pm-auth__divider::before, .pm-auth__divider::after { content: ''; flex: 1; height: 1px; background: var(--pm-border); }
+.pm-auth__error, .pm-auth__info { font-size: 13px; line-height: 1.4; border-radius: 8px; padding: 10px 12px; margin: 0 0 12px; }
+.pm-auth__error { color: #fca5a5; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.25); }
+.pm-auth__info { color: #6ee7b7; background: rgba(0, 229, 153, 0.08); border: 1px solid rgba(0, 229, 153, 0.25); }
+.pm-auth__links { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
+.pm-auth__switch { color: var(--pm-text-secondary); font-size: 14px; text-align: center; margin: 16px 0 0; }
+.pm-auth__link {
+  background: none; border: none; padding: 4px 2px; cursor: pointer;
+  color: var(--pm-accent-teal); font-family: var(--font-primary); font-size: 13px; font-weight: 600;
+}
+.pm-auth__link:hover, .pm-auth__link:focus-visible { text-decoration: underline; outline: none; }
+.pm-auth__link:disabled { opacity: 0.6; cursor: default; }
+@media (max-height: 480px) {
+  .pm-auth { padding: 16px 20px; }
+  .pm-auth__sub { margin-bottom: 12px; }
+  .pm-auth__divider { margin: 10px 0; }
+}
+
+.pm-auth-toast {
+  position: fixed; z-index: 13001; left: 50%; transform: translateX(-50%);
+  top: max(16px, var(--pm-safe-area-top));
+  max-width: calc(100vw - 32px); box-sizing: border-box;
+  padding: 10px 16px; border-radius: 10px; cursor: pointer; pointer-events: auto;
+  background: rgba(15, 19, 29, 0.96); border: 1px solid rgba(0, 229, 153, 0.4);
+  color: #6ee7b7; font-size: 14px; font-weight: 600; box-shadow: var(--pm-shadow-panel);
+}
+
+/* Route shell (/my-games and the reserved /g/:id stub) */
+.pm-route {
+  position: absolute; inset: 0; z-index: 5; overflow-y: auto;
+  background: var(--pm-bg-main);
+  padding: max(12px, var(--pm-safe-area-top)) max(16px, var(--pm-safe-area-right)) max(24px, var(--pm-safe-area-bottom)) max(16px, var(--pm-safe-area-left));
+  box-sizing: border-box;
+}
+.pm-route__bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; max-width: 1100px; margin: 0 auto; }
+.pm-route__home { background: none; border: none; padding: 4px; cursor: pointer; display: inline-flex; align-items: center; border-radius: 8px; }
+.pm-route__home:focus-visible { outline: 2px solid var(--pm-accent-teal); outline-offset: 2px; }
+.pm-route__home img { height: 34px; width: auto; display: block; }
+.pm-route__main { max-width: 1100px; margin: 0 auto; padding-top: 28px; }
+.pm-route__title { font-size: clamp(24px, 5vw, 34px); margin: 0 0 18px; }
+.pm-route__card { max-width: 560px; }
+.pm-route__card:hover { transform: none; }
+.pm-route__text { color: var(--pm-text-secondary); font-size: 15px; line-height: 1.5; margin: 0 0 16px; }
+.pm-route__text strong { color: var(--pm-text-primary); }
+.pm-route__actions { display: flex; gap: 10px; flex-wrap: wrap; }

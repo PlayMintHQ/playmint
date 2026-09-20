@@ -8,8 +8,11 @@ const GameComponent = ({ isFullscreen }) => {
   useEffect(() => {
     // Synchronously blur any active element from React UI inputs/buttons before game mounts
     // to prevent browser "dead focus" states that trap keyboard spacebar inputs.
-    if (document.activeElement && typeof document.activeElement.blur === 'function') {
-      document.activeElement.blur();
+    // Exception: focus inside the sign-in dialog / account menu stays put (a
+    // share-restore remount can happen while the dialog is open).
+    const active = document.activeElement;
+    if (active && !active.closest?.('[data-pm-modal]') && typeof active.blur === 'function') {
+      active.blur();
     }
 
     // Start the game instance once. Live tuning is handled via events.
