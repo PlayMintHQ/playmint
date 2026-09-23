@@ -13,9 +13,13 @@ import { isGeminiConfigured } from './assetPipeline/providers/geminiImage';
  * Generate game configuration locally without API calls
  * @param {string} promptText - User prompt text
  * @param {Function} onProgress - Progress callback
+ * @param {Object} [options] - Optional overrides
+ * @param {string} [options.mode] - Explicitly selected mode ('standard' | 'action_quest' | 'shooter_arena').
+ *   When provided it ALWAYS wins over any mode the prompt text implies (client
+ *   direction: the selected mode bubble is binding; the prompt defines the world).
  * @returns {Object} Game configuration object
  */
-export async function generateGameConfig(promptText, onProgress = () => {}) {
+export async function generateGameConfig(promptText, onProgress = () => {}, options = {}) {
   try {
     onProgress('[SYSTEM] Initializing local game generation...', 10);
 
@@ -23,9 +27,10 @@ export async function generateGameConfig(promptText, onProgress = () => {}) {
     const parsed = parsePromptKeywords(promptText);
     onProgress('[SYSTEM] Analyzing prompt keywords and modifiers...', 20);
 
-    // Determine game mode
-    const gameType = parsed.mode === 'action_quest' ? 'platformer'
-      : parsed.mode === 'shooter_arena' ? 'shooter'
+    // Determine game mode — an explicit selection overrides the prompt-derived one.
+    const resolvedMode = options.mode || parsed.mode;
+    const gameType = resolvedMode === 'action_quest' ? 'platformer'
+      : resolvedMode === 'shooter_arena' ? 'shooter'
       : 'runner';
 
     // Theme may be null: prompts matching none of the predefined themes get their
@@ -35,7 +40,7 @@ export async function generateGameConfig(promptText, onProgress = () => {}) {
     const secondaryTheme = parsed.secondaryThemeKey || theme;
 
     // Generate game name
-    const gameName = generateTitle(promptText, parsed.mode || 'standard', theme);
+    const gameName = generateTitle(promptText, resolvedMode || 'standard', theme);
     onProgress(`[SYSTEM] Generated game: "${gameName}"...`, 30);
 
     // Set difficulty based on modifiers
@@ -146,6 +151,12 @@ export async function generateGameConfig(promptText, onProgress = () => {}) {
       gameType,
       gameName,
       difficulty,
+      // The matched theme rides the config so every downstream consumer (static
+      // theme fallback, localDesign accents, cache matcher candidateTheme) sees
+      // the prompt's world instead of defaulting to 'ice'. May be null for
+      // prompts matching no predefined theme — those stay prompt-derived.
+      themeKey: theme,
+      secondaryThemeKey: secondaryTheme,
       runSpeed,
       jumpForce,
       gravity,

@@ -24,6 +24,11 @@
 --    OPEN ISSUE FOR OCTOBER: those folders are mutable (a restyle overwrites the
 --    same id) and the upload endpoint is unauthenticated. Before games become
 --    PUBLIC, published art must be made immutable (copy-on-publish).
+-- 4. CLIENT REVIEW 22 Sep 2026 (applied below): INSERT is column-gated so users
+--    cannot set id/owner_id/timestamps/visibility/published_at/allow_remix/
+--    remix_parent_id; enforce_games_row_cap() is SECURITY INVOKER (no SECURITY
+--    DEFINER in the public schema). UPDATE grants are unchanged — owners may
+--    later publish/remix their own rows.
 -- ──────────────────────────────────────────────────────────────────────────────
 
 create table public.games (
@@ -69,9 +74,19 @@ create trigger games_set_updated_at
 alter table public.games enable row level security;
 
 revoke all on public.games from anon, authenticated;
-grant select, insert, delete on public.games to authenticated;
+grant select, delete on public.games to authenticated;
+-- Column-level INSERT (client review 22 Sep 2026): users may only supply the
+-- content columns. id, owner_id, created_at/updated_at, visibility,
+-- published_at, allow_remix and remix_parent_id are NOT insertable — their
+-- defaults/casts fill them (id gen_random_uuid(), owner_id auth.uid(),
+-- created_at now(), visibility 'private', allow_remix false).
+grant insert (title, mode, prompt, config, asset_meta, schema_version, art_id,
+              thumbnail_path)
+  on public.games to authenticated;
 -- Column-level UPDATE: owner_id, id, created_at and remix_parent_id are
--- immutable after insert even for the owner.
+-- immutable after insert even for the owner. visibility/published_at/
+-- allow_remix stay updatable so owners can later publish/remix their own rows
+-- (October's publish feature) — only INSERT is locked down.
 grant update (title, prompt, config, asset_meta, schema_version, art_id,
               thumbnail_path, visibility, published_at, allow_remix)
   on public.games to authenticated;
@@ -94,10 +109,14 @@ create policy games_delete_own on public.games
   using ((select auth.uid()) = owner_id);
 
 -- ── Abuse guard: signup is open, so inserts must be bounded per user ──────────
+-- SECURITY INVOKER (client review 22 Sep 2026 — no SECURITY DEFINER in the
+-- public schema): the count query runs under the invoking role with RLS
+-- active, and games_select_own scopes it to that user's OWN rows — exactly
+-- the per-user cap we want. search_path stays pinned to ''.
 create or replace function public.enforce_games_row_cap()
 returns trigger
 language plpgsql
-security definer
+security invoker
 set search_path = ''
 as $$
 begin

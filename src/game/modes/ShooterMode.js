@@ -7,9 +7,10 @@ import Projectile from '../objects/Projectile';
 // key / click fires a real directional shot toward it — mouse aim only
 // engages after the first genuine (non-touch) pointer move, so it never
 // hijacks rotation on a touch device. Touch has no cursor to aim with, so it
-// keeps the original assisted aim: rotation follows movement, and the mobile
-// fire button shoots at the nearest enemy in range (see CLAUDE.md's Shooter
-// Arena section).
+// uses cone aim-assist: rotation follows movement, and the mobile fire button
+// snaps to the nearest enemy that is both in range and roughly along the
+// facing direction — or fires straight ahead when nothing qualifies, so the
+// button ALWAYS fires (see CLAUDE.md's Shooter Arena section).
 // Player/enemy art is a single static top-down sprite rotated at render time,
 // never a directional sheet — GameManagerScene skips SpriteAlignmentManager's
 // ground-anchor/flip logic for this mode and leaves the sprite origin centered.
@@ -33,6 +34,10 @@ export default class ShooterMode extends BaseMode {
     this.fireTrigger = false;
     this.mouseAimActive = false;
     this.mouseAiming = false;
+    // Touch aim-assist cone: half-angle (radians) around the player's facing
+    // direction that an enemy must fall inside to be auto-targeted. ±45° keeps
+    // the assist forgiving without snapping shots sideways.
+    this.aimAssistCone = Math.PI / 4;
     this.moveInput = { up: false, down: false, left: false, right: false };
 
     this.enemies = null;
@@ -209,18 +214,22 @@ export default class ShooterMode extends BaseMode {
     // (gameInputListener above) set the trigger; cooldown still rate-limits it
     // so holding/mashing the trigger can't out-fire fireRate. Mouse aim fires
     // a real directional shot toward the cursor; touch has no cursor, so it
-    // falls back to the assisted nearest-enemy shot.
+    // uses cone aim-assist: snap to the nearest enemy that is both in range
+    // and roughly along the facing direction, otherwise fire straight ahead —
+    // the button ALWAYS fires (a dead button on an empty arena read as broken).
     if (this.fireCooldown > 0) this.fireCooldown -= delta;
     if ((keys._shootTrigger || this.fireTrigger) && this.fireCooldown <= 0) {
       if (this.mouseAiming) {
         this.fireInDirection(player.rotation);
         this.fireCooldown = this.fireRate;
       } else {
-        const target = this.findNearestEnemyInRange(player);
+        const target = this.findBestAssistTarget(player);
         if (target) {
           this.fireAt(target);
-          this.fireCooldown = this.fireRate;
+        } else {
+          this.fireInDirection(player.rotation);
         }
+        this.fireCooldown = this.fireRate;
       }
     }
     if (scene.keyStates) scene.keyStates._shootTrigger = false;
@@ -236,16 +245,22 @@ export default class ShooterMode extends BaseMode {
     }
   }
 
-  findNearestEnemyInRange(player) {
+  // Touch aim-assist: the nearest enemy that is BOTH within fireRange AND
+  // within AIM_ASSIST_CONE of the player's facing direction. Returns null when
+  // nothing qualifies so the caller can fall back to a straight shot — the
+  // fire button must never do nothing.
+  findBestAssistTarget(player) {
     let nearest = null;
     let nearestDist = this.fireRange;
     this.enemies.children.iterate((enemy) => {
       if (!enemy || !enemy.active) return;
       const dist = Phaser.Math.Distance.Between(player.x, player.y, enemy.x, enemy.y);
-      if (dist <= nearestDist) {
-        nearestDist = dist;
-        nearest = enemy;
-      }
+      if (dist > nearestDist) return;
+      const angleToEnemy = Phaser.Math.Angle.Between(player.x, player.y, enemy.x, enemy.y);
+      const diff = Phaser.Math.Angle.Wrap(angleToEnemy - player.rotation);
+      if (Math.abs(diff) > this.aimAssistCone) return;
+      nearestDist = dist;
+      nearest = enemy;
     });
     return nearest;
   }

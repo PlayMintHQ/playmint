@@ -24,8 +24,9 @@ const SLOT_VOCAB = [...GENERATED_SLOTS, 'projectile', 'collectible'];
 // field existed are all side-view. Mode-agnosticism holds WITHIN a view only.
 const sameView = (c, view) => (c.assetMeta?.view || 'side') === view;
 
-// Prompt-generated configs carry no themeKey — derive it from the entry's own
-// source prompt so theme comparison works for every candidate.
+// Prompt-generated configs carry themeKey since 2026-09-22 (geminiService
+// stamps it); the parsePromptKeywords fallback covers legacy cache entries
+// saved before that.
 const candidateTheme = (c) =>
   c.config?.themeKey || parsePromptKeywords(c.sourcePrompt || '').themeKey || null;
 

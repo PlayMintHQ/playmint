@@ -330,8 +330,10 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
 
   // Terminal pipeline failure never dead-ends the flow: boot the game on built-in
   // theme art instead (dynamicAssetUrls null routes every texture pick to the
-  // static theme set). Custom prompts have themeKey null — pick 'ice' (the
-  // generateRandom precedent, full multi-layer art).
+  // static theme set). Prompt-generated configs carry the matched themeKey since
+  // 2026-09-22 (geminiService stamps it), so a "jungle world" fallback boots the
+  // forest theme — only prompts matching NO predefined theme fall back to 'ice'
+  // (the generateRandom precedent, full multi-layer art).
   const toStaticThemeConfig = (config) => ({
     ...config,
     themeKey: THEMES[config.themeKey] ? config.themeKey : 'ice',
@@ -504,7 +506,7 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
         const result = await generateGameConfig(text, (logText, progressVal) => {
           setTerminalLogs(prev => [...prev, logText]);
           setProgress(p => Math.max(p, Math.min(progressVal, 70)));
-        });
+        }, { mode: selectedMode });
         overlayConfig = result.config;
         metrics.mark('config');
         metrics.annotate({ gameType: result.config.gameType });
@@ -562,7 +564,7 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
         console.log(`[ScreenZero Progress Callback] Log: "${logText}", Progress: ${progressVal}%`);
         setTerminalLogs(prev => [...prev, logText]);
         setProgress(Math.min(progressVal, 70));
-      });
+      }, { mode: selectedMode });
       generatedConfig = result.config;
       // Prompt parsing used to sit entirely OUTSIDE the measurement — the old
       // clock started inside generateOrRestoreAssets, after this line.
