@@ -489,6 +489,48 @@ canvas {
 .pm-mobile-dpad-cross .pm-touch-btn--right { grid-column: 3; grid-row: 2; }
 .pm-mobile-dpad-cross .pm-touch-btn--down { grid-column: 2; grid-row: 3; }
 
+/* Twin-stick joysticks (shooter, 2026-09-23): a larger glassmorphic base with
+   a theme-accent knob. The base is the touch target — bigger than the buttons
+   because a stick is a continuous gesture, not a tap. touch-action: none so
+   the browser never steals the gesture for scrolling/zooming. */
+.pm-joystick {
+  pointer-events: auto;
+  position: relative;
+  width: calc(var(--pm-btn-jump) * 1.9);
+  height: calc(var(--pm-btn-jump) * 1.9);
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(18, 24, 37, 0.55);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  opacity: 0.6;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  transition: opacity 0.12s ease, border-color 0.1s ease, box-shadow 0.1s ease;
+}
+
+.pm-joystick:active {
+  opacity: 1;
+  border-color: var(--joystick-accent, #00E599);
+  box-shadow: 0 0 16px var(--joystick-accent, #00E599), inset 0 1px 2px rgba(255, 255, 255, 0.1);
+}
+
+.pm-joystick-knob {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 42%;
+  height: 42%;
+  margin: -21%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.35), transparent 60%),
+    var(--joystick-accent, #00E599);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+  will-change: transform;
+}
+
 /* Glassmorphic touch buttons, sized from the custom properties above. */
 .pm-touch-btn {
   -webkit-tap-highlight-color: transparent;

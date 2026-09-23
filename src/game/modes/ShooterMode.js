@@ -6,11 +6,12 @@ import Projectile from '../objects/Projectile';
 // player continuously faces the mouse cursor (independent of movement) and F
 // key / click fires a real directional shot toward it — mouse aim only
 // engages after the first genuine (non-touch) pointer move, so it never
-// hijacks rotation on a touch device. Touch has no cursor to aim with, so it
-// uses cone aim-assist: rotation follows movement, and the mobile fire button
-// snaps to the nearest enemy that is both in range and roughly along the
-// facing direction — or fires straight ahead when nothing qualifies, so the
-// button ALWAYS fires (see CLAUDE.md's Shooter Arena section).
+// hijacks rotation on a touch device. Touch uses the twin-stick scheme
+// (2026-09-23): a left analog stick moves, a right analog stick aims — the
+// player faces the right stick's direction and RELEASING it fires a shot
+// along that aim (the manual-trigger requirement survives: you release to
+// shoot). The old cone aim-assist remains only as the fallback when a touch
+// device fires without any aim input (e.g. the scene's pointerdown handler).
 // Player/enemy art is a single static top-down sprite rotated at render time,
 // never a directional sheet — GameManagerScene skips SpriteAlignmentManager's
 // ground-anchor/flip logic for this mode and leaves the sprite origin centered.
@@ -36,9 +37,16 @@ export default class ShooterMode extends BaseMode {
     this.mouseAiming = false;
     // Touch aim-assist cone: half-angle (radians) around the player's facing
     // direction that an enemy must fall inside to be auto-targeted. ±45° keeps
-    // the assist forgiving without snapping shots sideways.
+    // the assist forgiving without snapping shots sideways. Only used when a
+    // touch device fires with NO aim input at all (twin-stick aim supersedes).
     this.aimAssistCone = Math.PI / 4;
-    this.moveInput = { up: false, down: false, left: false, right: false };
+    this.moveInput = { up: false, down: false, left: false, right: false, x: 0, y: 0 };
+    // Twin-stick aim (right analog stick): deflection vector, whether it is
+    // currently deflected, and the last aim angle it produced — the fire-on-
+    // release shot travels along lastAimAngle, not the post-release rotation.
+    this.aimInput = { x: 0, y: 0 };
+    this.stickAiming = false;
+    this.lastAimAngle = null;
 
     this.enemies = null;
     this.projectiles = null;
@@ -89,6 +97,23 @@ export default class ShooterMode extends BaseMode {
       else if (action === 'left') this.moveInput.left = isDown;
       else if (action === 'right') this.moveInput.right = isDown;
       else if (action === 'shoot' && isDown) this.fireTrigger = true;
+      else if (action === 'move') {
+        // Left analog stick (twin-stick). x/y are normalized -1..1; the
+        // boolean d-pad flags above stay supported for any legacy dispatcher.
+        this.moveInput.x = e.detail.x || 0;
+        this.moveInput.y = e.detail.y || 0;
+      } else if (action === 'aim') {
+        // Right analog stick: deflection drives facing; release fires.
+        this.aimInput.x = e.detail.x || 0;
+        this.aimInput.y = e.detail.y || 0;
+        const mag = Math.hypot(this.aimInput.x, this.aimInput.y);
+        if (mag > 0.2) {
+          this.stickAiming = true;
+          this.lastAimAngle = Math.atan2(this.aimInput.y, this.aimInput.x);
+        } else if (state === 'up') {
+          this.stickAiming = false;
+        }
+      }
     };
     window.addEventListener('game-input', this.gameInputListener);
 
@@ -178,10 +203,21 @@ export default class ShooterMode extends BaseMode {
     const pointer = scene.input.activePointer;
     this.mouseAiming = this.mouseAimActive && !pointer.wasTouch;
 
-    let vx = (keys.ArrowRight || keys.KeyD || this.moveInput.right ? 1 : 0)
-      - (keys.ArrowLeft || keys.KeyA || this.moveInput.left ? 1 : 0);
-    let vy = (keys.ArrowDown || keys.KeyS || this.moveInput.down ? 1 : 0)
-      - (keys.ArrowUp || keys.KeyW || this.moveInput.up ? 1 : 0);
+    // Movement: the left analog stick (twin-stick) wins when deflected; the
+    // keyboard/d-pad boolean flags remain the fallback (and the only path on
+    // desktop). Both produce a normalized vector.
+    let vx = 0;
+    let vy = 0;
+    const stickMag = Math.hypot(this.moveInput.x, this.moveInput.y);
+    if (stickMag > 0.15) {
+      vx = this.moveInput.x;
+      vy = this.moveInput.y;
+    } else {
+      vx = (keys.ArrowRight || keys.KeyD || this.moveInput.right ? 1 : 0)
+        - (keys.ArrowLeft || keys.KeyA || this.moveInput.left ? 1 : 0);
+      vy = (keys.ArrowDown || keys.KeyS || this.moveInput.down ? 1 : 0)
+        - (keys.ArrowUp || keys.KeyW || this.moveInput.up ? 1 : 0);
+    }
 
     const moving = vx !== 0 || vy !== 0;
     if (moving) {
@@ -189,8 +225,11 @@ export default class ShooterMode extends BaseMode {
       vx /= len; vy /= len;
       player.body.setVelocity(vx * this.moveSpeed, vy * this.moveSpeed);
       // Movement drives facing only when nothing is aiming for us — mouse aim
-      // (below) overrides it so strafing doesn't spin the player off-target.
-      if (!this.mouseAiming) player.rotation = Phaser.Math.Angle.Between(0, 0, vx, vy);
+      // and the right stick (below) override it so strafing doesn't spin the
+      // player off-target.
+      if (!this.mouseAiming && !this.stickAiming) {
+        player.rotation = Phaser.Math.Angle.Between(0, 0, vx, vy);
+      }
     } else {
       player.body.setVelocity(0, 0);
     }
@@ -199,6 +238,13 @@ export default class ShooterMode extends BaseMode {
     // classic twin-stick feel. Recomputed after movement so it always wins.
     if (this.mouseAiming) {
       player.rotation = Phaser.Math.Angle.Between(player.x, player.y, pointer.worldX, pointer.worldY);
+    }
+
+    // Right analog stick aim: face the stick's deflection direction. Runs
+    // after movement so it wins over movement-facing; mouse aim (above) still
+    // outranks it when both are active.
+    if (this.stickAiming && this.lastAimAngle !== null) {
+      player.rotation = this.lastAimAngle;
     }
 
     // Enemy AI: chase the player, rotate to face travel direction (same
@@ -210,18 +256,28 @@ export default class ShooterMode extends BaseMode {
       enemy.rotation = angle;
     });
 
-    // Manual fire — F key / click (GameManagerScene) / mobile fire button
+    // Manual fire — F key / click (GameManagerScene) / right-stick release
     // (gameInputListener above) set the trigger; cooldown still rate-limits it
     // so holding/mashing the trigger can't out-fire fireRate. Mouse aim fires
-    // a real directional shot toward the cursor; touch has no cursor, so it
-    // uses cone aim-assist: snap to the nearest enemy that is both in range
-    // and roughly along the facing direction, otherwise fire straight ahead —
-    // the button ALWAYS fires (a dead button on an empty arena read as broken).
+    // a real directional shot toward the cursor; the right stick fires along
+    // its last aim angle (the direction the player was facing when released);
+    // a touch device with NO aim input falls back to cone aim-assist: snap to
+    // the nearest enemy that is both in range and roughly along the facing
+    // direction, otherwise fire straight ahead — the trigger ALWAYS fires (a
+    // dead button on an empty arena read as broken).
     if (this.fireCooldown > 0) this.fireCooldown -= delta;
     if ((keys._shootTrigger || this.fireTrigger) && this.fireCooldown <= 0) {
       if (this.mouseAiming) {
         this.fireInDirection(player.rotation);
         this.fireCooldown = this.fireRate;
+      } else if (this.lastAimAngle !== null) {
+        // Twin-stick aim: the shot travels along the aim stick's last
+        // direction, even though the stick is already released. Cleared after
+        // firing (unless the stick is still held) so a later F-key/click/tap
+        // falls back to cone-assist instead of a stale angle.
+        this.fireInDirection(this.lastAimAngle);
+        this.fireCooldown = this.fireRate;
+        if (!this.stickAiming) this.lastAimAngle = null;
       } else {
         const target = this.findBestAssistTarget(player);
         if (target) {
