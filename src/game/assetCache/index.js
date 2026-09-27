@@ -252,7 +252,11 @@ async function tryMatchedReuse({ config, userPrompt, promptKey, onProgress, canc
   // entry-shaped, so the matcher consumes both interchangeably; local wins dedup).
   let candidates = [];
   try {
-    const local = ((await backend.listGames()) || []).filter((e) => e.schemaVersion === SCHEMA_VERSION);
+    // Procedural fallback sets (shipped 2026-09-23, removed 2026-09-27) are
+    // still excluded from matching: they are a $0 stopgap, not showcase art — a
+    // matcher must never prefer one over a fresh run or a real cached set.
+    const local = ((await backend.listGames()) || [])
+      .filter((e) => e.schemaVersion === SCHEMA_VERSION && !e.assetMeta?.procedural);
     const localIds = new Set(local.map((e) => e.id));
     const remote = (await server.listGames())
       .filter((c) => c.schemaVersion === SCHEMA_VERSION && !localIds.has(c.id));
@@ -441,6 +445,59 @@ async function tryMatchedReuse({ config, userPrompt, promptKey, onProgress, canc
  * spread the RETURNED config (it carries gameId/sourcePrompt, and on cache hits
  * dynamicAssetUrls is forced true so keyless restores route to dyn_* textures).
  */
+
+// Predefined themes whose curated static art boots the game. Exactly the five
+// keys parsePromptKeywords can produce, so every one of them has real art in
+// public/assets/themes.
+const THEME_KEYS = ['ice', 'lava', 'forest', 'city', 'space'];
+
+// The prompt's own theme when it has one, otherwise a random curated world. A
+// custom world ("a clockwork castle") has no theme match, and drawing its art
+// procedurally shipped a bare stick figure the client rejected — the built-in
+// sets are the only art that reads as a finished game.
+const pickFallbackTheme = (themeKey) => (
+  THEME_KEYS.includes(themeKey)
+    ? themeKey
+    : THEME_KEYS[Math.floor(Math.random() * THEME_KEYS.length)]
+);
+
+// Gemini is unavailable (no key / quota / fatal slot) or Cache only missed —
+// never dead-end, never dead art. Returns the same static-boot shape the old
+// themed branch did, so callers need no special case. Cancellations always
+// propagate (they are rethrown before this is reached).
+const buildFallbackBoot = ({ config, onProgress }) => {
+  const themeKey = pickFallbackTheme(config?.themeKey);
+  const matched = themeKey === config?.themeKey;
+  bumpStats('staticMiss');
+  timeAnnotate({ staticWorld: themeKey, staticWorldMatched: matched });
+  onProgress?.(
+    matched
+      ? `[CACHE] No AI art available — launching with the built-in "${themeKey}" world artwork (no image spend).`
+      : `[CACHE] No AI art available and this prompt has no built-in world — launching with a random built-in world ("${themeKey}", no image spend).`,
+    null
+  );
+  return {
+    config: { ...config, themeKey, dynamicAssetUrls: null, preloadedImages: null, assetMeta: null },
+    preloadedImages: null,
+    assetMeta: null,
+    fromCache: false,
+    staticBoot: true
+  };
+};
+
+// Fresh generation with the fallback: a Gemini failure (no key, exhausted
+// quota, fatal slot) never dead-ends the boot — it falls back to built-in
+// theme art. Cancellations always propagate.
+const generateWithFallback = async ({ config, userPrompt, onProgress, cancelToken, t0, extraCost = null }) => {
+  try {
+    return await generateAndCache({ config, userPrompt, onProgress, cancelToken, t0, extraCost });
+  } catch (err) {
+    if (err?.cancelled) throw err;
+    console.warn('[AssetCache] Fresh generation failed — using built-in theme art:', err?.message || err);
+    return buildFallbackBoot({ config, onProgress });
+  }
+};
+
 export async function generateOrRestoreAssets({ config, userPrompt = '', promptKey = null, onProgress, cancelToken }) {
   const t0 = performance.now();
   const cacheOnly = readCacheOnly();
@@ -451,7 +508,7 @@ export async function generateOrRestoreAssets({ config, userPrompt = '', promptK
   if (!cacheOnly && (readForceFresh() || readDemoMode())) {
     onProgress?.('[CACHE] Force fresh is ON — skipping cache lookup and matching; generating new art for this prompt.', null);
     timeAnnotate({ forcedFresh: true });
-    return generateAndCache({ config, userPrompt, promptKey, onProgress, cancelToken, t0 });
+    return generateWithFallback({ config, userPrompt, promptKey, onProgress, cancelToken, t0 });
   }
 
   // Tier 1 — exact prompt match: instant whole-set restore, exactly $0.
@@ -500,14 +557,13 @@ export async function generateOrRestoreAssets({ config, userPrompt = '', promptK
     if (reused) return reused;
   }
 
-  // Tier 3 — cache-only miss: explain and hand the caller its static fallback.
+  // Tier 3 — cache-only miss: never dead-end. Built-in theme art, the prompt's
+  // own world if it has one and a random one if it doesn't.
   if (cacheOnly) {
-    bumpStats('staticMiss');
-    onProgress?.('[CACHE] Cache only is ON — no cached game matches this prompt. Launching built-in theme art (no image spend). Turn the toggle off (top right) to generate fresh AI art.', null);
-    throw Object.assign(new Error('cache-only: no cached match'), { cacheOnlyMiss: true });
+    return buildFallbackBoot({ config, onProgress });
   }
 
-  return generateAndCache({ config, userPrompt, promptKey, onProgress, cancelToken, t0, extraCost: box.matcherCost });
+  return generateWithFallback({ config, userPrompt, promptKey, onProgress, cancelToken, t0, extraCost: box.matcherCost });
 }
 
 /**

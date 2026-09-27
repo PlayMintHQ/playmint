@@ -740,7 +740,7 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
         <button
           onClick={toggleCacheOnly}
           disabled={isGenerating}
-          title={'Cache only: reuse cached art (free) instead of generating. No cached match = built-in theme art. Never spends on image generation.'}
+          title={'Cache only: reuse cached art (free) instead of generating. No cached match = a built-in world — the one your prompt names, or a random one. Never spends on image generation.'}
           style={{
             height: '32px', padding: '0 10px', borderRadius: '8px',
             fontSize: '12px', fontWeight: 700, cursor: 'pointer',
