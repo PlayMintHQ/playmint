@@ -2,16 +2,35 @@ import Phaser from 'phaser';
 import BaseMode from './BaseMode';
 import Projectile from '../objects/Projectile';
 
-// Top-down arena survival shooter. No gravity, 360° movement. On desktop the
-// player continuously faces the mouse cursor (independent of movement) and F
-// key / click fires a real directional shot toward it — mouse aim only
-// engages after the first genuine (non-touch) pointer move, so it never
-// hijacks rotation on a touch device. Touch uses the twin-stick scheme
-// (2026-09-23): a left analog stick moves, a right analog stick aims — the
-// player faces the right stick's direction and RELEASING it fires a shot
-// along that aim (the manual-trigger requirement survives: you release to
-// shoot). The old cone aim-assist remains only as the fallback when a touch
-// device fires without any aim input (e.g. the scene's pointerdown handler).
+// AUTO is the default; the config flag (or the localStorage dev override, same
+// shape as the other PM_* switches) turns on the manual twin-stick scheme.
+function readManualAim(cfg) {
+  if (cfg?.shooterManualAim === true) return true;
+  try {
+    return window.localStorage.getItem('PM_SHOOTER_MANUAL_AIM') === '1';
+  } catch {
+    return false; // private mode / storage disabled — auto is the default anyway
+  }
+}
+
+// Top-down arena survival shooter. No gravity, 360° movement.
+//
+// AIMING has two modes and AUTO is the default (client direction 2026-09-27 —
+// the manual twin-stick scheme had replaced v1's auto-targeting and made mobile
+// unplayable for a casual player):
+//   AUTO  (config.shooterManualAim !== true, also the PM_SHOOTER_MANUAL_AIM='1'
+//          dev override to flip it) — the player turns toward the NEAREST enemy
+//          inside shooterFireRange in ANY direction and fires at it on the
+//          shooterFireRate cooldown, holding the trigger by itself. The only
+//          input is "move". No target in range = no shot, so the gun never
+//          fires into an empty arena (v1's tell-tale broken-button behavior).
+//   MANUAL — the previous scheme, unchanged: the player faces the mouse cursor
+//          (desktop) or the right analog stick's last direction (touch) and
+//          F / click / stick-release fires along that aim, with a cone
+//          aim-assist when a touch device fires with no aim input at all.
+// Auto-aim also never snaps: facing is rate-limited toward the target (and the
+// projectile flies at the target's own position), so a chasing enemy reads as
+// the turret tracking, not teleporting. A thin reticle marks the locked target.
 // Player/enemy art is a single static top-down sprite rotated at render time,
 // never a directional sheet — GameManagerScene skips SpriteAlignmentManager's
 // ground-anchor/flip logic for this mode and leaves the sprite origin centered.
@@ -35,15 +54,24 @@ export default class ShooterMode extends BaseMode {
     this.fireTrigger = false;
     this.mouseAimActive = false;
     this.mouseAiming = false;
+    this.manualAim = readManualAim(cfg);
+    // rad/s the player turns toward its auto-target. Snappy enough to keep a
+    // 100px/s chaser inside a 400px range, smooth enough to read as turning.
+    this.turnRate = 7;
+    // Auto-aim lock reticle color — a light cyan that reads on all five
+    // static themes and on generated art alike.
+    this.reticleColor = 0x8ff7ff;
+    this.reticle = null;
+    this.lockedTarget = null;
     // Touch aim-assist cone: half-angle (radians) around the player's facing
     // direction that an enemy must fall inside to be auto-targeted. ±45° keeps
-    // the assist forgiving without snapping shots sideways. Only used when a
-    // touch device fires with NO aim input at all (twin-stick aim supersedes).
+    // the assist forgiving without snapping shots sideways. MANUAL mode only.
     this.aimAssistCone = Math.PI / 4;
     this.moveInput = { up: false, down: false, left: false, right: false, x: 0, y: 0 };
-    // Twin-stick aim (right analog stick): deflection vector, whether it is
-    // currently deflected, and the last aim angle it produced — the fire-on-
-    // release shot travels along lastAimAngle, not the post-release rotation.
+    // Twin-stick aim (right analog stick, MANUAL mode): deflection vector,
+    // whether it is currently deflected, and the last aim angle it produced —
+    // the fire-on-release shot travels along lastAimAngle, not the post-release
+    // rotation.
     this.aimInput = { x: 0, y: 0 };
     this.stickAiming = false;
     this.lastAimAngle = null;
@@ -88,6 +116,13 @@ export default class ShooterMode extends BaseMode {
       collectible.destroy();
     });
 
+    // Auto-aim lock indicator. One persistent Graphics, cleared and restroked
+    // each frame, created only in AUTO mode. Depth 5 so the ring draws over the
+    // enemy it brackets.
+    if (!this.manualAim) {
+      this.reticle = scene.add.graphics().setDepth(5);
+    }
+
     this.gameInputListener = (e) => {
       if (!e.detail) return;
       const { action, state } = e.detail;
@@ -102,7 +137,7 @@ export default class ShooterMode extends BaseMode {
         // boolean d-pad flags above stay supported for any legacy dispatcher.
         this.moveInput.x = e.detail.x || 0;
         this.moveInput.y = e.detail.y || 0;
-      } else if (action === 'aim') {
+      } else if (action === 'aim' && this.manualAim) {
         // Right analog stick: deflection drives facing; release fires.
         this.aimInput.x = e.detail.x || 0;
         this.aimInput.y = e.detail.y || 0;
@@ -120,12 +155,15 @@ export default class ShooterMode extends BaseMode {
     // Mouse aim engages on the first real (non-touch) pointer move — guards
     // against snapping the player to face (0,0) before the mouse has ever
     // moved, and keeps touch devices (which never fire a non-touch move) on
-    // the assisted movement-facing/nearest-enemy behavior below.
-    this.pointerMoveHandler = (pointer) => {
-      if (pointer.wasTouch) return;
-      this.mouseAimActive = true;
-    };
-    scene.input.on('pointermove', this.pointerMoveHandler, this);
+    // the assisted movement-facing/nearest-enemy behavior below. AUTO mode
+    // never registers the pointer at all: it owns rotation outright.
+    if (this.manualAim) {
+      this.pointerMoveHandler = (pointer) => {
+        if (pointer.wasTouch) return;
+        this.mouseAimActive = true;
+      };
+      scene.input.on('pointermove', this.pointerMoveHandler, this);
+    }
 
     this.resizeListener = (gameSize) => {
       if (this.resizeTimeout) clearTimeout(this.resizeTimeout);
@@ -201,7 +239,8 @@ export default class ShooterMode extends BaseMode {
     const player = scene.player;
     const keys = scene.keyStates || {};
     const pointer = scene.input.activePointer;
-    this.mouseAiming = this.mouseAimActive && !pointer.wasTouch;
+    const dt = delta / 1000;
+    this.mouseAiming = this.manualAim && this.mouseAimActive && !pointer.wasTouch;
 
     // Movement: the left analog stick (twin-stick) wins when deflected; the
     // keyboard/d-pad boolean flags remain the fallback (and the only path on
@@ -224,28 +263,34 @@ export default class ShooterMode extends BaseMode {
       const len = Math.hypot(vx, vy);
       vx /= len; vy /= len;
       player.body.setVelocity(vx * this.moveSpeed, vy * this.moveSpeed);
-      // Movement drives facing only when nothing is aiming for us — mouse aim
-      // and the right stick (below) override it so strafing doesn't spin the
-      // player off-target.
-      if (!this.mouseAiming && !this.stickAiming) {
-        player.rotation = Phaser.Math.Angle.Between(0, 0, vx, vy);
-      }
     } else {
       player.body.setVelocity(0, 0);
     }
+    const travelAngle = moving ? Phaser.Math.Angle.Between(0, 0, vx, vy) : null;
 
-    // Mouse aim: face the cursor every frame, independent of movement —
-    // classic twin-stick feel. Recomputed after movement so it always wins.
-    if (this.mouseAiming) {
-      player.rotation = Phaser.Math.Angle.Between(player.x, player.y, pointer.worldX, pointer.worldY);
-    }
+    // AUTO: the nearest live enemy anywhere inside fireRange, 360°. This is the
+    // whole mode — one target, one input, no aiming.
+    const autoTarget = this.manualAim ? null : this.findTargetInRange();
+    this.lockedTarget = autoTarget;
 
-    // Right analog stick aim: face the stick's deflection direction. Runs
-    // after movement so it wins over movement-facing; mouse aim (above) still
-    // outranks it when both are active.
-    if (this.stickAiming && this.lastAimAngle !== null) {
-      player.rotation = this.lastAimAngle;
+    // Facing is written in exactly ONE place, in priority order, each step
+    // overriding the last: movement -> auto-target -> right stick -> mouse.
+    if (this.manualAim) {
+      if (this.mouseAiming) {
+        // Face the cursor every frame, independent of movement.
+        player.rotation = Phaser.Math.Angle.Between(player.x, player.y, pointer.worldX, pointer.worldY);
+      } else if (this.stickAiming && this.lastAimAngle !== null) {
+        player.rotation = this.lastAimAngle;
+      } else if (travelAngle !== null) {
+        player.rotation = travelAngle;
+      }
+    } else if (autoTarget) {
+      const desired = Phaser.Math.Angle.Between(player.x, player.y, autoTarget.x, autoTarget.y);
+      player.rotation = Phaser.Math.Angle.RotateTo(player.rotation, desired, this.turnRate * dt);
+    } else if (travelAngle !== null) {
+      player.rotation = Phaser.Math.Angle.RotateTo(player.rotation, travelAngle, this.turnRate * dt);
     }
+    this.drawLockReticle(autoTarget);
 
     // Enemy AI: chase the player, rotate to face travel direction (same
     // rotate-at-render-time treatment as the player — locked art decision).
@@ -256,17 +301,26 @@ export default class ShooterMode extends BaseMode {
       enemy.rotation = angle;
     });
 
-    // Manual fire — F key / click (GameManagerScene) / right-stick release
-    // (gameInputListener above) set the trigger; cooldown still rate-limits it
-    // so holding/mashing the trigger can't out-fire fireRate. Mouse aim fires
-    // a real directional shot toward the cursor; the right stick fires along
-    // its last aim angle (the direction the player was facing when released);
-    // a touch device with NO aim input falls back to cone aim-assist: snap to
-    // the nearest enemy that is both in range and roughly along the facing
-    // direction, otherwise fire straight ahead — the trigger ALWAYS fires (a
-    // dead button on an empty arena read as broken).
     if (this.fireCooldown > 0) this.fireCooldown -= delta;
-    if ((keys._shootTrigger || this.fireTrigger) && this.fireCooldown <= 0) {
+    const canFire = this.fireCooldown <= 0;
+
+    if (!this.manualAim) {
+      // AUTO FIRE: the trigger is held for the player. Fires at the locked
+      // target's own position and does NOT snap the sprite to the shot (the
+      // rate-limited turn above is what the player sees). Nothing in range =
+      // nothing fired, so an empty arena reads as "no target", not as a jam.
+      if (autoTarget && canFire) {
+        this.fireAt(autoTarget, false);
+        this.fireCooldown = this.fireRate;
+      }
+    } else if ((keys._shootTrigger || this.fireTrigger) && canFire) {
+      // MANUAL: F key / click (GameManagerScene) / right-stick release
+      // (gameInputListener above) set the trigger; cooldown still rate-limits
+      // it so holding/mashing the trigger can't out-fire fireRate. Mouse aim
+      // fires a real directional shot toward the cursor; the right stick fires
+      // along its last aim angle; a touch device with NO aim input falls back
+      // to cone aim-assist, otherwise a straight shot — the trigger ALWAYS
+      // fires (a dead button on an empty arena read as broken).
       if (this.mouseAiming) {
         this.fireInDirection(player.rotation);
         this.fireCooldown = this.fireRate;
@@ -279,7 +333,7 @@ export default class ShooterMode extends BaseMode {
         this.fireCooldown = this.fireRate;
         if (!this.stickAiming) this.lastAimAngle = null;
       } else {
-        const target = this.findBestAssistTarget(player);
+        const target = this.findTargetInRange(this.aimAssistCone);
         if (target) {
           this.fireAt(target);
         } else {
@@ -301,31 +355,69 @@ export default class ShooterMode extends BaseMode {
     }
   }
 
-  // Touch aim-assist: the nearest enemy that is BOTH within fireRange AND
-  // within AIM_ASSIST_CONE of the player's facing direction. Returns null when
-  // nothing qualifies so the caller can fall back to a straight shot — the
-  // fire button must never do nothing.
-  findBestAssistTarget(player) {
+  /**
+   * Nearest live enemy within fireRange, measured edge to edge.
+   *
+   * `cone` optionally restricts candidates to that half-angle around the
+   * player's facing (the MANUAL touch aim-assist). Omit it (or pass Math.PI)
+   * for an unrestricted 360° pick — which is what AUTO aim uses, so the
+   * turret can lock a target behind the player.
+   */
+  findTargetInRange(cone = Math.PI) {
+    if (!this.enemies || !this.scene || !this.scene.player) return null;
+    const player = this.scene.player;
+    const halfWidth = (player.displayWidth || player.width || 0) / 2;
+    const halfHeight = (player.displayHeight || player.height || 0) / 2;
     let nearest = null;
-    let nearestDist = this.fireRange;
+    let nearestDist = Infinity;
     this.enemies.children.iterate((enemy) => {
-      if (!enemy || !enemy.active) return;
-      const dist = Phaser.Math.Distance.Between(player.x, player.y, enemy.x, enemy.y);
-      if (dist > nearestDist) return;
-      const angleToEnemy = Phaser.Math.Angle.Between(player.x, player.y, enemy.x, enemy.y);
-      const diff = Phaser.Math.Angle.Wrap(angleToEnemy - player.rotation);
-      if (Math.abs(diff) > this.aimAssistCone) return;
-      nearestDist = dist;
-      nearest = enemy;
+      if (!enemy || !enemy.active || enemy._dying) return;
+      // Edge-to-edge, not center-to-center: a 50px-wide enemy must be in
+      // range when its edge is, not half a body too late.
+      const dist = Phaser.Math.Distance.Between(player.x, player.y, enemy.x, enemy.y)
+        - (enemy.displayWidth || enemy.width || 0) / 2
+        - Math.max(halfWidth, halfHeight);
+      if (dist > this.fireRange) return;
+      if (cone < Math.PI) {
+        const toEnemy = Phaser.Math.Angle.Between(player.x, player.y, enemy.x, enemy.y);
+        if (Math.abs(Phaser.Math.Angle.Wrap(toEnemy - player.rotation)) > cone) return;
+      }
+      if (dist < nearestDist) {
+        nearestDist = dist;
+        nearest = enemy;
+      }
     });
     return nearest;
   }
 
-  fireAt(target) {
-    this.spawnProjectileToward(target.x, target.y);
+  // Auto-aim lock indicator: a thin ring with four ticks on the current target.
+  // Cleared every frame (including when the target is lost) so it can never
+  // linger on a dead enemy.
+  drawLockReticle(target) {
+    const g = this.reticle;
+    if (!g || !g.scene) return;
+    g.clear();
+    if (!target) return;
+    const r = Math.max(22, (target.displayWidth || target.width || 40) * 0.7);
+    g.lineStyle(2, this.reticleColor, 0.85);
+    g.strokeCircle(target.x, target.y, r);
+    g.lineStyle(2, this.reticleColor, 0.45);
+    for (let i = 0; i < 4; i++) {
+      const a = (i * Math.PI) / 2 + Math.PI / 4;
+      const cos = Math.cos(a);
+      const sin = Math.sin(a);
+      g.lineBetween(
+        target.x + cos * (r + 3), target.y + sin * (r + 3),
+        target.x + cos * (r + 9), target.y + sin * (r + 9)
+      );
+    }
   }
 
-  // Mouse-aim fire: no target sprite, just a travel direction — project a
+  fireAt(target, faceShot = true) {
+    this.spawnProjectileToward(target.x, target.y, faceShot);
+  }
+
+  // Directional fire: no target sprite, just a travel direction — project a
   // point far along it and reuse the same spawn path as fireAt().
   fireInDirection(angle) {
     const player = this.scene.player;
@@ -335,7 +427,7 @@ export default class ShooterMode extends BaseMode {
     );
   }
 
-  spawnProjectileToward(targetX, targetY) {
+  spawnProjectileToward(targetX, targetY, faceShot = true) {
     const { scene } = this;
     const player = scene.player;
     const projectile = this.projectiles.get();
@@ -347,7 +439,11 @@ export default class ShooterMode extends BaseMode {
     projectile.setScale(useDynamic ? 32 / projectile.frame.width : 1);
 
     projectile.fireAt(player.x, player.y, targetX, targetY, this.projectileSpeed);
-    player.rotation = Phaser.Math.Angle.Between(player.x, player.y, targetX, targetY);
+    // Manual shots snap the sprite to where they went (it shows the aim);
+    // auto-aim leaves rotation to the rate-limited turn in update().
+    if (faceShot) {
+      player.rotation = Phaser.Math.Angle.Between(player.x, player.y, targetX, targetY);
+    }
   }
 
   jump() {
@@ -406,6 +502,9 @@ export default class ShooterMode extends BaseMode {
     // Wave/enemy-count changes apply starting the next wave, not mid-wave.
     this.waveCount = newConfig.shooterWaveCount || 5;
     this.enemiesPerWave = newConfig.shooterEnemiesPerWave || 4;
+    // The aim mode is read once at init: switching it mid-run would leave a
+    // half-wired input scheme (a right stick that no longer aims, a mouse that
+    // no longer rotates), so a change takes effect on the next boot.
   }
 
   awardScore(points) {
@@ -420,6 +519,10 @@ export default class ShooterMode extends BaseMode {
     if (this.pointerMoveHandler && this.scene?.input) {
       this.scene.input.off('pointermove', this.pointerMoveHandler, this);
       this.pointerMoveHandler = null;
+    }
+    if (this.reticle) {
+      this.reticle.destroy();
+      this.reticle = null;
     }
 
     if (this.scene && this.scene.cameras && this.scene.cameras.main) {

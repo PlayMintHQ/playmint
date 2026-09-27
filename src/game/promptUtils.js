@@ -3,6 +3,8 @@
  * Prompt Parsing and Parameter Generation Utilities
  */
 
+import { ACTION_PLATFORM_TILE_W, actionJumpReach, actionJumpRise } from '../gameConfig';
+
 // Automated mechanics tuning table mapping keywords to gameplay variables
 export const MECHANICS_TUNING_TABLE = {
   // Speed Modifiers
@@ -87,9 +89,23 @@ export function createAssetGenerationRequest(promptText, themeKey) {
 }
 
 /**
- * Generates procedural layout array configurations based on prompt keywords and difficulty
+ * Generates procedural layout array configurations based on prompt keywords and difficulty.
+ *
+ * The chain is PLATFORMER-only (the runner's layout is hardcoded in
+ * geminiService) and it is measured against the physics that will actually run:
+ * `physics` carries the same actionWalkSpeed/actionJumpHeight/actionGravity the
+ * config will carry, and every gap is a fraction of the resulting jump REACH.
+ * Fixed pixel spacing used to be tuned against a 300px walk speed, which meant
+ * any "slow"-keyword level (walk 180-200) shipped gaps its own jump could not
+ * clear — the level became literally impossible to finish.
+ *
+ * @param {string} promptText
+ * @param {string} mode
+ * @param {number} worldWidth  Total world width; the chain spans EDGE_MARGIN in from both ends.
+ * @param {number} difficulty
+ * @param {{walkSpeed?: number, jumpHeight?: number, gravity?: number}} [physics]
  */
-export function generateProceduralLayout(promptText, mode, worldWidth = 4000, difficulty = 5) {
+export function generateProceduralLayout(promptText, mode, worldWidth = 4000, difficulty = 5, physics = {}) {
   const lower = promptText.toLowerCase();
   const floorY = 1000; // Match LOGICAL_FLOOR_Y
 
@@ -116,38 +132,61 @@ export function generateProceduralLayout(promptText, mode, worldWidth = 4000, di
   // mobile ground-line gutter (MultiCameraManager) is the actual guarantee.
   const EDGE_MARGIN = 400;
   const startX = EDGE_MARGIN;
-  const finishBlockX = worldWidth - EDGE_MARGIN;
 
-  // Decide platform density settings
-  let spacing = 400;
+  // Reach and apex of one running jump at THIS run's physics. Every horizontal
+  // gap is a fraction of `reach` (never a fixed pixel count) and every vertical
+  // step a fraction of `rise`, so the chain stays completable when a prompt
+  // keyword rewrites walk speed, jump or gravity.
+  const reach = Math.max(140, actionJumpReach(physics));
+  const rise = Math.max(40, actionJumpRise(physics));
+
+  // Density keywords only pick a window INSIDE the reach budget.
+  const densityGap = {
+    packed: [0.34, 0.55],
+    normal: [0.5, 0.7],
+    sparse: [0.62, 0.82]
+  };
+  const [gapMin, gapMax] = densityGap[platformDensity];
+  const gapWindow = (lo = gapMin, hi = gapMax) => reach * (lo + Math.random() * (hi - lo));
+
+  // Platform width per density. Width comes from the platformer grid
+  // (ACTION_PLATFORM_TILE_W), never from the runner theme's tile size.
   let defaultWidthScale = 1.5;
-  if (platformDensity === 'packed') {
-    spacing = 280;
-    defaultWidthScale = 1.0;
-  } else if (platformDensity === 'sparse') {
-    spacing = 550;
-    defaultWidthScale = 2.0;
-  }
+  if (platformDensity === 'packed') defaultWidthScale = 1.0;
+  else if (platformDensity === 'sparse') defaultWidthScale = 2.0;
 
-  // Iterate X coordinate from startX to finishBlockX
-  let currentX = startX;
+  // The finish anchor is a wide landing pad carrying the win zone (it rides the
+  // LAST platform, wherever that lands — nothing needs it at the right margin).
+  // `padLeftMax` is the furthest left edge it may have and still sit inside the
+  // world, so the final hop is a real budgeted gap instead of a snapped tail.
+  const finishScaleX = 3.0;
+  const finishWidth = finishScaleX * ACTION_PLATFORM_TILE_W;
+  const padLeftMax = worldWidth - 40 - finishWidth;
+
+  let prevRight = null; // right edge of the previous platform; null before the first
   let lastY = floorY - 80;
   let index = 0;
 
-  while (currentX < finishBlockX - 200) {
+  for (;;) {
     let scaleX = defaultWidthScale + (Math.random() * 0.8 - 0.4);
     if (scaleX < 0.8) scaleX = 0.8;
+    const width = scaleX * ACTION_PLATFORM_TILE_W;
+    const left = prevRight === null ? startX : prevRight + gapWindow();
+    // Stop while the chain could still fit THIS platform AND the finish pad
+    // after it, each separated by a budgeted gap. Snapping the pad to a fixed
+    // margin instead is what used to leave an uncrossable final jump.
+    if (prevRight !== null && left + gapWindow(gapMin, gapMax) + finishWidth > padLeftMax) break;
 
     let targetY = floorY - 80;
     if (verticality === 'vertical') {
-      // Steeper jumps upwards and downwards
-      const yOffset = Math.floor(Math.random() * 160) - 80; // range [-80, +80]
+      // Steeper steps, still a fraction of the apex so a rising hop can be
+      // landed on instead of clipping into the next pad's side.
+      const yOffset = Math.round((Math.random() * 2 - 1) * rise * 0.5);
       targetY = Math.max(floorY - 260, Math.min(lastY + yOffset, floorY - 40));
     } else if (verticality === 'flat') {
       targetY = floorY - 50; // flat levels have lower uniform platforms
     } else {
-      // Standard layout jumps
-      const yOffset = Math.floor(Math.random() * 100) - 50; // range [-50, +50]
+      const yOffset = Math.round((Math.random() * 2 - 1) * rise * 0.4);
       targetY = Math.max(floorY - 180, Math.min(lastY + yOffset, floorY - 50));
     }
 
@@ -155,22 +194,28 @@ export function generateProceduralLayout(promptText, mode, worldWidth = 4000, di
     const hasEnemy = (index % 2 === 1) && (difficulty > 2) && (Math.random() * 10 < difficulty);
 
     platforms.push({
-      x: Math.round(currentX),
+      x: Math.round(left + width / 2),
       y: Math.round(targetY),
       scaleX: parseFloat(scaleX.toFixed(2)),
       hasEnemy: hasEnemy
     });
 
     lastY = targetY;
-    currentX += spacing + (Math.random() * 80 - 40);
+    prevRight = left + width;
     index++;
   }
 
-  // Always append the final Win Zone anchor platform at the end of the map
+  // Always append the final Win Zone anchor platform at the end of the map.
+  // One more budgeted hop from the last chain platform, then clamped so the pad
+  // stays inside the world — the clamp can only SHORTEN that hop, never stretch
+  // it, so the level stays finishable at any world width.
+  const padClimb = Math.min(60, rise * 0.5);
+  const padY = Math.round(Math.max(floorY - 260, Math.min(lastY - padClimb, floorY - 120)));
+  const padLeft = Math.max(Math.min(prevRight + gapWindow(gapMin, gapMax), padLeftMax), prevRight);
   platforms.push({
-    x: finishBlockX,
-    y: floorY - 150,
-    scaleX: 3.0,
+    x: Math.round(padLeft + finishWidth / 2),
+    y: padY,
+    scaleX: finishScaleX,
     hasEnemy: false
   });
 
@@ -304,8 +349,12 @@ export function parsePromptKeywords(text) {
 
   // 5. Generate Procedural Level Layout Array (Foundational Layout Array)
   const resolvedMode = mode || 'standard';
-  const layoutArray = resolvedMode === 'action_quest' 
-    ? generateProceduralLayout(lower, resolvedMode, worldWidth, difficulty)
+  const layoutArray = resolvedMode === 'action_quest'
+    ? generateProceduralLayout(lower, resolvedMode, worldWidth, difficulty, {
+        walkSpeed: tuningParams.actionWalkSpeed,
+        jumpHeight: tuningParams.actionJumpHeight,
+        gravity: tuningParams.actionGravity
+      })
     : null;
 
   // 6. Generate AI Asset Generation Request Template (Code Hook API)

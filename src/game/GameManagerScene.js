@@ -250,7 +250,13 @@ export default class GameManagerScene extends Phaser.Scene {
           .setDepth(-1);
       }
     } else {
-      const floorWidth = this.gameConfig.gameType === 'platformer' ? 4000 : Math.max(width * 2, 4000);
+      // The platformer's floor spans the LEVEL, not a fixed 4000: a
+      // "mega level" prompt (worldWidth 8000) otherwise ran out of floor
+      // halfway across, and a "mini level" (1600) got 2400px of it. Kept in
+      // sync with PlatformerMode's worldWidth, which sets the physics bounds.
+      const floorWidth = this.gameConfig.gameType === 'platformer'
+        ? (this.gameConfig.worldWidth || 4000)
+        : Math.max(width * 2, 4000);
       const floorTexture = this.gameConfig.dynamicAssetUrls ? 'dyn_floor' : (this.secondaryTheme?.floorTexture || this.activeTheme.floorTexture || 'ground');
       const floorFrameIndex = this.gameConfig.dynamicAssetUrls ? 0 : (this.secondaryTheme?.floorFrame !== undefined ? this.secondaryTheme.floorFrame : (this.activeTheme.floorFrame !== undefined ? this.activeTheme.floorFrame : 0));
       const textureObj = this.textures.get(floorTexture);
@@ -883,7 +889,9 @@ export default class GameManagerScene extends Phaser.Scene {
       }
 
       if (this.floorSegments && this.floorSegments.length) {
-        const floorWidth = this.gameConfig.gameType === 'platformer' ? 4000 : Math.max(width * 4, 1600);
+        const floorWidth = this.gameConfig.gameType === 'platformer'
+          ? (this.gameConfig.worldWidth || 4000)
+          : Math.max(width * 4, 1600);
         const floorHeight = this.activeTheme?.floorHeight || this.gameConfig.floorHeight || 100;
         const floorTexture = this.gameConfig.dynamicAssetUrls ? 'dyn_floor' : (this.activeTheme.floorTexture || 'ground');
         const floorFrameIndex = this.gameConfig.dynamicAssetUrls ? 0 : (this.activeTheme.floorFrame !== undefined ? this.activeTheme.floorFrame : 0);

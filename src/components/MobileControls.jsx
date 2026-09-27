@@ -10,14 +10,16 @@ const THEME_ACCENTS = {
   default: { primary: '#00E599', semi: 'rgba(0, 229, 153, 0.25)' }
 };
 
-// Analog joystick for the shooter's twin-stick scheme (2026-09-23): the left
-// stick is movement, the right stick is aim direction. Dispatches the existing
-// `game-input` CustomEvent contract with new actions:
+// Analog joystick for the shooter's twin-stick scheme (2026-09-23, MANUAL aim
+// mode only since 2026-09-27): the left stick is movement, the right stick is
+// aim direction. Dispatches the existing `game-input` CustomEvent contract with
+// new actions:
 //   { action: 'move', state: 'down'|'move'|'up', x, y }  — normalized -1..1
 //   { action: 'aim',  state: 'down'|'move'|'up', x, y }  — normalized -1..1
 // The right stick ALSO fires on release (state 'up' with a deflection ≥ the
 // dead zone) via the existing 'shoot' action, so aiming and firing are one
 // gesture — the manual-trigger requirement survives (you release to shoot).
+// In the default AUTO mode only the left stick is rendered at all.
 // Each stick tracks its own pointerId so left thumb + right thumb work
 // simultaneously (multi-touch).
 const Joystick = ({ action, accent, ariaLabel }) => {
@@ -107,7 +109,7 @@ const Joystick = ({ action, accent, ariaLabel }) => {
   );
 };
 
-const MobileControls = ({ gameType, themeKey, projectilesEnabled }) => {
+const MobileControls = ({ gameType, themeKey, projectilesEnabled, manualAim }) => {
   const accent = THEME_ACCENTS[themeKey] || THEME_ACCENTS.default;
   const overlayRef = React.useRef(null);
   const dpadRef = React.useRef(null);
@@ -277,7 +279,12 @@ const MobileControls = ({ gameType, themeKey, projectilesEnabled }) => {
             </button>
           </div>
         ) : gameType === 'shooter' ? (
-          <Joystick action="aim" accent={accent} ariaLabel="Aim and fire" />
+          /* Shooter: a move stick on the left is the WHOLE control scheme while
+             the game auto-targets and auto-fires (the default). The right aim
+             stick only appears in the optional manual mode — an empty cluster
+             measures 0x0, so uiZones still reports the left stick alone and the
+             ground-line gutter is unaffected. */
+          manualAim ? <Joystick action="aim" accent={accent} ariaLabel="Aim and fire" /> : null
         ) : (
           /* Runner Mode action cluster: simple jump button */
           <button

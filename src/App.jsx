@@ -740,6 +740,7 @@ function App() {
                 gameType={liveParams.gameType}
                 themeKey={liveParams.themeKey}
                 projectilesEnabled={!!liveParams.actionProjectileEnabled}
+                manualAim={!!liveParams.shooterManualAim}
               />
             )}
 
@@ -762,7 +763,15 @@ function App() {
             {!isTouchDevice && liveParams.gameType === 'shooter' && (
               <div className="pm-keyboard-hint" style={{ position: 'fixed', bottom: '30px', width: '100%', textAlign: 'center', zIndex: 10, pointerEvents: 'none' }}>
                 <p style={{ margin: 0, color: 'var(--pm-text-secondary)', fontSize: '14px', background: 'var(--pm-bg-panel)', padding: '8px 16px', display: 'inline-block', borderRadius: '20px', border: '1px solid var(--pm-border)', boxShadow: 'var(--pm-shadow-panel)' }}>
-                  <span style={{ background: 'var(--pm-bg-input)', padding: '2px 8px', borderRadius: '4px', color: 'var(--pm-accent-teal)', fontFamily: 'monospace', fontWeight: 'bold' }}>WASD / Arrows</span> Move · Mouse Aim · <span style={{ background: 'var(--pm-bg-input)', padding: '2px 8px', borderRadius: '4px', color: 'var(--pm-accent-orange)', fontFamily: 'monospace', fontWeight: 'bold' }}>F</span> / Click Fire
+                  {liveParams.shooterManualAim ? (
+                    <>
+                      <span style={{ background: 'var(--pm-bg-input)', padding: '2px 8px', borderRadius: '4px', color: 'var(--pm-accent-teal)', fontFamily: 'monospace', fontWeight: 'bold' }}>WASD / Arrows</span> Move · Mouse Aim · <span style={{ background: 'var(--pm-bg-input)', padding: '2px 8px', borderRadius: '4px', color: 'var(--pm-accent-orange)', fontFamily: 'monospace', fontWeight: 'bold' }}>F</span> / Click Fire
+                    </>
+                  ) : (
+                    <>
+                      <span style={{ background: 'var(--pm-bg-input)', padding: '2px 8px', borderRadius: '4px', color: 'var(--pm-accent-teal)', fontFamily: 'monospace', fontWeight: 'bold' }}>WASD / Arrows</span> Move · auto-aim &amp; auto-fire
+                    </>
+                  )}
                 </p>
               </div>
             )}

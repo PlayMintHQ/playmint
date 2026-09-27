@@ -1,6 +1,7 @@
 import { parsePromptKeywords, generateTitle, generateProceduralLayout, generateWaveConfig } from './promptUtils';
 import { generateAssetDirections } from './assetPipeline/promptDesigner';
 import { isGeminiConfigured } from './assetPipeline/providers/geminiImage';
+import { ACTION_WALK_SPEED_DEFAULT } from '../gameConfig';
 
 /**
  * PlayMint Local Generation Service
@@ -56,6 +57,7 @@ export async function generateGameConfig(promptText, onProgress = () => {}, opti
     let jumpForce = 700;
     let gravity = 1600;
     let obstacleDelay = 1200;
+    let actionWalkSpeed = ACTION_WALK_SPEED_DEFAULT;
     let actionJumpHeight = 600;
     let actionGravity = 1400;
     let actionEnemyCount = 5;
@@ -66,7 +68,8 @@ export async function generateGameConfig(promptText, onProgress = () => {}, opti
     let worldWidth = 4000;
 
     // Shooter Arena defaults — no gravity/jump concept, so no tuning-table
-    // overrides exist for these yet; difficulty scales wave/enemy count.
+    // overrides exist for these yet; difficulty scales wave/enemy count
+    // (shooterWaves, from generateWaveConfig below).
     let shooterMoveSpeed = 260;
     let shooterFireRate = 500;
     let shooterProjectileSpeed = 500;
@@ -80,6 +83,7 @@ export async function generateGameConfig(promptText, onProgress = () => {}, opti
     if (parsed.tuningParams.jumpForce) jumpForce = parsed.tuningParams.jumpForce;
     if (parsed.tuningParams.gravity) gravity = parsed.tuningParams.gravity;
     if (parsed.tuningParams.obstacleDelay) obstacleDelay = parsed.tuningParams.obstacleDelay;
+    if (parsed.tuningParams.actionWalkSpeed) actionWalkSpeed = parsed.tuningParams.actionWalkSpeed;
     if (parsed.tuningParams.actionJumpHeight) actionJumpHeight = parsed.tuningParams.actionJumpHeight;
     if (parsed.tuningParams.actionGravity) actionGravity = parsed.tuningParams.actionGravity;
     if (parsed.tuningParams.actionEnemyCount) actionEnemyCount = parsed.tuningParams.actionEnemyCount;
@@ -116,10 +120,16 @@ export async function generateGameConfig(promptText, onProgress = () => {}, opti
 
     onProgress('[SYSTEM] Configured physics and gameplay parameters...', 40);
 
-    // Generate procedural layout for platformer mode
+    // Generate procedural layout for platformer mode. The generator measures
+    // its gaps against the physics the level will actually run with, so a
+    // speed/gravity keyword can't leave an uncrossable chain behind.
     let layoutArray = [];
     if (gameType === 'platformer') {
-      layoutArray = generateProceduralLayout(promptText, 'action_quest', worldWidth, difficulty);
+      layoutArray = generateProceduralLayout(promptText, 'action_quest', worldWidth, difficulty, {
+        walkSpeed: actionWalkSpeed,
+        jumpHeight: actionJumpHeight,
+        gravity: actionGravity
+      });
       onProgress('[SYSTEM] Generated procedural level layout...', 50);
     } else if (gameType === 'shooter') {
       // Waves are generated at runtime in ShooterMode — no precomputed layout.
@@ -161,6 +171,7 @@ export async function generateGameConfig(promptText, onProgress = () => {}, opti
       jumpForce,
       gravity,
       obstacleDelay,
+      actionWalkSpeed,
       actionJumpHeight,
       actionGravity,
       actionEnemyCount,
@@ -172,6 +183,10 @@ export async function generateGameConfig(promptText, onProgress = () => {}, opti
       shooterEnemySpeed,
       shooterWaveCount: shooterWaves.waveCount,
       shooterEnemiesPerWave: shooterWaves.enemiesPerWave,
+      // AUTO aim is the default (client direction 2026-09-27): the player turns
+      // to the nearest enemy in range and fires on the cooldown, so the only
+      // input is "move". `true` restores the manual twin-stick/mouse scheme.
+      shooterManualAim: false,
       worldWidth: gameType === 'shooter' ? shooterWorldWidth : worldWidth,
       worldHeight: gameType === 'shooter' ? shooterWorldHeight : 1500,
       layoutArray,

@@ -3,12 +3,13 @@ import BaseMode from './BaseMode';
 import Projectile from '../objects/Projectile';
 import MeleeAttack from '../objects/MeleeAttack';
 import { getCornerMargins } from '../uiZones';
+import { ACTION_PLATFORM_TILE_W, ACTION_PLATFORM_TILE_H, ACTION_WALK_SPEED_DEFAULT } from '../../gameConfig';
 
 export default class PlatformerMode extends BaseMode {
   init() {
     const theme = this.scene.activeTheme || {};
     // Prioritize gameConfig (prompt modifiers) -> theme defaults -> hardcoded fallback
-    this.moveSpeed = this.scene.gameConfig.actionWalkSpeed || theme.moveSpeed || 300;
+    this.moveSpeed = this.scene.gameConfig.actionWalkSpeed || ACTION_WALK_SPEED_DEFAULT;
     this.jumpForce = this.scene.gameConfig.actionJumpHeight || theme.jumpForce || 600;
     this.gravity = this.scene.gameConfig.actionGravity || theme.gravity || 1500;
     
@@ -16,8 +17,15 @@ export default class PlatformerMode extends BaseMode {
     this.enemyCount = this.scene.gameConfig.actionEnemyCount || 5;
     this.projectilesEnabled = this.scene.gameConfig.actionProjectileEnabled || false;
     
-    // Determine world width based on theme
-    this.worldWidth = theme.worldWidth || 4000;
+    // World width. The CONFIG owns it, not the theme: the level is generated
+    // from config.worldWidth (geminiService builds the chain out to
+    // worldWidth - EDGE_MARGIN) and the camera already follows
+    // `config.worldWidth || theme.worldWidth`. Reading the theme here made the
+    // physics clamp the last writer, so any theme whose worldWidth was smaller
+    // than the generated level locked the player out of most of it — forest
+    // (960) against a 4000px level, a level that could not be finished. The
+    // theme tier stays as the fallback for a config that never sets one.
+    this.worldWidth = this.scene.gameConfig.worldWidth || theme.worldWidth || 4000;
     
     // We will track input state directly
     this.movingLeft = false;
@@ -198,36 +206,38 @@ export default class PlatformerMode extends BaseMode {
     const floorY = this.scene.LOGICAL_FLOOR_Y;
     
     // Very simple hand-placed static map
-    const theme = this.scene.activeTheme || {};
-    const isSmallWorld = (theme.worldWidth || 4000) < 2000;
-    // The first small-world platform (x:180, scaleX:5 → spans x≈20-340) sits in
-    // the level-start bottom-left corner, under the d-pad. It is left alone on
-    // purpose: it is only 20px above the floor, so the mobile ground-line gutter
-    // (MultiCameraManager) already lifts it clear of the buttons, and nudging
-    // these hand-tuned positions risks re-ordering or overrunning small worlds
-    // for no gain.
+    const isSmallWorld = this.worldWidth < 2000;
+    // These hand-placed chains are the fallback for a config with NO
+    // layoutArray (presets / quick start). They are authored on the platformer
+    // grid (ACTION_PLATFORM_TILE_W) with every edge-to-edge gap inside the
+    // default jump reach (336px at walk 420 / jump 600 / gravity 1500) and every
+    // step well under the 120px apex, so the preset is finishable too.
     const layout = this.scene.gameConfig.layoutArray || (isSmallWorld ? [
-      { x: 180, y: floorY - 20, scaleX: 5, hasEnemy: false },
-      { x: 350, y: floorY - 35, scaleX: 5, hasEnemy: true },
-      { x: 520, y: floorY - 20, scaleX: 5, hasEnemy: false },
-      { x: 690, y: floorY - 35, scaleX: 5, hasEnemy: true },
-      { x: 850, y: floorY - 25, scaleX: 8, hasEnemy: false }, // Big finish block
+      { x: 180, y: floorY - 20, scaleX: 2.5, hasEnemy: false },
+      { x: 480, y: floorY - 40, scaleX: 2.5, hasEnemy: true },
+      { x: 780, y: floorY - 20, scaleX: 2.5, hasEnemy: false },
+      { x: 1080, y: floorY - 40, scaleX: 2.5, hasEnemy: true },
+      { x: 1400, y: floorY - 25, scaleX: 4.0, hasEnemy: false }, // Big finish block
     ] : [
-      { x: 400, y: floorY - 80, scaleX: 1.5, hasEnemy: false },
-      { x: 800, y: floorY - 150, scaleX: 2.0, hasEnemy: true },
-      { x: 1200, y: floorY - 80, scaleX: 1.0, hasEnemy: false },
-      { x: 1500, y: floorY - 180, scaleX: 1.5, hasEnemy: true },
-      { x: 1900, y: floorY - 250, scaleX: 1.5, hasEnemy: false },
-      { x: 2300, y: floorY - 150, scaleX: 1.0, hasEnemy: true },
-      { x: 2600, y: floorY - 80, scaleX: 1.5, hasEnemy: false },
-      { x: 3000, y: floorY - 120, scaleX: 1.0, hasEnemy: true },
-      { x: 3400, y: floorY - 200, scaleX: 3.0, hasEnemy: false }, // Big finish block
+      { x: 400, y: floorY - 90, scaleX: 1.5, hasEnemy: false },
+      { x: 740, y: floorY - 70, scaleX: 1.5, hasEnemy: true },
+      { x: 1080, y: floorY - 95, scaleX: 1.5, hasEnemy: false },
+      { x: 1420, y: floorY - 75, scaleX: 1.5, hasEnemy: true },
+      { x: 1760, y: floorY - 100, scaleX: 1.5, hasEnemy: false },
+      { x: 2100, y: floorY - 80, scaleX: 1.5, hasEnemy: true },
+      { x: 2440, y: floorY - 105, scaleX: 1.5, hasEnemy: false },
+      { x: 2780, y: floorY - 85, scaleX: 1.5, hasEnemy: true },
+      { x: 3120, y: floorY - 110, scaleX: 1.5, hasEnemy: false },
+      { x: 3400, y: floorY - 150, scaleX: 3.0, hasEnemy: false }, // Big finish block
     ]);
 
     const maxEnemies = this.enemyCount;
 
-    const TILE_W = theme.tileWidth || 64;
-    const PLATFORM_H = theme.platformHeight || 32;
+    // The platformer grid, NOT the runner theme's tile size — forest's 16px
+    // ground tile made every platform 17-30px wide, unlandable next to the
+    // level's gaps. See ACTION_PLATFORM_TILE_W in gameConfig.js.
+    const TILE_W = ACTION_PLATFORM_TILE_W;
+    const PLATFORM_H = ACTION_PLATFORM_TILE_H;
     const themePlatformTexture = this.scene.gameConfig.dynamicAssetUrls ? 'dyn_platform' : (this.scene.activeTheme?.platformTexture || 'stone_tile');
     // Generated coin art when the optional collectible slot delivered (projectile
     // pattern: existence-guarded — a dropped slot keeps the static coin).
@@ -515,7 +525,7 @@ export default class PlatformerMode extends BaseMode {
     this.jumpForce = newConfig.actionJumpHeight || 600;
     this.enemyCount = newConfig.actionEnemyCount || 5;
     this.projectilesEnabled = !!newConfig.actionProjectileEnabled;
-    this.moveSpeed = newConfig.actionWalkSpeed || 300;
+    this.moveSpeed = newConfig.actionWalkSpeed || ACTION_WALK_SPEED_DEFAULT;
     
     if (newConfig.actionGravity !== oldConfig.actionGravity) {
       this.gravity = newConfig.actionGravity || 1500;
@@ -525,6 +535,25 @@ export default class PlatformerMode extends BaseMode {
     }
     if (newConfig.actionEnemyCount !== oldConfig.actionEnemyCount) {
       this.refreshEnemies();
+    }
+    // Level length is a live-editable field (AI editor / share link), and it is
+    // the field the physics clamp and the floor are both sized from — so a
+    // change has to re-apply all three here, or the tweak would only look like
+    // it did nothing until the next remount. The chain itself is NOT rebuilt:
+    // a longer world simply extends the runnable floor, a shorter one clamps
+    // at the new edge (the same relationship the generator builds to).
+    if (newConfig.worldWidth && newConfig.worldWidth !== oldConfig.worldWidth) {
+      this.worldWidth = newConfig.worldWidth;
+      this.scene.physics.world.setBounds(0, 0, this.worldWidth, this.scene.LOGICAL_FLOOR_Y + 100);
+      const camera = this.scene.cameras?.main;
+      if (camera) {
+        const boundsHeight = this.scene.cameraManager
+          ? this.scene.cameraManager.followBoundsHeight(this.scene.scale.height)
+          : Math.max(this.scene.LOGICAL_FLOOR_Y + 100, this.scene.scale.height);
+        camera.setBounds(0, 0, this.worldWidth, boundsHeight);
+        if (this.scene.player) camera.centerOn(this.scene.player.x, this.scene.player.y);
+      }
+      this.scene.handleResize?.(this.scene.scale.gameSize);
     }
   }
 
