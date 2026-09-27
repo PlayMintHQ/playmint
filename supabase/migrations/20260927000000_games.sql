@@ -1,10 +1,17 @@
--- PlayMint · games table — DRAFT FOR CLIENT REVIEW. NOT APPLIED.
+-- PlayMint · games table — APPROVED by the client 27 September 2026; pending
+-- application to production (apply this file in the Supabase SQL editor, then
+-- confirm with GET /api/keepalive, which reports gamesTable: 'ok').
 --
 -- Contract checkpoint 20 Sep 2026: "Games table schema and RLS policies drafted
--- and shared for review before any row is written." This file lives in
--- supabase/drafts/ (NOT supabase/migrations/) so no tool can apply it by
--- accident. After approval it moves to migrations/ unchanged and Week 2
--- (saved games / My Games) starts writing rows.
+-- and shared for review before any row is written." It sat in supabase/drafts/
+-- (outside migrations/, so no tool could apply it by accident) until the client
+-- approved it on 27 Sep 2026; it then moved here. The SQL below is the reviewed
+-- text, byte-identical to the draft — only this header changed.
+--
+-- Week 2 (saved games / My Games) writes rows through
+-- src/game/savedGames/index.js. Client code is written to degrade to an empty
+-- library if this table is absent, so the app runs on a deployment where the
+-- migration has not been applied yet.
 --
 -- Depends on: 20260919120000_profiles.sql (public.set_updated_at()).
 --

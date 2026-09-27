@@ -10,7 +10,10 @@
 // Only the load-bearing boot fields of assetMeta survive on the link: frames
 // (spritesheet registration + animation), facingVerified (sprite alignment),
 // dropped (optional-slot state). Everything else feeds only the cost report.
-const stripForShare = (liveParams) => {
+// Exported for the saved-games library: a saved row's `config` IS this payload,
+// which is what lets "Play" on a My Games card re-enter through the same tested
+// share-link import path instead of a second boot route.
+export const stripForShare = (liveParams) => {
   const { preloadedImages: _pi, assetMeta, ...config } = liveParams || {};
   const slots = assetMeta?.slots;
   if (slots) {

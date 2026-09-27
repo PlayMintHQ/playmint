@@ -127,6 +127,36 @@ export const putGame = async (entry) => {
   }
 };
 
+// My Games card art (added 2026-09-27). Same store, same token endpoint, same
+// deterministic-path contract — the endpoint's ALLOWED_PATH regex already admits
+// `games/<id>/thumbnail.png` ([a-z][a-z0-9_]{0,31}\.png), so no server change was
+// needed. It is deliberately NOT listed in meta.json's `slots`, so the game
+// restore path (getGame) never downloads it as art.
+export const putThumbnail = async (gameId, blob) => {
+  if (!gameId || !blob) return null;
+  if (!(await resolveBase())) return null; // no store reachable — the card falls back to a painted gradient
+  try {
+    await upload(`games/${gameId}/thumbnail.png`, blob, {
+      access: 'public',
+      handleUploadUrl: UPLOAD_ENDPOINT,
+      contentType: 'image/png'
+    });
+    return `games/${gameId}/thumbnail.png`;
+  } catch (err) {
+    warnOnce(err);
+    return null;
+  }
+};
+
+// Relative stored path → absolute public URL. Card art is persisted as a PATH
+// (the store's hostname can change; the read-path contract is the path), so the
+// grid resolves it here, reusing the memoized base discovery.
+export const publicUrl = async (path) => {
+  if (!path) return '';
+  const base = await resolveBase();
+  return base ? `${base}/${path}` : '';
+};
+
 // Matcher candidate cards for the WHOLE shared population (entry-shaped, no
 // images) via /api/games/list. [] on any failure — reads as "no candidates".
 export const listGames = async () => {

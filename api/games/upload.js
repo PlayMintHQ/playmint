@@ -1,8 +1,10 @@
 // Client-upload token endpoint for the asset cache's server backend (Vercel Blob).
 // The browser asks this route for a scoped one-time token, then uploads DIRECTLY
-// to Blob storage (no function body-size limit, no double bandwidth). This is the
-// only server-side code in the project; the read path needs none (public store,
-// deterministic paths).
+// to Blob storage (no function body-size limit, no double bandwidth). The read
+// path needs none (public store, deterministic paths).
+//
+// The project's other serverless route is api/keepalive.js (the daily Supabase
+// keep-alive cron).
 //
 // Guardrails: uploads are restricted to games/<gameId>/<slot>.png|meta.json,
 // PNG/JSON only, ≤4MB per file. The endpoint is public by design (same accepted

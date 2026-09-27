@@ -1,5 +1,5 @@
 import React from 'react';
-import { IconFullscreen, IconFullscreenExit, IconMenu } from './Icons';
+import { IconFullscreen, IconFullscreenExit, IconMenu, IconSave } from './Icons';
 import AccountButton from '../auth/AccountButton';
 
 const HudHeader = ({
@@ -12,6 +12,9 @@ const HudHeader = ({
   onMenuOpen,
   onLogoClick,
   onMyGames,
+  onSave,
+  saveState,
+  canSave,
 }) => {
   return (
     <div className="hud-header" onPointerDown={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()}>
@@ -49,6 +52,23 @@ const HudHeader = ({
 
           {/* Renders nothing when accounts are not configured. */}
           <AccountButton compact onMyGames={onMyGames} />
+
+          {/* Save to My Games. Hidden entirely when the deployment has no
+              accounts, so a keyless build shows no dead control. */}
+          {canSave && (
+            <button
+              className="pm-btn pm-btn-outline hud-header__icon-btn"
+              onClick={onSave}
+              disabled={saveState === 'saving'}
+              title={saveState === 'error' ? 'Could not save — press to try again' : 'Save to My Games'}
+              aria-label="Save to My Games"
+            >
+              {saveState === 'saving' && '…'}
+              {saveState === 'saved' && <span aria-hidden="true">✓</span>}
+              {saveState === 'error' && <span aria-hidden="true">!</span>}
+              {saveState === 'idle' && <IconSave />}
+            </button>
+          )}
 
           <button className="pm-btn pm-btn-primary hud-header__icon-btn" onClick={onMenuOpen}>
             <IconMenu />

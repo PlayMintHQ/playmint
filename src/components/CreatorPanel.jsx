@@ -252,6 +252,9 @@ const CreatorPanel = ({
   onSliderChange,
   onPromptGenerate,
   onHomeClick,
+  onSave,
+  saveState,
+  canSave,
 }) => {
   const isCustom = presetKey === 'custom';
   // Read only while the drawer is open — a localStorage hit per closed-panel
@@ -515,6 +518,26 @@ const CreatorPanel = ({
 
         {/* 6. Config Actions at bottom */}
         <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {/* Save to My Games. This is the panel's answer to "I tweaked the
+              sliders" — contract 2B: tweaks update the SAVED CONFIG when the
+              user chooses Save, so the library copy is the tuned one. Same
+              action as the HUD button (App passes one handler to both).
+              Hidden when the deployment has no accounts, so a keyless build
+              shows no dead control. */}
+          {canSave && (
+            <button
+              className="pm-btn pm-btn-primary"
+              onClick={onSave}
+              disabled={saveState === 'saving'}
+              style={{ width: '100%', padding: '10px' }}
+              title={saveState === 'error' ? 'Could not save — press to try again' : 'Save this game to My Games (includes your current tweaks)'}
+            >
+              {saveState === 'saving' && '💾 Saving…'}
+              {saveState === 'saved' && '✓ Saved to My Games'}
+              {saveState === 'error' && '! Save failed — retry'}
+              {saveState === 'idle' && '💾 Save to My Games'}
+            </button>
+          )}
           {/* Downloadable spend report — every AI/cache game carries run telemetry
               now, INCLUDING $0 cache hits (the label shows the CURRENT run's cost;
               the report separates run cost from the art's original cost). */}

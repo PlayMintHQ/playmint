@@ -19,6 +19,7 @@ import AuthDialog from './auth/AuthDialog';
 import { useAuth } from './auth/authContext';
 import { useRoute, navigate } from './router';
 import { MyGamesPage, RouteStubPage } from './components/MyGamesPage';
+import { saveGame } from './game/savedGames';
 
 // Capture mode (2026-08-20): a chrome-free view for recording demos and
 // marketing footage. Driven by the URL so a recording setup is reproducible and
@@ -117,8 +118,17 @@ function App() {
   // running: /my-games and the reserved /g/:id replace ScreenZero. The sign-in
   // dialog pauses the game exactly like the Creator Panel does.
   const route = useRoute();
-  const { dialog: authDialog } = useAuth();
+  const { dialog: authDialog, status: authStatus, requireAuth } = useAuth();
   const isSignInOpen = !!authDialog;
+
+  // Saved games (2026-09-27, contract §2B). 'idle' | 'saving' | 'saved' | 'error'
+  // drives the Save button in the HUD and in the Creator Panel; one action, two
+  // entry points, so a slider tweak is saved the same way however it is reached.
+  const [saveState, setSaveState] = useState('idle');
+  // gameIds already auto-saved this session. Auto-save fires ONCE per game; the
+  // Save button is the update path from then on ("tweaks update the saved config
+  // when the user chooses Save").
+  const autoSavedRef = useRef(new Set());
 
   // Timing telemetry (src/game/metrics.js). Two jobs, both of which have to be
   // set up before Phaser's first boot can land:
@@ -500,6 +510,81 @@ function App() {
     navigate('/my-games');
   };
 
+  // ── Saved games (contract §2B, 2026-09-27) ─────────────────────────────────
+  // ONE action behind both Save buttons (HUD + Creator Panel), so a slider tweak
+  // is saved the same way however the user reaches it. liveParams is read through
+  // a ref rather than the closure: these handlers are passed to memo-free
+  // children and must always see the CURRENT run, not the render they were
+  // created in.
+  const liveParamsRef = useRef(liveParams);
+  liveParamsRef.current = liveParams;
+
+  const runSave = async () => {
+    const current = liveParamsRef.current;
+    setSaveState('saving');
+    const result = await saveGame({ liveParams: current, preloadedImages: current?.preloadedImages });
+    if (!result.ok) {
+      setSaveState('error');
+      console.warn('[SavedGames] save failed:', result.error);
+      return false;
+    }
+    // Remember the row so a SECOND save (after tweaks) updates it instead of
+    // inserting a duplicate.
+    const id = result.id;
+    setLiveParams(prev => (id && prev.gameId === current.gameId ? { ...prev, savedGameId: id } : prev));
+    setSaveState('saved');
+    // Back to the resting label on its own (the Share button's idiom), so a
+    // later save is never a no-op because the button still reads "Saved".
+    setTimeout(() => setSaveState((s) => (s === 'saved' ? 'idle' : s)), 2000);
+    window.dispatchEvent(new CustomEvent('pm-games-changed'));
+    return true;
+  };
+
+  // A guest is sent through the sign-in dialog and the save runs itself
+  // afterwards (AuthProvider replays its pendingActionRef on SIGNED_IN). A
+  // GOOGLE sign-in is a full-page redirect that drops that callback — the
+  // auto-save below covers the gap, because signing in flips authStatus for the
+  // game already on screen.
+  const requestSave = () => {
+    if (requireAuth('save', runSave)) runSave();
+  };
+
+  // Auto-save on generation for signed-in users, so the game is in My Games
+  // before anyone goes looking for it.
+  //
+  // Keyed on the gameId, which generation stamps on the returned config for BOTH
+  // a fresh run and a cache hit. Games with no gameId are the static-art
+  // fallback boots (Gemini dead / cache only — buildFallbackBoot), which are
+  // saved by hand.
+  //
+  // The game the user ARRIVED with is exempt: opening someone else's shared game
+  // must not write a row into the reader's library. Only that one id is exempt,
+  // so a game generated from inside a shared link still auto-saves.
+  useEffect(() => {
+    if (authStatus !== 'authed') return;
+    const gameId = liveParamsRef.current?.gameId;
+    if (!gameId || gameId === initialConfig.pendingRestoreId) return;
+    if (autoSavedRef.current.has(gameId)) return;
+    autoSavedRef.current.add(gameId);
+    let cancelled = false;
+    saveGame({
+      liveParams: liveParamsRef.current,
+      preloadedImages: liveParamsRef.current?.preloadedImages
+    }).then((res) => {
+      if (cancelled) return;
+      if (res.ok) {
+        const id = res.id;
+        setLiveParams(prev => (id ? { ...prev, savedGameId: id } : prev));
+        window.dispatchEvent(new CustomEvent('pm-games-changed'));
+      } else {
+        // Let a later manual save retry rather than marking it done.
+        autoSavedRef.current.delete(gameId);
+        console.warn('[SavedGames] auto-save failed:', res.error);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [liveParams.gameId, authStatus, initialConfig.pendingRestoreId]);
+
   const handlePromptGenerate = async (promptText) => {
     console.log('[App.jsx] handlePromptGenerate triggered with prompt:', promptText);
     // Synchronously blur active elements immediately before closing menu / updating config
@@ -703,6 +788,9 @@ function App() {
               onMenuOpen={() => setIsMenuOpen(true)}
               onLogoClick={handleReopenPrompt}
               onMyGames={handleGoMyGames}
+              onSave={requestSave}
+              saveState={saveState}
+              canSave={authStatus !== 'disabled'}
             />
 
             {captureMode && (
@@ -732,6 +820,9 @@ function App() {
               onSliderChange={handleSliderChange}
               onPromptGenerate={handlePromptGenerate}
               onHomeClick={handleGoHome}
+              onSave={requestSave}
+              saveState={saveState}
+              canSave={authStatus !== 'disabled'}
             />
 
             {/* Premium Virtual Mobile Controls Overlay */}

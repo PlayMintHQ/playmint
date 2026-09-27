@@ -63,3 +63,17 @@ export const IconMenu = () => (
     <line x1="2" y1="15" x2="18" y2="15" />
   </svg>
 );
+
+export const IconSave = () => (
+  <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={s}>
+    <path d="M17 10v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-6" />
+    <polyline points="7 3 10 6 13 3" />
+    <line x1="10" y1="6" x2="10" y2="14" />
+  </svg>
+);
+
+export const IconPlay = () => (
+  <svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={s}>
+    <polygon points="6,3 17,10 6,17" fill="currentColor" stroke="none" />
+  </svg>
+);

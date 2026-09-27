@@ -1,0 +1,133 @@
+PlayMint 10-month roadmap — progress ticks as of 28 Aug 2026
+[x] = complete, [ ] = not started, <<()>> = status comment
+
+SEPTEMBER 2026 — CONTRACT OVERRIDE (added 27 Sep 2026)
+The September milestone contract (14-30 Sep) reorders this roadmap for the
+private-beta window; where they disagree, the contract wins. This file was last
+revised 28 Aug and is otherwise stale (it still lists audio + RPG as the
+September plan). What actually shipped in September, per contract steps 1-2:
+  - Week 1: Supabase accounts (email+password w/ confirmation + Google), auth
+    dialog, protected routes, /my-games route, optional-auth posture.
+  - Week 2 (27 Sep): public.games table + owner-only RLS (migration APPROVED,
+    PENDING application in the Supabase SQL editor), auto-save on generation,
+    manual Save in the HUD and the Creator Panel, My Games card grid with
+    thumbnails, Play via the share-link restore path, rename, delete with
+    confirmation, two-account isolation script + walkthrough, daily Supabase
+    keep-alive cron.
+  - October: publish/unlisted/public visibility, public /g/:id pages, remix.
+Below, M4/M5 items that shipped on 27 Sep are ticked and annotated.
+
+MONTH 1 — AI GENERATION MATRIX
+[x] Prompt -> world parsing architecture
+[x] API/layout templates for dynamic 2D asset generation
+[x] Keyword -> gameplay-variable tuning tables (speed, gravity, spawn rates)
+[x] Universal 2D Multi-Camera Manager (top-down, fixed-arena, side-scrolling)
+[x] Deliverable: local build where a prompt assigns parameters, sets camera
+    view, renders a procedural 2D canvas
+    <<(exceeded: deployed build, not just local — https://playmintai.vercel.app)>>
+
+MONTH 2 — AI FINALIZATION & SHOOTER SETUP
+[x] Lock/stress-test the generation engine (no config drift)
+    <<(locked with per-run cost budgets, cancellation, deterministic + vision QA
+    gates, downloadable per-run cost reports)>>
+[x] Adapt projectile physics + enemy logic into a top-down 360-degree movement
+    wrapper
+[x] Feed AI assets/layout into the Shooter Arena
+[x] Deliverable: working Top-Down Shooter mode driven by the prompt engine
+    <<(implemented, but not yet commited before throough testing — fixed arena, auto-fire, escalating waves, mobile d-pad;)>>
+
+MONTH 3 — AUDIO ENGINE & RPG FOUNDATION
+[ ] Global 2D Audio Manager (persistent theme playlists across scenes)
+[ ] Context-aware SFX channels (jump, fire, impacts, game-over)
+[ ] Init "RPG Adventure" engine class with open exploratory map grid
+    <<(head start exists: the shooter's top-down camera + 360-degree movement
+    are the same foundations the RPG mode needs)>>
+[ ] Deliverable: client with immersive audio + baseline top-down exploration
+    mode
+
+MONTH 4 — RPG COMPLETION & WEB AUTH
+[ ] NPC interaction bounds, text dialog UI, key-to-door win conditions
+[x] Frontend UI/UX polish sweep (inputs, modal focus, responsive layouts)
+    <<(partially implemented: mobile controls, safe-area handling, HUD and hit
+    feedback polish already done; full sweep pending — the My Games grid
+    (27 Sep) and the auth dialog set the modal/responsive bar) >>
+[x] Cloud app shell — email signup, Google OAuth, protected routes
+    <<(SHIPPED 19-27 Sep 2026: Supabase auth, sign-in dialog with pending-action
+    replay, path router, /my-games, /g/:id reserved. Optional-auth: with no
+    VITE_SUPABASE_* the app is exactly the pre-accounts app) >>
+[ ] Deliverable: locked multi-mode engine inside an authenticated web app shell
+    <<(the shell is live; "locked" still means the M10 audit)>>
+
+MONTH 5 — CLOUD SAVE ARCHITECTURE
+[x] Production relational DB schemas + Row Level Security per user
+    <<(public.games + profiles APPROVED 27 Sep 2026, owner-only RLS, column-
+    restricted INSERT/UPDATE, SECURITY INVOKER 200-row cap. PENDING: the client
+    pastes the migration into the Supabase SQL editor — the app degrades to an
+    empty library until then) >>
+[x] Serialization of AI gameConfig matrices/asset URLs/tuning into JSON rows
+    <<(a saved row's `config` IS the share-link payload, so a game round-trips
+    through one representation; art is referenced by art_id, never copied) >>
+[x] Cloud API to save/read/rewrite configs per profile
+    <<(shipped 27 Sep: src/game/savedGames/index.js is the only writer, every
+    export is non-throwing; save/upsert, list, rename, delete. Thumbnails are
+    composited from the game's own art — no extra generation spend) >>
+[ ] Deliverable: creators save AI games to a dashboard and load them back
+    <<(the library IS the load-back path: Play re-enters the tested share-link
+    restore, cross-device. A "dashboard" beyond My Games is still open)>>
+
+MONTH 6 — DISCOVERY, SOCIAL & REMIXING
+[ ] Public Discovery Feed with search + Like metric
+    <<(groundwork exists: every generated game is already tagged with
+    searchable style/mood/entity tags at creation time, and a server endpoint
+    already lists the shared game population)>>
+[ ] Public/Private toggles
+[ ] Remix Engine (safe clone of another player's config into a sandbox with
+    parent attribution ID)
+[ ] Social share deep links with meta tags
+    <<(partially implemented: share links already work cross-device with full
+    AI art; meta tags/previews pending)>>
+[ ] Deliverable: community platform — play, like, share, remix
+
+MONTH 7 — MONETIZATION TIER GATING
+[ ] Server-side authorization middleware validating requests vs account tier
+[ ] Premium feature locks (advanced camera styles, complex assets, high-volume
+    generation)
+    <<(groundwork exists: quality/demo generation tiers and per-run cost
+    budgets are already built and measurable — the things a premium tier
+    would gate)>>
+[ ] Daily/monthly free-tier prompt quota counters
+[ ] Deliverable: free-vs-premium authorization proxy layer
+
+MONTH 8 — LEMON SQUEEZY CHECKOUT
+[ ] Plan variants in Lemon Squeezy/Stripe
+[ ] Inline overlay checkout or payment-link redirects
+[ ] Subscription conversion flows, price charts, feature checklists in the
+    dashboard
+    <<(pricing inputs ready: measured cost per generation and cache-hit-rate
+    projection tables already exist in the cost reports)>>
+[ ] Deliverable: production-ready checkout flow
+
+MONTH 9 — WEBHOOKS & BILLING PORTAL
+[ ] Secure webhook endpoints with signature verification
+[ ] DB routines toggling feature access on lifecycle events (renewal, trial,
+    expiration, default)
+[ ] Customer billing portal links (cards, invoices, cancel)
+[ ] Deliverable: automated billing backend synced to live payment state
+
+MONTH 10 — SECURITY AUDIT & V1 LAUNCH
+[ ] Itemized RLS rule review
+[ ] Simulate malicious/failed webhook events (fraud-injection immunity)
+[ ] CI/CD pipelines for backend + frontend
+[ ] Deliverable: PlayMint V1 — tested, secure, monetization-ready SaaS
+
+SUMMARY
+- M1 (July) and M2 (August) fully complete; the M2 shooter shipped 25 Aug.
+- September contract steps 1-2 (accounts + saved games) shipped on the 27th;
+  the only outstanding item is applying the approved `games` migration in the
+  client's Supabase project and filing the two-account isolation log.
+- Delivered ahead of plan (M5-M6 territory pulled forward): server asset cache
+  with smart reuse (~45% measured), cross-device share links, per-game tagging,
+  cost telemetry and pricing projections.
+- Next: M3 (audio engine) + the October publish/remix work (public /g/:id,
+  visibility toggle) — NOT the M3 plan this file originally listed for
+  September; the contract moved that.
