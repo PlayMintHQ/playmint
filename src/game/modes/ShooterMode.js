@@ -2,8 +2,9 @@ import Phaser from 'phaser';
 import BaseMode from './BaseMode';
 import Projectile from '../objects/Projectile';
 
-// AUTO is the default; the config flag (or the localStorage dev override, same
-// shape as the other PM_* switches) turns on the manual twin-stick scheme.
+// AIM ASSIST is the default; the config flag (or the localStorage dev override,
+// same shape as the other PM_* switches) turns on the manual twin-stick scheme.
+// Either way the TRIGGER is the player's: nothing is ever fired without input.
 function readManualAim(cfg) {
   if (cfg?.shooterManualAim === true) return true;
   try {
@@ -15,22 +16,21 @@ function readManualAim(cfg) {
 
 // Top-down arena survival shooter. No gravity, 360° movement.
 //
-// AIMING has two modes and AUTO is the default (client direction 2026-09-27 —
-// the manual twin-stick scheme had replaced v1's auto-targeting and made mobile
-// unplayable for a casual player):
-//   AUTO  (config.shooterManualAim !== true, also the PM_SHOOTER_MANUAL_AIM='1'
+// SHOOTING IS ALWAYS THE PLAYER'S INPUT — the fire button on screen, F, or a
+// click. A press fires one shot; holding repeats at shooterFireRate. The mode
+// only ever supplies the AIM (client direction 2026-09-28, after the auto-fire
+// default was rejected: "the current version removes the fire button and shoots
+// automatically by itself"). Two aim schemes, the default one is the assist:
+//   ASSIST (config.shooterManualAim !== true, also the PM_SHOOTER_MANUAL_AIM='1'
 //          dev override to flip it) — the player turns toward the NEAREST enemy
-//          inside shooterFireRange in ANY direction and fires at it on the
-//          shooterFireRate cooldown, holding the trigger by itself. The only
-//          input is "move". No target in range = no shot, so the gun never
-//          fires into an empty arena (v1's tell-tale broken-button behavior).
-//   MANUAL — the previous scheme, unchanged: the player faces the mouse cursor
-//          (desktop) or the right analog stick's last direction (touch) and
-//          F / click / stick-release fires along that aim, with a cone
+//          inside shooterFireRange in ANY direction, rate-limited so it reads as
+//          a turret tracking rather than a sprite teleporting, with a thin
+//          reticle on the lock. A trigger press fires AT that target; with
+//          nothing in range the shot goes straight along the current facing, so
+//          the button is never dead (v1's tell-tale broken-button behavior).
+//   MANUAL — desktop mouse-aim or the right analog stick's deflection drives
+//          facing; F / click / the fire button shoots along it, with a cone
 //          aim-assist when a touch device fires with no aim input at all.
-// Auto-aim also never snaps: facing is rate-limited toward the target (and the
-// projectile flies at the target's own position), so a chasing enemy reads as
-// the turret tracking, not teleporting. A thin reticle marks the locked target.
 // Player/enemy art is a single static top-down sprite rotated at render time,
 // never a directional sheet — GameManagerScene skips SpriteAlignmentManager's
 // ground-anchor/flip logic for this mode and leaves the sprite origin centered.
@@ -51,11 +51,15 @@ export default class ShooterMode extends BaseMode {
 
     this.currentWave = 0;
     this.fireCooldown = 0;
+    // One-shot trigger flags (a press, or the scene's click flag) plus the
+    // HELD state of the on-screen fire button — holding repeats at fireRate,
+    // which is still player input, unlike the auto-fire that was removed.
     this.fireTrigger = false;
+    this.shootHeld = false;
     this.mouseAimActive = false;
     this.mouseAiming = false;
     this.manualAim = readManualAim(cfg);
-    // rad/s the player turns toward its auto-target. Snappy enough to keep a
+    // rad/s the player turns toward its target. Snappy enough to keep a
     // 100px/s chaser inside a 400px range, smooth enough to read as turning.
     this.turnRate = 7;
     // Auto-aim lock reticle color — a light cyan that reads on all five
@@ -69,9 +73,8 @@ export default class ShooterMode extends BaseMode {
     this.aimAssistCone = Math.PI / 4;
     this.moveInput = { up: false, down: false, left: false, right: false, x: 0, y: 0 };
     // Twin-stick aim (right analog stick, MANUAL mode): deflection vector,
-    // whether it is currently deflected, and the last aim angle it produced —
-    // the fire-on-release shot travels along lastAimAngle, not the post-release
-    // rotation.
+    // whether it is currently deflected, and the angle it produced. AIM ONLY —
+    // the stick no longer fires on release; the fire button is the sole trigger.
     this.aimInput = { x: 0, y: 0 };
     this.stickAiming = false;
     this.lastAimAngle = null;
@@ -117,8 +120,9 @@ export default class ShooterMode extends BaseMode {
     });
 
     // Auto-aim lock indicator. One persistent Graphics, cleared and restroked
-    // each frame, created only in AUTO mode. Depth 5 so the ring draws over the
-    // enemy it brackets.
+    // each frame, created only in the default ASSIST scheme (the manual scheme
+    // never has a target until the trigger is pulled, so there is nothing to
+    // draw). Depth 5 so the ring draws over the enemy it brackets.
     if (!this.manualAim) {
       this.reticle = scene.add.graphics().setDepth(5);
     }
@@ -131,14 +135,21 @@ export default class ShooterMode extends BaseMode {
       else if (action === 'down') this.moveInput.down = isDown;
       else if (action === 'left') this.moveInput.left = isDown;
       else if (action === 'right') this.moveInput.right = isDown;
-      else if (action === 'shoot' && isDown) this.fireTrigger = true;
-      else if (action === 'move') {
+      else if (action === 'shoot') {
+        // The on-screen fire button: 'down' is both an instant shot and the
+        // start of hold-to-repeat, 'up' stops the repeat. Nothing else in this
+        // mode can produce a shot.
+        this.fireTrigger = isDown;
+        this.shootHeld = isDown;
+      } else if (action === 'move') {
         // Left analog stick (twin-stick). x/y are normalized -1..1; the
         // boolean d-pad flags above stay supported for any legacy dispatcher.
         this.moveInput.x = e.detail.x || 0;
         this.moveInput.y = e.detail.y || 0;
       } else if (action === 'aim' && this.manualAim) {
-        // Right analog stick: deflection drives facing; release fires.
+        // Right analog stick: deflection drives facing ONLY. It used to fire on
+        // release, which duplicated the fire button and made adjusting an aim
+        // spend a shot — the button is the sole trigger now.
         this.aimInput.x = e.detail.x || 0;
         this.aimInput.y = e.detail.y || 0;
         const mag = Math.hypot(this.aimInput.x, this.aimInput.y);
@@ -155,8 +166,8 @@ export default class ShooterMode extends BaseMode {
     // Mouse aim engages on the first real (non-touch) pointer move — guards
     // against snapping the player to face (0,0) before the mouse has ever
     // moved, and keeps touch devices (which never fire a non-touch move) on
-    // the assisted movement-facing/nearest-enemy behavior below. AUTO mode
-    // never registers the pointer at all: it owns rotation outright.
+    // the assisted movement-facing/nearest-enemy behavior below. The default
+    // ASSIST mode never registers the pointer at all: it owns rotation outright.
     if (this.manualAim) {
       this.pointerMoveHandler = (pointer) => {
         if (pointer.wasTouch) return;
@@ -268,8 +279,8 @@ export default class ShooterMode extends BaseMode {
     }
     const travelAngle = moving ? Phaser.Math.Angle.Between(0, 0, vx, vy) : null;
 
-    // AUTO: the nearest live enemy anywhere inside fireRange, 360°. This is the
-    // whole mode — one target, one input, no aiming.
+    // ASSIST: the nearest live enemy anywhere inside fireRange, 360°. This
+    // supplies the AIM only — the shot itself still waits for the trigger.
     const autoTarget = this.manualAim ? null : this.findTargetInRange();
     this.lockedTarget = autoTarget;
 
@@ -304,43 +315,31 @@ export default class ShooterMode extends BaseMode {
     if (this.fireCooldown > 0) this.fireCooldown -= delta;
     const canFire = this.fireCooldown <= 0;
 
-    if (!this.manualAim) {
-      // AUTO FIRE: the trigger is held for the player. Fires at the locked
-      // target's own position and does NOT snap the sprite to the shot (the
-      // rate-limited turn above is what the player sees). Nothing in range =
-      // nothing fired, so an empty arena reads as "no target", not as a jam.
-      if (autoTarget && canFire) {
-        this.fireAt(autoTarget, false);
-        this.fireCooldown = this.fireRate;
-      }
-    } else if ((keys._shootTrigger || this.fireTrigger) && canFire) {
-      // MANUAL: F key / click (GameManagerScene) / right-stick release
-      // (gameInputListener above) set the trigger; cooldown still rate-limits
-      // it so holding/mashing the trigger can't out-fire fireRate. Mouse aim
-      // fires a real directional shot toward the cursor; the right stick fires
-      // along its last aim angle; a touch device with NO aim input falls back
-      // to cone aim-assist, otherwise a straight shot — the trigger ALWAYS
-      // fires (a dead button on an empty arena read as broken).
-      if (this.mouseAiming) {
+    // THE ONLY WAY TO SHOOT. Three input sources, one gate: the on-screen fire
+    // button (gameInputListener: 'down' fires and starts the hold, 'up' stops
+    // it), the F key (a real held key state, so holding F repeats too) and a
+    // click (the scene's one-shot _shootTrigger). A press always produces a
+    // shot, a hold repeats it at fireRate, and with NO input at all the gun
+    // stays silent — the previous default fired by itself, which the client
+    // rejected (2026-09-28).
+    const triggerDown = this.shootHeld || !!keys.KeyF;
+    const triggerPressed = this.fireTrigger || !!keys._shootTrigger;
+    if ((triggerDown || triggerPressed) && canFire) {
+      if (this.manualAim && this.mouseAiming) {
+        // Desktop: an explicit cursor aim wins — a real shot along the facing.
         this.fireInDirection(player.rotation);
-        this.fireCooldown = this.fireRate;
-      } else if (this.lastAimAngle !== null) {
-        // Twin-stick aim: the shot travels along the aim stick's last
-        // direction, even though the stick is already released. Cleared after
-        // firing (unless the stick is still held) so a later F-key/click/tap
-        // falls back to cone-assist instead of a stale angle.
-        this.fireInDirection(this.lastAimAngle);
-        this.fireCooldown = this.fireRate;
-        if (!this.stickAiming) this.lastAimAngle = null;
       } else {
-        const target = this.findTargetInRange(this.aimAssistCone);
-        if (target) {
-          this.fireAt(target);
-        } else {
-          this.fireInDirection(player.rotation);
-        }
-        this.fireCooldown = this.fireRate;
+        // ASSIST: the locked target (already computed this frame, and it is the
+        // one the reticle is bracketing) — the projectile flies at its own
+        // position while the rate-limited turn above owns the sprite. MANUAL
+        // touch: a cone-assist pick around the current facing. Either way an
+        // assist that finds nothing falls back to a straight shot along the
+        // facing, because a trigger that does nothing reads as a broken button.
+        const target = this.manualAim ? this.findTargetInRange(this.aimAssistCone) : autoTarget;
+        if (target) this.fireAt(target);
+        else this.fireInDirection(player.rotation);
       }
+      this.fireCooldown = this.fireRate;
     }
     if (scene.keyStates) scene.keyStates._shootTrigger = false;
     this.fireTrigger = false;
@@ -360,8 +359,8 @@ export default class ShooterMode extends BaseMode {
    *
    * `cone` optionally restricts candidates to that half-angle around the
    * player's facing (the MANUAL touch aim-assist). Omit it (or pass Math.PI)
-   * for an unrestricted 360° pick — which is what AUTO aim uses, so the
-   * turret can lock a target behind the player.
+   * for an unrestricted 360° pick — which is what the default ASSIST aim uses,
+   * so the turret can lock a target behind the player.
    */
   findTargetInRange(cone = Math.PI) {
     if (!this.enemies || !this.scene || !this.scene.player) return null;
@@ -413,8 +412,8 @@ export default class ShooterMode extends BaseMode {
     }
   }
 
-  fireAt(target, faceShot = true) {
-    this.spawnProjectileToward(target.x, target.y, faceShot);
+  fireAt(target) {
+    this.spawnProjectileToward(target.x, target.y);
   }
 
   // Directional fire: no target sprite, just a travel direction — project a
@@ -427,7 +426,7 @@ export default class ShooterMode extends BaseMode {
     );
   }
 
-  spawnProjectileToward(targetX, targetY, faceShot = true) {
+  spawnProjectileToward(targetX, targetY) {
     const { scene } = this;
     const player = scene.player;
     const projectile = this.projectiles.get();
@@ -439,11 +438,9 @@ export default class ShooterMode extends BaseMode {
     projectile.setScale(useDynamic ? 32 / projectile.frame.width : 1);
 
     projectile.fireAt(player.x, player.y, targetX, targetY, this.projectileSpeed);
-    // Manual shots snap the sprite to where they went (it shows the aim);
-    // auto-aim leaves rotation to the rate-limited turn in update().
-    if (faceShot) {
-      player.rotation = Phaser.Math.Angle.Between(player.x, player.y, targetX, targetY);
-    }
+    // No rotation write here: facing belongs to update() alone (the rate-limited
+    // assist turn, the aim stick, or the mouse), so a shot never snaps the
+    // sprite out from under the aim the player is holding.
   }
 
   jump() {

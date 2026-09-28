@@ -10,24 +10,21 @@ const THEME_ACCENTS = {
   default: { primary: '#00E599', semi: 'rgba(0, 229, 153, 0.25)' }
 };
 
-// Analog joystick for the shooter's twin-stick scheme (2026-09-23, MANUAL aim
-// mode only since 2026-09-27): the left stick is movement, the right stick is
-// aim direction. Dispatches the existing `game-input` CustomEvent contract with
-// new actions:
+// Analog joystick for the shooter's control scheme (2026-09-23): the left stick
+// is movement, the right stick (optional manual-aim mode) is aim direction.
+// Dispatches the existing `game-input` CustomEvent contract with the analog
+// actions:
 //   { action: 'move', state: 'down'|'move'|'up', x, y }  — normalized -1..1
 //   { action: 'aim',  state: 'down'|'move'|'up', x, y }  — normalized -1..1
-// The right stick ALSO fires on release (state 'up' with a deflection ≥ the
-// dead zone) via the existing 'shoot' action, so aiming and firing are one
-// gesture — the manual-trigger requirement survives (you release to shoot).
-// In the default AUTO mode only the left stick is rendered at all.
+// Firing is NOT a stick gesture: it was release-to-fire until 2026-09-28, which
+// duplicated the fire button and made adjusting an aim spend a shot. The
+// `shoot` action now comes only from the fire button below.
 // Each stick tracks its own pointerId so left thumb + right thumb work
 // simultaneously (multi-touch).
 const Joystick = ({ action, accent, ariaLabel }) => {
   const baseRef = React.useRef(null);
   const knobRef = React.useRef(null);
   const pointerIdRef = React.useRef(null);
-  // Last deflection magnitude at release — the fire-on-release gate.
-  const lastMagRef = React.useRef(0);
 
   const emit = (state, x, y) => {
     window.dispatchEvent(new CustomEvent('game-input', { detail: { action, state, x, y } }));
@@ -53,7 +50,6 @@ const Joystick = ({ action, accent, ariaLabel }) => {
     const mag = Math.hypot(dx, dy);
     const nx = mag > 0 ? dx / mag : 0;
     const ny = mag > 0 ? dy / mag : 0;
-    lastMagRef.current = Math.min(1, mag / radius);
     updateKnob(nx * radius * 0.5, ny * radius * 0.5);
     emit('down', nx, ny);
   };
@@ -71,7 +67,6 @@ const Joystick = ({ action, accent, ariaLabel }) => {
     // Clamp the knob to the base circle; the vector stays normalized.
     const clamped = Math.min(1, mag / radius);
     if (mag > 0) { dx = (dx / mag) * clamped * radius; dy = (dy / mag) * clamped * radius; }
-    lastMagRef.current = clamped;
     updateKnob(dx * 0.5, dy * 0.5);
     emit('move', mag > 0 ? dx / mag : 0, mag > 0 ? dy / mag : 0);
   };
@@ -82,13 +77,6 @@ const Joystick = ({ action, accent, ariaLabel }) => {
     pointerIdRef.current = null;
     updateKnob(0, 0);
     emit('up', 0, 0);
-    // Fire on release — the right stick's "shoot" gesture. Only when the stick
-    // was actually deflected (a tap on the base shouldn't waste a shot).
-    if (action === 'aim' && lastMagRef.current >= 0.25) {
-      window.dispatchEvent(new CustomEvent('game-input', { detail: { action: 'shoot', state: 'down' } }));
-      window.dispatchEvent(new CustomEvent('game-input', { detail: { action: 'shoot', state: 'up' } }));
-    }
-    lastMagRef.current = 0;
   };
 
   return (
@@ -172,6 +160,10 @@ const MobileControls = ({ gameType, themeKey, projectilesEnabled, manualAim }) =
         triggerInput('right', 'up');
         triggerInput('up', 'up');
         triggerInput('down', 'up');
+        // Backstop for the shooter's hold-to-repeat: if the last finger leaves
+        // without the button's own touchend (a drag off it, a canceled pointer),
+        // the held trigger must still drop or the gun fires forever.
+        triggerInput('shoot', 'up');
       }
     };
     window.addEventListener('touchend', handleGlobalTouchEnd);
@@ -279,12 +271,31 @@ const MobileControls = ({ gameType, themeKey, projectilesEnabled, manualAim }) =
             </button>
           </div>
         ) : gameType === 'shooter' ? (
-          /* Shooter: a move stick on the left is the WHOLE control scheme while
-             the game auto-targets and auto-fires (the default). The right aim
-             stick only appears in the optional manual mode — an empty cluster
-             measures 0x0, so uiZones still reports the left stick alone and the
-             ground-line gutter is unaffected. */
-          manualAim ? <Joystick action="aim" accent={accent} ariaLabel="Aim and fire" /> : null
+          /* Shooter: move stick on the left, and a VISIBLE fire button — in
+             BOTH aim schemes, because the button being absent is what the client
+             rejected on 2026-09-28 (the default auto-fired with no control at
+             all). Press = one shot, hold = repeat at shooterFireRate; the mode
+             supplies the aim (auto-target, or the optional right aim stick). */
+          <div className="pm-shooter-actions">
+            {manualAim && <Joystick action="aim" accent={accent} ariaLabel="Aim" />}
+            <button
+              className="pm-touch-btn pm-touch-btn--jump pm-touch-btn--fire"
+              onTouchStart={(e) => handleTouchStart('shoot', e)}
+              onTouchEnd={(e) => handleTouchEnd('shoot', e)}
+              onTouchCancel={(e) => handleTouchEnd('shoot', e)}
+              onMouseDown={() => triggerInput('shoot', 'down')}
+              onMouseUp={() => triggerInput('shoot', 'up')}
+              onMouseLeave={() => triggerInput('shoot', 'up')}
+              aria-label="Fire"
+            >
+              <svg viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="7.5" stroke="currentColor" strokeWidth="1.8" fill="none"/>
+                <circle cx="12" cy="12" r="2" fill="currentColor"/>
+                <path d="M12 1.5v3.5M12 19v3.5M1.5 12H5M19 12h3.5" stroke="currentColor" strokeWidth="1.8"/>
+              </svg>
+              <span className="pm-fire-label">FIRE</span>
+            </button>
+          </div>
         ) : (
           /* Runner Mode action cluster: simple jump button */
           <button

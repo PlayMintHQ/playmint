@@ -41,8 +41,8 @@ const EDITABLE_FIELDS = {
   shooterMoveSpeed: { min: 100, max: 500, label: 'shooter player move speed (px/s)' },
   shooterFireRate: { min: 150, max: 1500, int: true, label: 'shooter ms between shots (lower = faster)' },
   shooterProjectileSpeed: { min: 200, max: 900, label: 'shooter projectile speed' },
-  shooterFireRange: { min: 150, max: 800, label: 'shooter auto-fire range (px)' },
-  shooterManualAim: { bool: true, label: 'shooter manual aim (off = auto-target + auto-fire)' },
+  shooterFireRange: { min: 150, max: 800, label: 'shooter aim-assist range (px)' },
+  shooterManualAim: { bool: true, label: 'shooter manual aim (off = auto-target aim assist)' },
   shooterEnemySpeed: { min: 40, max: 400, label: 'shooter enemy chase speed' },
   shooterWaveCount: { min: 1, max: 20, int: true, label: 'shooter number of waves' },
   shooterEnemiesPerWave: { min: 1, max: 20, int: true, label: 'shooter enemies per wave' }

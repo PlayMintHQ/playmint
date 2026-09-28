@@ -13,7 +13,7 @@ const BANNED_WORDS = ['fuck', 'shit', 'bitch', 'cunt', 'ass', 'dick', 'pussy', '
 const AVAILABLE_MODES = [
   { key: 'standard', label: 'Runner', desc: 'Fast-paced infinite progression runner. Avoid obstacles, collect coins.' },
   { key: 'action_quest', label: 'Action Quest', desc: 'Classic 2D platformer with melee slashing, projectile combat, and patrolling enemies.' },
-  { key: 'shooter_arena', label: 'Shooter Arena', desc: 'Top-down arena survival. Move with WASD, auto-fire at nearby enemies, clear the waves.' },
+  { key: 'shooter_arena', label: 'Shooter Arena', desc: 'Top-down arena survival. Move with the stick, tap FIRE (aim assist locks the nearest enemy), clear the waves.' },
 ];
 
 const COMING_SOON_MODES = [

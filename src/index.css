@@ -586,6 +586,44 @@ canvas {
   height: calc(var(--pm-btn-jump) * 0.44);
 }
 
+/* Shooter fire button (2026-09-28): the trigger the player is meant to press,
+   so it takes the largest size, its own warm palette (the theme accent is the
+   movement stick's job — a green-on-green fire button is easy to miss) and a
+   visible FIRE label. Sized from the same custom properties as every other
+   control, so the footprint MobileControls measures stays truthful. */
+.pm-shooter-actions {
+  display: flex;
+  gap: var(--pm-btn-gap);
+  align-items: flex-end;
+}
+
+.pm-touch-btn--fire {
+  flex-direction: column;
+  gap: 2px;
+  background: rgba(46, 20, 16, 0.62);
+  border-color: rgba(255, 146, 92, 0.55);
+}
+
+.pm-touch-btn--fire:active {
+  background: rgba(255, 107, 61, 0.34);
+  border-color: #ff8a4c;
+  box-shadow: 0 0 18px rgba(255, 107, 61, 0.65), inset 0 1px 2px rgba(255, 255, 255, 0.12);
+}
+
+.pm-touch-btn--fire svg {
+  width: calc(var(--pm-btn-jump) * 0.4);
+  height: calc(var(--pm-btn-jump) * 0.4);
+}
+
+.pm-fire-label {
+  pointer-events: none;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  line-height: 1;
+  color: #ffd9c7;
+}
+
 /* Combat cluster: ONE row (shoot · melee · jump), never a stack. A stacked
    cluster is ~130px tall and its top sits ABOVE the floor line — that is the
    exact overlap the "enemies under the buttons" complaint was about, and the
