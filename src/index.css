@@ -311,6 +311,71 @@ canvas {
   display: block;
 }
 
+/* Native-fullscreen fallback note (iOS Safari portrait). Sits at the bottom so
+   it never covers the HUD row, and carries pointer-events so its own close
+   button works while the game underneath keeps receiving input. */
+.pm-fs-hint {
+  position: absolute;
+  left: 50%;
+  bottom: max(14px, env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(420px, calc(100vw - 24px));
+  padding: 9px 10px 9px 14px;
+  border-radius: 12px;
+  background: rgba(10, 14, 22, 0.9);
+  border: 1px solid var(--pm-border);
+  color: var(--pm-text-secondary);
+  font-size: 12px;
+  line-height: 1.35;
+  pointer-events: auto;
+  animation: hud-note-pulse 2.4s ease-in-out infinite;
+  z-index: 20;
+}
+.pm-fs-hint__close {
+  flex: 0 0 auto;
+  background: none;
+  border: none;
+  color: var(--pm-text-tertiary);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+.pm-fs-hint__close:hover { color: var(--pm-text-primary); }
+@media (prefers-reduced-motion: reduce) {
+  .pm-fs-hint { animation: none; }
+}
+
+/* Player-animation repair notice (2026-09-29). Sits under the HUD row, pointer
+   events off so it can never eat a jump/click meant for the canvas. */
+.hud-note {
+  margin: 6px 0 0;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(10, 14, 22, 0.72);
+  border: 1px solid var(--pm-border);
+  color: var(--pm-text-secondary);
+  font-size: clamp(10px, 1.4vw, 12px);
+  font-weight: 600;
+  text-align: center;
+  pointer-events: none;
+  animation: hud-note-pulse 1.8s ease-in-out infinite;
+}
+.hud-note--warn {
+  color: var(--pm-accent-orange);
+  border-color: rgba(255, 179, 71, 0.35);
+  animation: none;
+}
+@keyframes hud-note-pulse {
+  0%, 100% { opacity: 0.85; }
+  50% { opacity: 0.5; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hud-note { animation: none; }
+}
+
 .hud-header__controls {
   flex: 0 0 auto;
   display: flex;
@@ -348,10 +413,16 @@ canvas {
   font-size: 14px;
 }
 
-/* Hide fullscreen button on mobile (browsers handle it natively) */
+/* Portrait phones (2026-09-29): the fullscreen button used to be hidden here
+   on the assumption "browsers handle it natively". On iOS Safari they do not —
+   an iPhone in portrait gives the game a letterboxed strip with the browser
+   chrome eating the height, and the player had NO control to fix it. The button
+   is now always available; on a device whose browser genuinely has no native
+   fullscreen the button still renders and explains the workaround instead of
+   silently vanishing (see the hint in HudHeader). */
 @media (max-width: 480px) {
   .hud-header__fullscreen-btn {
-    display: none;
+    display: inline-flex;
   }
 }
 
@@ -890,7 +961,18 @@ body.pm-capture .pm-auth-toast { display: none !important; }
   background: transparent;
 }
 .pm-library__art img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.pm-library__artFallback { position: absolute; inset: 0; display: block; }
+/* Built-in world's own backdrop art, cover-fitted. A scrim keeps the play badge
+   and the card's bottom edge legible over a bright sky. */
+.pm-library__artFallback {
+  position: absolute; inset: 0; display: block;
+  background-size: cover;
+  background-position: center;
+}
+.pm-library__artFallback::after {
+  content: '';
+  position: absolute; inset: 0;
+  background: linear-gradient(180deg, rgba(6, 9, 14, 0.12) 40%, rgba(6, 9, 14, 0.5) 100%);
+}
 .pm-library__art:focus-visible { outline: 2px solid var(--pm-accent-teal); outline-offset: -2px; }
 .pm-library__playBadge {
   position: absolute; right: 8px; bottom: 8px;

@@ -19,7 +19,7 @@ import { IconPlay } from './Icons';
 import { navigate } from '../router';
 import { encodeShareConfig } from '../game/shareLink';
 import { listMyGames, renameGame, deleteGame } from '../game/savedGames';
-import { thumbPalette } from '../game/savedGames/thumbnail';
+import { THEME_ART_URLS } from '../game/themes';
 
 // games.mode holds the internal gameType; the UI has always called the
 // platformer "Action Quest" (ScreenZero's AVAILABLE_MODES is the source).
@@ -112,10 +112,14 @@ function GameCard({ game, onRename, onDelete }) {
     }
   }, [editing]);
 
-  // A thumbnail that 404s (or was never uploaded — static-art games have no
-  // file) falls back to the world's own gradient, so a card is never broken.
+  // Card art is normally a real captured frame of the game (a PNG uploaded when
+  // the game was saved — see game/frameCapture.js). This state only exists for
+  // the rows that predate that, or whose upload never reached the store: those
+  // fall back to the built-in world's own backdrop image, never to a flat
+  // gradient. The client's verdict on a colour swatch: "there must be a frame
+  // within the game, not just the sample color".
   const [thumbFailed, setThumbFailed] = useState(false);
-  const palette = thumbPalette(game?.config?.themeKey);
+  const themeKey = game?.config?.themeKey;
   const showImage = !!game?.thumbnail_url && !thumbFailed;
 
   const startEdit = () => {
@@ -165,9 +169,14 @@ function GameCard({ game, onRename, onDelete }) {
             onError={() => setThumbFailed(true)}
           />
         ) : (
+          // Last resort for a row that has no captured frame yet (saved before
+          // card art was a real screenshot, or its upload never reached the
+          // store). This paints the BUILT-IN WORLD'S OWN backdrop image rather
+          // than a flat gradient: the client was explicit that a colour swatch
+          // is not a thumbnail. The real frame replaces it on the next save.
           <span
             className="pm-library__artFallback"
-            style={{ background: `linear-gradient(160deg, ${palette[0]}, ${palette[1]} 55%, ${palette[2]})` }}
+            style={{ backgroundImage: `url(${THEME_ART_URLS[themeKey || 'default']?.backdrop || THEME_ART_URLS.default.backdrop})` }}
             aria-hidden="true"
           />
         )}

@@ -163,3 +163,24 @@ export const getTheme = (key) => {
   if (!key) return THEMES.default;
   return THEMES[key] || THEMES.default;
 };
+
+// Each built-in world's backdrop + ground ART, as browser-loadable URLs.
+//
+// Why this exists: themes.js describes a world as Phaser TEXTURE KEYS
+// ('winter_bg_1'), and GameManagerScene.preload() is the only place those keys
+// are resolved to files. Anything outside the Phaser scene — today the My Games
+// card compositor — had no way to reach the real art of a world, so a static-art
+// game painted a hard-coded gradient instead. Those gradients were near-black
+// for any world with no themeKey (every prompt-generated game has themeKey null),
+// which is why saved cards read as a blank rectangle.
+//
+// URLs are relative and load.setPath-relative ('assets/…'), matching preload().
+// Keep in sync with the preload list in GameManagerScene.
+export const THEME_ART_URLS = {
+  default: { backdrop: 'assets/themes/forest/bg_far.png', ground: 'assets/ground.png' },
+  lava: { backdrop: 'assets/themes/lava/bg.png', ground: 'assets/themes/lava/lava_ground.png' },
+  ice: { backdrop: 'assets/themes/winter/bg-1.png', ground: 'assets/themes/winter/winter_ground_1.png' },
+  forest: { backdrop: 'assets/themes/forest/bg_far.png', ground: 'assets/themes/forest/ground_tile.png' },
+  city: { backdrop: 'assets/themes/city/bg_far.png', ground: 'assets/themes/city/city_tile.png' },
+  space: { backdrop: 'assets/themes/space/bg_nebula.png', ground: 'assets/scifi_tileset.png' }
+};

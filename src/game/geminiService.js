@@ -1,4 +1,4 @@
-import { parsePromptKeywords, generateTitle, generateProceduralLayout, generateWaveConfig } from './promptUtils';
+import { parsePromptKeywords, generateTitle, generateProceduralLayout, generateWaveConfig, normalizeRunnerPacing } from './promptUtils';
 import { generateAssetDirections } from './assetPipeline/promptDesigner';
 import { isGeminiConfigured } from './assetPipeline/providers/geminiImage';
 import { ACTION_WALK_SPEED_DEFAULT } from '../gameConfig';
@@ -112,6 +112,14 @@ export async function generateGameConfig(promptText, onProgress = () => {}, opti
       obstacleDelay = Math.max(obstacleDelay * 0.6, 600);
       actionEnemyCount = Math.min(actionEnemyCount * 2, 15);
     }
+
+    // The runner obstacle interval is an interval in milliseconds and has to
+    // stay above one jump's airtime or the level is unwinnable (no double
+    // jump, and two obstacles never fit under one arc). Both the tuning table
+    // and the modifier multipliers above can push a runSpeed as high as 800,
+    // so this is re-checked against the FINAL physics — a difficulty keyword
+    // shortens the interval, it never buys an impossible one.
+    obstacleDelay = normalizeRunnerPacing({ obstacleDelay, jumpForce, gravity }).obstacleDelay;
 
     // Wave/enemy-count scaling for Shooter Arena — analogous to the procedural
     // layout generators below, but shooter waves are computed at runtime by

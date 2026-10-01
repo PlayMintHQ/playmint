@@ -6,9 +6,9 @@ import CreatorPanel from './components/CreatorPanel';
 import ScreenZero from './components/ScreenZero';
 import { GAME_PRESETS } from './gameConfig';
 import { generateGameConfig } from './game/geminiService';
-import { regenerateAssetSlots } from './game/assetPipeline';
+import { regenerateAssetSlots, createCancelToken, isGeminiConfigured } from './game/assetPipeline';
 import { generateOrRestoreAssets, updateGameArt, makePromptKey, getGameById } from './game/assetCache';
-import { encodeShareConfig, decodeShareConfig } from './game/shareLink';
+import { encodeShareConfig, decodeShareConfig, hydrateAssetMetaLite } from './game/shareLink';
 import { generateTitle } from './game/promptUtils';
 import { interpretEditPrompt, resolveAssetTargets } from './game/gameEditor';
 import GameOverOverlay from './components/GameOverOverlay';
@@ -19,7 +19,8 @@ import AuthDialog from './auth/AuthDialog';
 import { useAuth } from './auth/authContext';
 import { useRoute, navigate } from './router';
 import { MyGamesPage, RouteStubPage } from './components/MyGamesPage';
-import { saveGame } from './game/savedGames';
+import { saveGame, attachThumbnail } from './game/savedGames';
+import { captureGameFrameWhenReady } from './game/frameCapture';
 
 // Capture mode (2026-08-20): a chrome-free view for recording demos and
 // marketing footage. Driven by the URL so a recording setup is reproducible and
@@ -36,9 +37,54 @@ const readCaptureMode = () => {
   }
 };
 
-// The Fullscreen API is still vendor-prefixed on Safari, and the previous code
+// ── Fullscreen API notes ─────────────────────────────────────────────────────
+// The API is still vendor-prefixed on Safari, and the previous code
 // only ever called the unprefixed form — which is why fullscreen silently did
 // nothing there.
+
+/**
+ * A short unique token identifying ONE boot's config. crypto.randomUUID is not
+ * universal (and this module is evaluated in every browser the app supports, some
+ * without it on http:// origins), so fall back to a timestamp+random pair.
+ */
+const newRunId = () => {
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  } catch { /* fall through */ }
+  return `r${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+};
+
+/** Stamp a fresh per-boot identity on a config that is becoming the live game. */
+const withRunId = (config) => ({ ...(config || {}), saveRunId: newRunId() });
+
+/**
+ * Fold a boot-time player-animation repair's spend into the game's existing
+ * cost block, so the cost report reflects what the game ACTUALLY cost instead
+ * of the generation run alone. Per-call entries are concatenated (both runs
+ * logged their own calls) and every total is re-summed from the merged list —
+ * counting off `kind` rather than adding the two tallies, so the two runs can
+ * never disagree with the call log the report prints.
+ */
+const mergeRepairCost = (existing, repair) => {
+  if (!repair) return existing || { estUsd: 0, imageCalls: 0, visionCalls: 0, calls: [] };
+  const calls = [...(existing?.calls || []), ...(repair.calls || [])];
+  const sum = (key) => calls.reduce((n, c) => n + (Number(c?.[key]) || 0), 0);
+  const byKind = (kind) => calls.filter((c) => c?.kind === kind).length;
+  return {
+    ...(existing || {}),
+    ...repair,
+    calls,
+    imageCalls: byKind('image'),
+    visionCalls: byKind('vision'),
+    imageFailures: calls.filter((c) => c?.kind === 'image' && c?.failed).length,
+    visionFailures: calls.filter((c) => c?.kind === 'vision' && c?.failed).length,
+    promptTokens: sum('promptTokens'),
+    outputTokens: sum('outputTokens'),
+    thoughtsTokens: sum('thoughtsTokens'),
+    estUsd: Math.round(((existing?.estUsd || 0) + (repair.estUsd || 0)) * 1e6) / 1e6
+  };
+};
+
 const requestFullscreenOn = (el) => {
   if (!el) return Promise.resolve();
   const fn = el.requestFullscreen || el.webkitRequestFullscreen || el.webkitRequestFullScreen || el.msRequestFullscreen;
@@ -67,9 +113,19 @@ const getInitialState = () => {
     const hash = window.location.hash;
     if (hash && hash.startsWith('#config=')) {
       try {
-        const importedConfig = decodeShareConfig(hash.replace('#config=', ''));
+        const importedConfig = hydrateAssetMetaLite(decodeShareConfig(hash.replace('#config=', '')));
         if (typeof importedConfig === 'object' && importedConfig !== null && Object.keys(importedConfig).length > 0) {
           if (!importedConfig.gameName) importedConfig.gameName = 'PlayMint Core';
+          // Auto-save exemption marker (see the auto-save effect). A boolean on
+          // the config, NOT a derived string: a link to a static-art game
+          // carries no gameId, and the exemption used to compare only that id,
+          // so a static fallback boot reached through a shared link was written
+          // into the reader's own library — which the contract forbids. The old
+          // attempt at this (a name+prompt string key) collided whenever a
+          // reader regenerated the same prompt from inside the link, silently
+          // exempting their OWN new game. The flag rides the config object, so
+          // it survives the restore remount and dies with the first generation.
+          importedConfig.autoSaveExempt = true;
           // Links carry config only — boot on built-in theme art first. If the
           // link's gameId is in this browser's asset cache, an App effect
           // upgrades the boot to the cached AI art right after (one remount).
@@ -96,13 +152,24 @@ const getInitialState = () => {
 function App() {
   const [initialConfig] = useState(getInitialState);
   const [presetKey, setPresetKey] = useState(initialConfig.presetKey);
-  const [liveParams, setLiveParams] = useState(initialConfig.liveParams);
+  const [liveParams, setLiveParams] = useState(() => ({
+    ...initialConfig.liveParams,
+    // A per-boot identity, used ONLY to dedup auto-save and to make a late save
+    // result land on the right config. A static-art boot has no gameId, so this
+    // is the only thing that tells two different static games apart. It is
+    // stripped from the share payload and from the saved row (shareLink.stripForShare),
+    // so it is never persisted and never crosses a link.
+    saveRunId: initialConfig.liveParams?.saveRunId || newRunId()
+  }));
   const [hasStarted, setHasStarted] = useState(initialConfig.isImported);
   const [regenState, setRegenState] = useState(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const fullscreenContainerRef = useRef(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isFullscreenSupported, setIsFullscreenSupported] = useState(true);
+  // Shown when the browser refuses native fullscreen (notably iOS Safari
+  // portrait). Self-clearing: it is guidance, not a modal.
+  const [fullscreenHint, setFullscreenHint] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isSelectorOpen, setIsSelectorOpen] = useState(false);
   const [score, setScore] = useState(0);
@@ -129,6 +196,15 @@ function App() {
   // Save button is the update path from then on ("tweaks update the saved config
   // when the user chooses Save").
   const autoSavedRef = useRef(new Set());
+  // The captured in-game frame, keyed by the per-boot identity. This is the
+  // My Games card art: an actual frame of the running game, not a reconstruction
+  // from its assets and never a bare colour (game/frameCapture.js).
+  const frameRef = useRef(null);
+  // Player-animation repair (one attempt per game) + its cancel token, so
+  // starting another game or unmounting stops an in-flight redraw.
+  const repairAttemptedRef = useRef(false);
+  const repairTokenRef = useRef(null);
+  const [repairState, setRepairState] = useState(null);
 
   // Timing telemetry (src/game/metrics.js). Two jobs, both of which have to be
   // set up before Phaser's first boot can land:
@@ -186,7 +262,11 @@ function App() {
         dynamicAssetUrls: true,
         gameId: id,
         preloadedImages: cached.preloadedImages,
-        assetMeta: cached.assetMeta
+        // The cache entry's own metadata is authoritative. The link's slim
+        // metadata only fills fields an older/partial entry is missing — the
+        // one case that matters is `frames`, which decides whether the player
+        // animates at all.
+        assetMeta: hydrateAssetMetaLite({ assetMeta: cached.assetMeta }).assetMeta
       }));
       setGameKey(k => k + 1);
       // Released after the remount is queued: the record now closes on the
@@ -408,7 +488,15 @@ function App() {
 
   const handleFullscreen = () => {
     if (fullscreenContainerRef.current && !fullscreenElement()) {
-      requestFullscreenOn(fullscreenContainerRef.current);
+      const req = requestFullscreenOn(fullscreenContainerRef.current);
+      // requestFullscreenOn swallows a missing API and errors, so an unsupported
+      // browser would otherwise make the button a silent no-op — which is the
+      // state the button is now VISIBLE in. Say what to do instead.
+      if (req && typeof req.catch === 'function') {
+        req.catch(() => setFullscreenHint(true));
+      } else if (!isFullscreenSupported) {
+        setFullscreenHint(true);
+      }
     }
   };
 
@@ -445,12 +533,12 @@ function App() {
     const theme = 'ice';
 
     setPresetKey(key);
-    setLiveParams({
+    setLiveParams(withRunId({
       ...GAME_PRESETS[key],
       themeKey: theme,
       gameName: generateTitle("", mode, theme),
       dynamicAssetUrls: null // presets use built-in theme art
-    });
+    }));
   };
 
   const handleOpenSelector = () => {
@@ -461,7 +549,9 @@ function App() {
   const handleGenerate = (key, customConfig) => {
     setPresetKey(key);
     setGameKey(k => k + 1);
-    setLiveParams(customConfig);
+    // Fresh run id: this is a NEW game, so it must be free to auto-save as its
+    // own row even if the previous game was the same preset.
+    setLiveParams(withRunId(customConfig));
     setHasStarted(true);
     setIsPromptOpen(false);
   };
@@ -469,7 +559,7 @@ function App() {
   const handleOverlayGenerate = (key, customConfig) => {
     setPresetKey(key);
     setGameKey(k => k + 1);
-    setLiveParams(customConfig);
+    setLiveParams(withRunId(customConfig));
     setIsPromptOpen(false);
   };
 
@@ -490,11 +580,24 @@ function App() {
     }
   }, [hasStarted, presetKey, liveParams, isGameOver]);
 
-  const handleGoHome = () => {
+  // Leaving the running game, either way. isTransitioning is cleared HERE as
+  // well as in onCompleteTransition: that callback only fires when the
+  // ScreenZero phase machine reaches 'fading' (ScreenZero.jsx:262), so a boot
+  // that stops short — a cancelled run, a failed load, a second generation
+  // started from the preset path — left the flag stuck true forever, and the
+  // route gates below never mounted anything. Navigating away is a second,
+  // unconditional exit from that state.
+  const leaveRunningGame = () => {
     setHasStarted(false);
     setIsMenuOpen(false);
+    setIsPromptOpen(false);
     setIsGameOver(false);
     setGameOverData(null);
+    setIsTransitioning(false);
+  };
+
+  const handleGoHome = () => {
+    leaveRunningGame();
     // Leaving the game: drop the share hash so a reload lands on ScreenZero.
     // Pinned to '/' (not the current pathname) now that the app has routes.
     navigate('/', { replace: true });
@@ -502,11 +605,7 @@ function App() {
 
   // Account menu → My Games while a game is running: leave the game first.
   const handleGoMyGames = () => {
-    setHasStarted(false);
-    setIsMenuOpen(false);
-    setIsPromptOpen(false);
-    setIsGameOver(false);
-    setGameOverData(null);
+    leaveRunningGame();
     navigate('/my-games');
   };
 
@@ -522,16 +621,21 @@ function App() {
   const runSave = async () => {
     const current = liveParamsRef.current;
     setSaveState('saving');
-    const result = await saveGame({ liveParams: current, preloadedImages: current?.preloadedImages });
+    const frame = frameRef.current?.runId === current?.saveRunId ? frameRef.current.blob : null;
+    const result = await saveGame({ liveParams: current, preloadedImages: current?.preloadedImages, frameBlob: frame });
     if (!result.ok) {
       setSaveState('error');
       console.warn('[SavedGames] save failed:', result.error);
       return false;
     }
     // Remember the row so a SECOND save (after tweaks) updates it instead of
-    // inserting a duplicate.
+    // inserting a duplicate. Guarded on the per-boot token, not gameId: a
+    // slow manual save for game A landing after game B booted would otherwise
+    // stamp A's row onto B, and B's next save would UPDATE A's row.
     const id = result.id;
-    setLiveParams(prev => (id && prev.gameId === current.gameId ? { ...prev, savedGameId: id } : prev));
+    setLiveParams(prev => (
+      id && prev.saveRunId === current?.saveRunId ? { ...prev, savedGameId: id } : prev
+    ));
     setSaveState('saved');
     // Back to the resting label on its own (the Share button's idiom), so a
     // later save is never a no-op because the button still reads "Saved".
@@ -552,38 +656,256 @@ function App() {
   // Auto-save on generation for signed-in users, so the game is in My Games
   // before anyone goes looking for it.
   //
-  // Keyed on the gameId, which generation stamps on the returned config for BOTH
-  // a fresh run and a cache hit. Games with no gameId are the static-art
-  // fallback boots (Gemini dead / cache only — buildFallbackBoot), which are
-  // saved by hand.
+  // A STATIC-ART BOOT HAS NO gameId and still auto-saves. That gate (removed
+  // 2026-09-29) excluded every run where Gemini was unavailable, over quota or
+  // fatally failed, plus every "💾 Cache only" miss — i.e. on a keyless
+  // deployment it excluded 100% of runs, while the manual Save button worked
+  // fine, because saveGame treats a missing art id as an ordinary INSERT
+  // (art_id null, savedGames/index.js). The fix is to let the keyless path
+  // through, NOT to mint a fake gameId: art_id is the lookup key for uploaded
+  // art, so a synthetic id would make getGameById/ensureUploaded chase files
+  // that were never written.
+  //
+  // Dedup identity is the ROW target when there is one, else the art id, else a
+  // stable per-boot token — a static boot has neither id, and keying on
+  // liveParams.gameId (undefined) would dedup every static game as one.
   //
   // The game the user ARRIVED with is exempt: opening someone else's shared game
-  // must not write a row into the reader's library. Only that one id is exempt,
-  // so a game generated from inside a shared link still auto-saves.
+  // must not write a row into the reader's library. The exemption is the
+  // autoSaveExempt flag getInitialState stamps on an imported config, so it
+  // covers a link to a static-art game (no gameId) as well as an AI one, and a
+  // game the reader generates from inside the link is NOT exempt (the fresh
+  // config has no flag).
   useEffect(() => {
     if (authStatus !== 'authed') return;
-    const gameId = liveParamsRef.current?.gameId;
-    if (!gameId || gameId === initialConfig.pendingRestoreId) return;
-    if (autoSavedRef.current.has(gameId)) return;
-    autoSavedRef.current.add(gameId);
+    const current = liveParamsRef.current;
+    if (!current || current.autoSaveExempt) return;
+    // Dedup key is the ROW target when there is one, else the art id, else the
+    // per-boot token. A static-art boot has neither id, and a name+prompt STRING
+    // collided: two different static games from the same prompt (a re-roll with a
+    // different title, or a second run) shared one key, so the second silently
+    // never auto-saved. `saveRunId` is unique per config object, so it can only
+    // ever suppress a genuine repeat of the SAME game.
+    const dedupKey = current.savedGameId || current.gameId || current.saveRunId;
+    if (!dedupKey) return;
+    if (autoSavedRef.current.has(dedupKey)) return;
+    autoSavedRef.current.add(dedupKey);
     let cancelled = false;
-    saveGame({
-      liveParams: liveParamsRef.current,
-      preloadedImages: liveParamsRef.current?.preloadedImages
-    }).then((res) => {
-      if (cancelled) return;
-      if (res.ok) {
-        const id = res.id;
-        setLiveParams(prev => (id ? { ...prev, savedGameId: id } : prev));
-        window.dispatchEvent(new CustomEvent('pm-games-changed'));
-      } else {
-        // Let a later manual save retry rather than marking it done.
-        autoSavedRef.current.delete(gameId);
+    let retryTimer = null;
+    const attempt = (triesLeft) => {
+      // Re-read every attempt: a retry must save the CURRENT params, not the
+      // snapshot that failed.
+      const params = liveParamsRef.current;
+      if (!params) return;
+      // The captured frame, when this game has one. A save that beats the
+      // capture (auto-save fires the moment the row can be inserted) falls back
+      // to composing, and the frame is attached to the row when it lands.
+      const frame = frameRef.current?.runId === params.saveRunId ? frameRef.current.blob : null;
+      saveGame({ liveParams: params, preloadedImages: params?.preloadedImages, frameBlob: frame }).then((res) => {
+        if (cancelled) return;
+        if (res.ok) {
+          const id = res.id;
+          // Only stamp the row id onto the config it belongs to. A slow save for
+          // game A landing after game B booted would otherwise write A's row id
+          // onto B, and B's next save would UPDATE A's row. The old guard was
+          // `prev.gameId === params.gameId`, which is `undefined === undefined`
+          // for two DIFFERENT static games — exactly the population without ids.
+          // The per-boot token compares uniquely in every case.
+          setLiveParams(prev => (
+            id && prev.saveRunId === params.saveRunId ? { ...prev, savedGameId: id } : prev
+          ));
+          setSaveState('saved');
+          setTimeout(() => setSaveState((s) => (s === 'saved' ? 'idle' : s)), 2000);
+          window.dispatchEvent(new CustomEvent('pm-games-changed'));
+          return;
+        }
+        // Visible, not a console line: a silently-failed auto-save is
+        // indistinguishable from one that never ran, which is exactly how this
+        // bug reached the client. The Save buttons already render "!" and
+        // "Could not save — press to try again" for saveState 'error'.
+        autoSavedRef.current.delete(dedupKey);
+        setSaveState('error');
         console.warn('[SavedGames] auto-save failed:', res.error);
+        // Re-arm with a bounded retry. Deleting the key alone was not enough:
+        // no effect dependency ever changes again, so nothing re-ran it.
+        if (triesLeft > 0) {
+          retryTimer = setTimeout(() => { if (!cancelled) attempt(triesLeft - 1); }, 4000);
+        }
+      }).catch((err) => {
+        if (cancelled) return;
+        autoSavedRef.current.delete(dedupKey);
+        setSaveState('error');
+        console.warn('[SavedGames] auto-save threw:', err);
+        if (triesLeft > 0) {
+          retryTimer = setTimeout(() => { if (!cancelled) attempt(triesLeft - 1); }, 4000);
+        }
+      });
+    };
+    attempt(2);
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+    };
+  }, [liveParams.gameId, liveParams.savedGameId, liveParams.autoSaveExempt, liveParams.saveRunId, authStatus]);
+
+  // ── Player-animation repair (added 2026-09-29) ────────────────────────────
+  // A game whose sprite sheet failed every rescue rung boots with a STATIC
+  // player: GameManagerScene creates 'dyn_player_run' only when
+  // assetMeta.slots.player.frames exists, so playPlayerAnim takes the
+  // anims.stop() branch and the runner "moves forward but never animates" —
+  // the client report. The pipeline logs that state loudly at generation time,
+  // where nobody is looking, and the tilt-bob that used to paper over it was
+  // removed at the client's direction (2026-08-23). So the game heals ITSELF
+  // here, in the background, and the user never sees the frozen player for more
+  // than the length of one redraw.
+  //
+  // COST IS THE WHOLE DESIGN CONSTRAINT, and every gate below exists to keep it
+  // at zero whenever the user has asked for zero:
+  //   · no Gemini key            → never. This is the "key off, no money" case.
+  //   · PM_FORCE_CACHE ('Cache only') → never. Hard no-spend mode.
+  //   · static-art boot          → never. There is no generated player to build a
+  //     sheet FROM, and this is the same population auto-save just learned to
+  //     save by hand; a keyless deployment must stay keyless.
+  //   · shooter                  → never. No sheet exists for a rotating sprite.
+  //   · instruction ''           → reuses config.assetDesignDirections, so the
+  //     prompt designer takes its LOCAL path: no LLM design call.
+  //   · maxImageCalls 4          → static base + ONE sheet attempt, never the
+  //     full rescue ladder (lite ×2 → 3.1-flash → per-frame escalation).
+  // It runs after a beat so the first frames are never competing with it, it is
+  // cancellable, it is capped to one attempt per game, and every failure is
+  // swallowed: a repair must never break play.
+  useEffect(() => {
+    const params = liveParamsRef.current;
+    if (!params || !hasStarted) return;
+    // One attempt per GAME, keyed by the per-boot identity rather than a bare
+    // boolean: a boolean reset effect runs in the same commit as this one (and
+    // would clear a guard this effect had just set), while a keyed check
+    // self-invalidates the moment a genuinely new game boots.
+    const gameKeyForRepair = params.saveRunId;
+    if (!gameKeyForRepair || repairAttemptedRef.current === gameKeyForRepair) return;
+    // Only a game that HAS generated art and a static player to replace.
+    if (!params.dynamicAssetUrls) return;
+    if (params.gameType === 'shooter') return;
+    const playerMeta = params.assetMeta?.slots?.player;
+    if (!playerMeta) return;
+    // Has frames → the scene already built the animation. Nothing to repair.
+    if (playerMeta.frames) return;
+    if (!isGeminiConfigured()) return;
+    try {
+      if (localStorage.getItem('PM_FORCE_CACHE') === '1') return;
+    } catch { /* private mode: assume spend is allowed */ }
+
+    repairAttemptedRef.current = gameKeyForRepair;
+    const token = createCancelToken();
+    repairTokenRef.current = token;
+    const timer = setTimeout(async () => {
+      if (token.cancelled) return;
+      setRepairState('running');
+      const t0 = performance.now();
+      try {
+        // instruction '' → local design path, no LLM call. slots ['player_sheet']
+        // is the same substitution generation makes for the player slot.
+        const res = await regenerateAssetSlots({
+          config: params,
+          instruction: '',
+          slots: ['player_sheet'],
+          cancelToken: token,
+          maxImageCalls: 4
+        });
+        if (token.cancelled) return;
+        const newMeta = res?.meta || {};
+        const newImages = res?.preloadedImages || {};
+        // The sheet result is stored under the `player` key. Without frames the
+        // gates rejected it again, so there is nothing to swap in and the static
+        // player (with its honest note) stays.
+        if (!newMeta.player?.frames || !newImages.player) {
+          setRepairState('failed');
+          console.warn('[PlayerRepair] the redraw did not produce an animated sheet; keeping the static player.');
+          return;
+        }
+        const mergedImages = { ...(params.preloadedImages || {}), player: newImages.player };
+        const mergedParams = {
+          ...params,
+          preloadedImages: mergedImages,
+          assetMeta: {
+            ...(params.assetMeta || {}),
+            slots: {
+              ...(params.assetMeta?.slots || {}),
+              player: { ...newMeta.player, source: 'generated' }
+            },
+            // The repair's spend is part of THIS game's cost, or the report
+            // under-counts a game that quietly cost twice.
+            cost: mergeRepairCost(params.assetMeta?.cost, res.cost),
+            run: { ...(params.assetMeta?.run || {}), repairedPlayerAnim: true }
+          }
+        };
+        setRepairState('done');
+        setGameKey(k => k + 1);
+        setLiveParams(mergedParams);
+        if (mergedParams.gameId) {
+          // Persist under the same cache entry so a later hit/share-link shows
+          // the animated player. Fire-and-forget.
+          updateGameArt(mergedParams.gameId, {
+            config: mergedParams,
+            preloadedImages: mergedImages,
+            assetMeta: mergedParams.assetMeta
+          });
+        }
+        console.log(`[PlayerRepair] animated player installed in ${Math.round(performance.now() - t0)}ms`);
+      } catch (err) {
+        if (token.cancelled || err?.cancelled) return;
+        setRepairState('failed');
+        console.warn('[PlayerRepair] failed, keeping the static player:', err?.message || err);
+      }
+    }, 1200);
+    return () => {
+      clearTimeout(timer);
+      token.cancel();
+      repairTokenRef.current = null;
+    };
+  }, [hasStarted, liveParams.gameId, liveParams.saveRunId]);
+
+  // A new game clears the visible repair state and cancels an in-flight redraw
+  // belonging to the previous one. The one-shot guard does NOT need resetting —
+  // it is keyed on saveRunId, so a new game simply does not match.
+  useEffect(() => {
+    repairTokenRef.current?.cancel();
+    repairTokenRef.current = null;
+    setRepairState(null);
+  }, [liveParams.saveRunId]);
+
+  // ── In-game frame capture (the My Games card art) ─────────────────────────
+  // The card must be a frame OF THE GAME, so it is one: the running canvas is
+  // read back after boot, once the scene has settled. Keyed on the per-boot
+  // identity and on whether the user is signed in — an anonymous session can
+  // never have a library to hold a thumbnail, and captureGameFrameWhenReady
+  // costs a readPixels, so there is no reason to pay it.
+  //
+  // Two consumers, in the order things happen:
+  //   1. auto-save / manual save read frameRef.current (a save that happens
+  //      before the frame is ready falls back to composing, as before);
+  //   2. if a row was already written when the frame lands, attachThumbnail
+  //      pushes it onto that row — which is also how an OLD card that was saved
+  //      back when there was no frame at all gets a real one, the next time the
+  //      user plays it.
+  useEffect(() => {
+    if (!hasStarted || authStatus !== 'authed') return;
+    const runId = liveParams.saveRunId;
+    if (!runId) return;
+    let cancelled = false;
+    captureGameFrameWhenReady().then((blob) => {
+      if (cancelled || !blob) return;
+      frameRef.current = { runId, blob };
+      // A row saved before this point has no frame of its own.
+      const params = liveParamsRef.current;
+      if (params?.saveRunId === runId && params?.savedGameId) {
+        attachThumbnail(params.savedGameId, blob).then((path) => {
+          if (!cancelled && path) window.dispatchEvent(new CustomEvent('pm-games-changed'));
+        });
       }
     });
     return () => { cancelled = true; };
-  }, [liveParams.gameId, authStatus, initialConfig.pendingRestoreId]);
+  }, [hasStarted, authStatus, liveParams.saveRunId]);
 
   const handlePromptGenerate = async (promptText) => {
     console.log('[App.jsx] handlePromptGenerate triggered with prompt:', promptText);
@@ -738,7 +1060,7 @@ function App() {
       // Apply — force fresh Phaser instance
       setGameKey(k => k + 1);
       setPresetKey('custom');
-      setLiveParams({ ...gen.config, preloadedImages: gen.preloadedImages, assetMeta: gen.assetMeta });
+      setLiveParams(withRunId({ ...gen.config, preloadedImages: gen.preloadedImages, assetMeta: gen.assetMeta }));
     } catch (err) {
       console.error('[App.jsx] Prompt generation failed:', err);
       metrics.cancelRun(); // no boot follows a failed regeneration
@@ -791,6 +1113,7 @@ function App() {
               onSave={requestSave}
               saveState={saveState}
               canSave={authStatus !== 'disabled'}
+              playerAnimState={repairState === 'done' ? null : repairState}
             />
 
             {captureMode && (
@@ -802,6 +1125,24 @@ function App() {
               >
                 ✕ exit capture
               </button>
+            )}
+
+            {/* Native fullscreen refused (iOS Safari). Non-blocking pointer-events
+                so the game stays playable while the note is up. */}
+            {fullscreenHint && (
+              <div className="pm-fs-hint" role="status" onPointerDown={(e) => e.stopPropagation()}>
+                <span>
+                  This browser won&rsquo;t go fullscreen here. Rotate to landscape, or
+                  add PlayMint to your Home Screen for a fullscreen game.
+                </span>
+                <button
+                  className="pm-fs-hint__close"
+                  onClick={() => setFullscreenHint(false)}
+                  aria-label="Dismiss"
+                >
+                  ✕
+                </button>
+              </div>
             )}
 
             <CreatorPanel
@@ -893,19 +1234,24 @@ function App() {
         }}
       />
 
-      {/* Routes (only while no game is running and none is booting) */}
-      {!hasStarted && !isTransitioning && route.name === 'my-games' && <MyGamesPage />}
-      {!hasStarted && !isTransitioning && (route.name === 'game' || route.name === 'not-found') && (
+      {/* Routes. The ROUTE is authoritative — it is never gated on the
+          transition flag. `isTransitioning` only ever meant "ScreenZero is
+          booting a game", and gating the route pages on it made a stranded
+          flag render neither the grid nor a way out. `!hasStarted` is the real
+          "a game owns the screen" condition and both branches already use it. */}
+      {!hasStarted && route.name === 'my-games' && <MyGamesPage />}
+      {!hasStarted && (route.name === 'game' || route.name === 'not-found') && (
         <RouteStubPage kind={route.name} />
       )}
 
-      {/* ScreenZero rendered if NOT started */}
-      {!hasStarted && (route.name === 'home' || isTransitioning) && (
+      {/* ScreenZero rendered if NOT started and NOT on another route */}
+      {!hasStarted && route.name === 'home' && (
         <ScreenZero
+          onMyGames={handleGoMyGames}
           onStartTransition={(config) => {
             setGameKey(k => k + 1);
             setIsTransitioning(true);
-            setLiveParams(config);
+            setLiveParams(withRunId(config));
           }}
           onCompleteTransition={() => {
             setHasStarted(true);
@@ -917,6 +1263,7 @@ function App() {
 
       {isPromptOpen && (
         <ScreenZero
+          onMyGames={handleGoMyGames}
           onGenerate={handleOverlayGenerate}
           onClose={() => setIsPromptOpen(false)}
           isOverlay

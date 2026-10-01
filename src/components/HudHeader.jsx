@@ -15,6 +15,7 @@ const HudHeader = ({
   onSave,
   saveState,
   canSave,
+  playerAnimState,
 }) => {
   return (
     <div className="hud-header" onPointerDown={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()}>
@@ -39,8 +40,19 @@ const HudHeader = ({
             <span style={{ color: 'var(--pm-accent-teal)' }}>{score}</span>
           </div>
 
-          {!isFullscreen && isFullscreenSupported && (
-            <button className="pm-btn pm-btn-outline hud-header__icon-btn hud-header__fullscreen-btn" onClick={onFullscreen} title="Fullscreen">
+          {/* Always rendered. The old code hid this on narrow screens and when
+              the browser reported no Fullscreen API, which on iOS Safari left a
+              portrait phone with a letterboxed game and NO way to fix it. When
+              native fullscreen is genuinely unavailable the button explains the
+              manual route (landscape / add to Home Screen) rather than doing
+              nothing. */}
+          {!isFullscreen && (
+            <button
+              className="pm-btn pm-btn-outline hud-header__icon-btn hud-header__fullscreen-btn"
+              onClick={onFullscreen}
+              title={isFullscreenSupported ? 'Fullscreen' : 'Fullscreen — rotate to landscape, or add this page to your Home Screen for fullscreen'}
+              aria-label="Fullscreen"
+            >
               <IconFullscreen />
             </button>
           )}
@@ -81,6 +93,19 @@ const HudHeader = ({
         <h1 className="hud-header__title hud-header__title--mobile">
           {liveParams.gameName}
         </h1>
+      )}
+
+      {/* Player-animation repair. This game's sprite sheet failed its quality
+          gates, so the player boots static; App is redrawing it in the
+          background. Honest, non-blocking, and it says so rather than leaving
+          the player to look frozen with no explanation. */}
+      {playerAnimState === 'running' && (
+        <p className="hud-note" role="status">Animating your character…</p>
+      )}
+      {playerAnimState === 'failed' && (
+        <p className="hud-note hud-note--warn" role="status">
+          This character came out static — generating a new one could not be completed.
+        </p>
       )}
     </div>
   );

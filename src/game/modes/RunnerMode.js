@@ -1,5 +1,22 @@
 import Phaser from 'phaser';
 import BaseMode from './BaseMode';
+import { normalizeRunnerPacing } from '../../game/promptUtils';
+import {
+  RUNNER_GRAVITY,
+  RUNNER_JUMP_FORCE,
+  RUNNER_OBSTACLE_DELAY_MS,
+  RUNNER_SPEED,
+  runnerAirtimeMs,
+  runnerMinObstacleInterval,
+  runnerMinObstacleLead,
+  runnerObstacleWarningS
+} from '../../gameConfig';
+
+// Hard backstop for the spawn guard: an obstacle is never born closer than this
+// many seconds of travel ahead of the player, whatever the speed, screen size or
+// jump physics. The physics-derived warning window is the real constraint; this
+// just makes "never spawn on the player" true unconditionally.
+const OBSTACLE_CLEARANCE_S = 0.25;
 
 export default class RunnerMode extends BaseMode {
   init() {
@@ -17,6 +34,9 @@ export default class RunnerMode extends BaseMode {
     this.wasGrounded = true;
     this.lastVy = 0;
     this.lastLandingAt = 0;
+    // One console note per run, not per clamp. `init()` runs again on every
+    // scene.restart(), so a retry gets to report its own config.
+    this.timingWarned = false;
   }
 
   create() {
@@ -26,12 +46,14 @@ export default class RunnerMode extends BaseMode {
 
     this.obstacles = this.scene.physics.add.group();
 
-    this.obstacleTimer = this.scene.time.addEvent({
-      delay: this.scene.gameConfig.obstacleDelay || 1200,
-      callback: this.spawnObstacle,
-      callbackScope: this,
-      loop: true
-    });
+    // Obstacles are paced by a TIMER whose interval is `config.obstacleDelay`
+    // (MILLISECONDS), the value the tuning table, the Creator Panel slider and
+    // the AI editor all speak. The two multipliers give the feel the config
+    // asked for: a slightly shorter interval as the run speeds up, which is the
+    // difficulty curve a runner needs. It is still one TimerEvent named
+    // `obstacleTimer`, re-armed after each spawn, so the pause path's by-name
+    // reach-in is unchanged.
+    this.armObstacleTimer();
 
     this.scene.physics.add.collider(this.obstacles, this.scene.floor);
     this.scene.physics.add.collider(this.scene.player, this.obstacles, this.scene.hitObstacle, null, this.scene);
@@ -70,11 +92,127 @@ export default class RunnerMode extends BaseMode {
     this.scene.scale.on('resize', this.resizeListener, this);
   }
 
+  /**
+   * Milliseconds until the next obstacle.
+   *
+   * `config.obstacleDelay` is a real interval in milliseconds — it is the value
+   * the tuning table (`promptUtils.js`, whose runner rows are all at or above
+   * their own airtime floor), the Creator Panel slider (400-2500) and the AI
+   * editor's whitelist all mean by it.
+   *
+   * An earlier revision divided it by the run speed to "re-derive" a distance
+   * budget. That was wrong twice over: it returned SECONDS into a millisecond
+   * timer, and the 320ms floor then swallowed the result, so EVERY config
+   * spawned an obstacle every 320ms — a 112px gap at 350px/s against a 833ms
+   * jump, i.e. unsurvivable, with the config's difficulty knobs all dead.
+   *
+   * The interval is then floored at the run's own minimum jumpable interval
+   * (`runnerMinObstacleInterval`): the player has no double jump, so anything
+   * shorter than one airtime plus a landing window means the next obstacle
+   * arrives mid-air and the level is physically unwinnable rather than hard.
+   * The floor is applied AFTER the speed curve, which shortens the interval as
+   * the run accelerates and would otherwise walk back under it late in a run.
+   */
+  nextObstacleDelay() {
+    const gapMs = this.scene.gameConfig.obstacleDelay || RUNNER_OBSTACLE_DELAY_MS;
+    const speed = Math.max(this.runSpeed || 1, 1);
+    const speedFactor = Phaser.Math.Clamp(speed / (this.baseSpeed || speed), 0.5, 2.5);
+    const curveMs = Phaser.Math.Clamp(gapMs * (1 - (speedFactor - 1) * 0.12), 320, 2600);
+    const minMs = runnerMinObstacleInterval(this.runnerPhysics());
+    if (minMs > curveMs) {
+      this.logTimingClamp(
+        `obstacle interval ${Math.round(curveMs)}ms -> ${Math.round(minMs)}ms`,
+        `an interval under one jump's airtime (${Math.round(runnerAirtimeMs(this.runnerPhysics()))}ms) leaves no room to land and re-jump`
+      );
+    }
+    return Math.max(curveMs, minMs);
+  }
+
+  /** The jump physics the pacing budget is measured against. */
+  runnerPhysics(extra = {}) {
+    const cfg = this.scene.gameConfig;
+    return {
+      jumpForce: cfg.jumpForce,
+      gravity: cfg.gravity,
+      runSpeed: this.runSpeed || this.baseSpeed,
+      ...extra
+    };
+  }
+
+  /** One-time console note when a clamp overrides a config value, so an impossible config is visible instead of silently rewritten. */
+  logTimingClamp(detail, why) {
+    if (this.timingWarned) return;
+    this.timingWarned = true;
+    console.info(`[RUNNER] Obstacle pacing clamped to a playable level — ${detail} (${why}).`);
+  }
+
+  /**
+   * Where the next obstacle is born.
+   *
+   * The right edge of the viewport is the natural spawn point — it keeps
+   * obstacles from popping into existence in view — and in runner mode that is
+   * also a FIXED world x, because the camera's `scrollX` is pinned at 0 (the
+   * world scrolls past a stationary player; `virtualScrollX` is parallax-only).
+   *
+   * A fixed spawn x therefore hands the player a warning of
+   * `(spawnX - viewportWidth) / runSpeed` seconds, and that shrinks as the
+   * screen narrows — a phone got ~0.7s to react to the first obstacle of the
+   * run, wide desktop screens got 3-4s. So the spawn is additionally pushed
+   * off-screen by the distance needed to give a full warning window at the
+   * current speed (`runnerMinObstacleLead`), plus a small backstop so an
+   * obstacle can never be born on top of the player at all.
+   *
+   * Applied to EVERY spawn, not just the first: the stream is born at a fixed x
+   * while the run speed ramps, so a first-spawn-only guard would let a later
+   * obstacle inherit the old margin. The floors are lower bounds only, so they
+   * can never bring two obstacles closer than the spawn interval already
+   * spaces them.
+   */
+  nextSpawnX() {
+    const camera = this.scene.cameras.main;
+    const speed = Math.max(this.runSpeed || 1, 1);
+    const edge = camera.scrollX + camera.width + 16;
+    const player = this.scene.player;
+    const playerX = player ? player.x : edge;
+
+    // Born just off the right edge, but only once it is far enough out that
+    // crossing into view leaves a full warning window. This is the normal path
+    // at every speed, so it is deliberately NOT logged as a clamp.
+    const withWarning = edge + runnerMinObstacleLead(this.runnerPhysics());
+    // Backstop: never inside the player, whatever the speed or screen size.
+    // Only reachable when the viewport is so narrow that the warning lead would
+    // land the obstacle on top of the player — that IS a clamp worth reporting.
+    const clearOfPlayer = playerX + speed * OBSTACLE_CLEARANCE_S;
+
+    if (clearOfPlayer > withWarning) {
+      this.logTimingClamp(
+        `spawn pushed ${Math.round(clearOfPlayer - edge)}px past the screen edge`,
+        `a ${Math.round(camera.width)}px viewport at ${Math.round(speed)}px/s only leaves ${((edge - playerX) / speed).toFixed(2)}s of warning, under the ${runnerObstacleWarningS(this.runnerPhysics()).toFixed(2)}s a jump needs`
+      );
+    }
+    return Math.max(withWarning, clearOfPlayer);
+  }
+
+  /** (Re)arms the single pending obstacle-spawn timer. */
+  armObstacleTimer() {
+    if (this.obstacleTimer) this.obstacleTimer.remove();
+    this.obstacleTimer = this.scene.time.addEvent({
+      delay: this.nextObstacleDelay(),
+      callback: () => {
+        this.spawnObstacle();
+        // One-shot re-arm, never `loop: true`: the delay has to be recomputed
+        // from the speed at the moment of the spawn.
+        if (!this.scene.isGameOver) this.armObstacleTimer();
+      },
+      callbackScope: this
+    });
+  }
+
   spawnObstacle() {
     if (this.scene.isGameOver) return;
 
     const scale = Phaser.Math.FloatBetween(this.scene.gameConfig.obstacleScaleMin || 0.8, this.scene.gameConfig.obstacleScaleMax || 1.2);
-    const spawnX = this.scene.cameras.main.scrollX + this.scene.cameras.main.width + 16;
+    const spawnX = this.nextSpawnX();
     const obstacleTexture = this.scene.gameConfig.dynamicAssetUrls ? 'dyn_obstacle' : (this.scene.activeTheme?.obstacleTexture || 'crate');
 
     // Obtain frame dimensions for proper obstacle scaling normalization
@@ -191,7 +329,7 @@ export default class RunnerMode extends BaseMode {
     if (this.scene.isGameOver) return;
     
     if (this.scene.player.body.touching.down || this.scene.player.body.blocked.down) {
-      this.scene.player.body.setVelocityY(-(this.scene.gameConfig.jumpForce || 750));
+      this.scene.player.body.setVelocityY(-(this.scene.gameConfig.jumpForce || RUNNER_JUMP_FORCE));
       this.scene.playPlayerAnim('jump');
       this.scene.fx?.pulse(this.scene.player, 0.86, 1.18, 80); // stretch on takeoff
       this.wasGrounded = false;
@@ -209,17 +347,30 @@ export default class RunnerMode extends BaseMode {
   }
 
   onConfigUpdate(newConfig, oldConfig) {
-    this.baseSpeed = newConfig.runSpeed || 350;
+    // Every live tweak — the Creator Panel sliders, the difficulty dial, the AI
+    // editor's clamped patch — lands here, so this is where the run's physics
+    // get one last plausibility check. Without it a slider combination exists
+    // that no amount of pacing can rescue (the AI editor's `jumpForce` floor of
+    // 400 under heavy gravity leaves an apex below the tallest obstacle, i.e. a
+    // level that cannot be completed at all).
+    normalizeRunnerPacing(newConfig);
+    // The scene already merged the UNNORMALIZED values into `gameConfig` before
+    // calling us, so re-merge: `jump()` reads `gameConfig.jumpForce` at the
+    // moment of the jump and must see the raised value, not the one we just
+    // replaced. (`this.scene.gameConfig` is a plain merged copy, never frozen.)
+    this.scene.gameConfig = { ...this.scene.gameConfig, ...newConfig };
+
+    this.baseSpeed = newConfig.runSpeed || RUNNER_SPEED;
     this.runSpeed = this.baseSpeed;
 
     if (this.scene.player && this.scene.player.body) {
-      this.scene.player.body.setGravityY(newConfig.gravity || 1800);
+      this.scene.player.body.setGravityY(newConfig.gravity || RUNNER_GRAVITY);
     }
 
     if (this.obstacles && this.obstacles.children) {
       this.obstacles.children.iterate((obstacle) => {
         if (obstacle && obstacle.body) {
-          obstacle.body.setGravityY(newConfig.gravity || 1800);
+          obstacle.body.setGravityY(newConfig.gravity || RUNNER_GRAVITY);
           obstacle.body.setVelocityX(-this.runSpeed);
         }
       });
@@ -231,14 +382,17 @@ export default class RunnerMode extends BaseMode {
       });
     }
 
-    if (oldConfig.obstacleDelay !== newConfig.obstacleDelay) {
-      if (this.obstacleTimer) this.obstacleTimer.remove();
-      this.obstacleTimer = this.scene.time.addEvent({
-        delay: newConfig.obstacleDelay || 1200,
-        callback: this.spawnObstacle,
-        callbackScope: this,
-        loop: true
-      });
+    // runSpeed, the interval budget and the JUMP PHYSICS all feed the pending
+    // spawn's delay (the minimum is derived from jumpForce/gravity, so a live
+    // gravity or jump tweak can raise the floor the timer has to respect), so
+    // any of them re-arms it rather than waiting out an interval computed for
+    // the old numbers.
+    const pacingInputs = ['obstacleDelay', 'runSpeed', 'jumpForce', 'gravity'];
+    if (pacingInputs.some((key) => oldConfig[key] !== newConfig[key])) {
+      // The new config may be playable where the old one was not — let it
+      // report its own clamps.
+      this.timingWarned = false;
+      this.armObstacleTimer();
     }
   }
 

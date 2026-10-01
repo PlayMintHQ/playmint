@@ -6,6 +6,7 @@ import { downloadMetricsReport } from '../game/metricsReport';
 import { getRecords as getTimingRecords } from '../game/metrics';
 import { encodeShareConfig } from '../game/shareLink';
 import { ensureUploaded } from '../game/assetCache';
+import { normalizeRunnerPacing } from '../game/promptUtils';
 
 const RunnerControls = ({ liveParams, onSliderChange }) => (
   <>
@@ -295,7 +296,14 @@ const CreatorPanel = ({
       const config = { ...prev, difficulty: diff };
       if (mode === 'runner') {
         config.runSpeed = 200 + (diff * 40);
-        config.obstacleDelay = 2000 - (diff * 120);
+        // Floored at the shortest interval this jump can clear (see
+        // ScreenZero.applyDifficulty) — the dial expresses harder runs through
+        // runSpeed rather than through an unwinnable obstacle interval.
+        config.obstacleDelay = normalizeRunnerPacing({
+          obstacleDelay: 2000 - (diff * 120),
+          jumpForce: config.jumpForce,
+          gravity: config.gravity
+        }).obstacleDelay;
       } else if (mode === 'platformer') {
         config.actionEnemyCount = Math.floor(diff * 1.5);
         config.actionJumpHeight = 400 + (diff * 30);

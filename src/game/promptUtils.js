@@ -3,14 +3,25 @@
  * Prompt Parsing and Parameter Generation Utilities
  */
 
-import { ACTION_PLATFORM_TILE_W, actionJumpReach, actionJumpRise } from '../gameConfig';
+import { ACTION_PLATFORM_TILE_W, actionJumpReach, actionJumpRise, runnerMinJumpForce, runnerMinObstacleInterval } from '../gameConfig';
 
 // Automated mechanics tuning table mapping keywords to gameplay variables
+//
+// `obstacleDelay` is an interval in MILLISECONDS and every runner row's value
+// is kept at or above `runnerMinObstacleInterval` for that row's own jump
+// physics — the player has no double jump, so an interval shorter than one
+// airtime means the next obstacle arrives while they are still airborne, and
+// two obstacles never fit under a single jump arc. That is unwinnable, not
+// hard. Difficulty within a row comes from runSpeed (more pixels per second
+// covered, same warning time) and from how close the interval sits to the
+// physical floor, not from crossing below it. `RunnerMode` enforces the same
+// floor at runtime; these values are kept plausible so a generated level is
+// playable from its config alone.
 export const MECHANICS_TUNING_TABLE = {
   // Speed Modifiers
-  fast: { runSpeed: 550, actionWalkSpeed: 420, obstacleDelay: 900, label: 'Turbo Speed' },
-  speed: { runSpeed: 500, actionWalkSpeed: 380, obstacleDelay: 1000, label: 'Fast Pace' },
-  zoom: { runSpeed: 600, actionWalkSpeed: 450, obstacleDelay: 800, label: 'Zoom Speed' },
+  fast: { runSpeed: 550, actionWalkSpeed: 420, obstacleDelay: 1050, label: 'Turbo Speed' },
+  speed: { runSpeed: 500, actionWalkSpeed: 380, obstacleDelay: 1050, label: 'Fast Pace' },
+  zoom: { runSpeed: 600, actionWalkSpeed: 450, obstacleDelay: 1100, label: 'Zoom Speed' },
   slow: { runSpeed: 240, actionWalkSpeed: 180, obstacleDelay: 1800, label: 'Slow Motion' },
   easy: { runSpeed: 260, actionWalkSpeed: 200, obstacleDelay: 1600, label: 'Relaxed/Easy' },
   chill: { runSpeed: 250, actionWalkSpeed: 190, obstacleDelay: 1700, label: 'Chill Mode' },
@@ -23,12 +34,12 @@ export const MECHANICS_TUNING_TABLE = {
   heavy: { jumpForce: 950, actionJumpHeight: 500, gravity: 2400, actionGravity: 2100, label: 'Heavy Gravity' },
 
   // Threat & Combat Modifiers
-  fight: { actionEnemyCount: 8, obstacleDelay: 850, actionProjectileEnabled: true, label: 'Combat Action' },
-  combat: { actionEnemyCount: 9, obstacleDelay: 800, actionProjectileEnabled: true, label: 'Deep Combat' },
+  fight: { actionEnemyCount: 8, obstacleDelay: 1050, actionProjectileEnabled: true, label: 'Combat Action' },
+  combat: { actionEnemyCount: 9, obstacleDelay: 1050, actionProjectileEnabled: true, label: 'Deep Combat' },
   enemies: { actionEnemyCount: 7, label: 'Enemy Swarm' },
   shoot: { actionProjectileEnabled: true, actionEnemyCount: 6, label: 'Ranged Combat' },
-  hard: { actionEnemyCount: 8, runSpeed: 480, gravity: 2000, obstacleDelay: 850, label: 'Hard Challenge' },
-  hardcore: { actionEnemyCount: 12, runSpeed: 600, gravity: 2200, obstacleDelay: 600, actionProjectileEnabled: true, label: 'Hardcore Survival' },
+  hard: { actionEnemyCount: 8, runSpeed: 480, gravity: 2000, obstacleDelay: 1000, label: 'Hard Challenge' },
+  hardcore: { actionEnemyCount: 12, runSpeed: 600, gravity: 2200, obstacleDelay: 900, actionProjectileEnabled: true, label: 'Hardcore Survival' },
   peaceful: { actionEnemyCount: 0, obstacleDelay: 2500, label: 'Zen / Peaceful' },
 
   // World Bounding Modifiers
@@ -36,6 +47,38 @@ export const MECHANICS_TUNING_TABLE = {
   long: { worldWidth: 5000, label: 'Expanded Level' },
   huge: { worldWidth: 8000, label: 'Mega Level' }
 };
+
+/**
+ * Raise a runner config to the tightest level its own physics can actually
+ * clear. Called after the tuning-table merge, because a later matched row can
+ * overwrite the earlier row's jumpForce/gravity (e.g. "fast and moon") and
+ * change both floors — the per-row table values cannot be validated in
+ * isolation. Mutates and returns the config.
+ *
+ * Two floors, both physical:
+ *  - `obstacleDelay` (ms) may not fall below one jump's airtime plus a landing
+ *    window, or the next obstacle arrives while the player is still airborne
+ *    and two obstacles never fit under a single arc.
+ *  - `jumpForce` may not fall so low that the apex is under the tallest
+ *    obstacle, which is an outright uncompletable level.
+ */
+export function normalizeRunnerPacing(config) {
+  if (!config) return config;
+  const gravity = config.gravity;
+  const minJump = runnerMinJumpForce({ gravity });
+  // CEIL, never round: a rounded value can land *below* the floor it was meant
+  // to enforce (a floor of 1513.3ms rounded to 1513ms is still an unplayable
+  // interval, and an impulse rounded down can leave the apex under the
+  // obstacle), which reintroduces exactly the bug the floor exists to prevent.
+  if (config.jumpForce != null && config.jumpForce < minJump) {
+    config.jumpForce = minJump;
+  }
+  if (config.obstacleDelay != null) {
+    const floor = runnerMinObstacleInterval({ jumpForce: config.jumpForce, gravity });
+    if (config.obstacleDelay < floor) config.obstacleDelay = Math.ceil(floor);
+  }
+  return config;
+}
 
 /**
  * Creates a structural metadata object to detail what assets are requested
@@ -338,6 +381,7 @@ export function parsePromptKeywords(text) {
       keywordsMatched++;
     }
   });
+  normalizeRunnerPacing(tuningParams);
 
   // Calculate difficulty index
   let difficulty = 5;

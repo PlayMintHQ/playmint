@@ -62,6 +62,49 @@ const buildSaveMeta = (assetMeta) => {
 
 const fail = (error, extra = {}) => ({ ok: false, error: error?.message || String(error) || 'unknown', ...extra });
 
+// A card-art problem must be DIAGNOSABLE. putThumbnail resolving null — no
+// BLOB_READ_WRITE_TOKEN, an unreachable /api/games/upload, a compose that found
+// nothing to paint — used to be indistinguishable from success, because nothing
+// but the resulting blank card said so. Card art is cosmetic and never fails a
+// save, so a warning is the whole remedy. Deduped per message so a library of
+// twelve games does not print twelve identical lines.
+const warnedOnce = new Set();
+const warnOnce = (message, err) => {
+  const key = `${message}|${err?.message || ''}`;
+  if (warnedOnce.has(key)) return;
+  warnedOnce.add(key);
+  console.warn(`[SavedGames] ${message}${err ? `: ${err.message || err}` : ''}`);
+};
+
+/**
+ * Second chance at card art for a game that had no art_id to key an upload
+ * under (a static-art boot) or whose first upload found nothing to paint.
+ * composeThumbnail falls back to the built-in world's real backdrop art, so this
+ * succeeds for essentially every game; the row id stands in for the art id.
+ *
+ * Runs AFTER the row exists and writes ONLY thumbnail_path, so it can never
+ * fail the save and cannot clobber anything else. Returns the path it settled
+ * on (the existing one when this pass adds nothing).
+ */
+const backfillThumbnail = async (supabase, rowId, existingPath, compose, warn) => {
+  if (existingPath || !rowId) return existingPath;
+  try {
+    const blob = await compose();
+    if (!blob) return null;
+    const path = await server.putThumbnail(rowId, blob);
+    if (!path) {
+      warn('no card art was uploaded (no reachable image store — set BLOB_READ_WRITE_TOKEN)');
+      return null;
+    }
+    const upd = await supabase.from('games').update({ thumbnail_path: path }).eq('id', rowId);
+    if (upd.error) warn('card art uploaded but its path could not be saved', upd.error);
+    return path;
+  } catch (err) {
+    warn('card art skipped', err);
+    return null;
+  }
+};
+
 // A missing table (migration not applied yet) is a distinct state from a
 // network/permission error: the grid says so instead of showing a raw PostgREST
 // code. 42P01 = undefined_table, PGRST205 = relation not in schema cache.
@@ -88,7 +131,7 @@ const COLUMNS = 'id,title,mode,prompt,config,art_id,thumbnail_path,visibility,cr
  *
  * @returns {Promise<{ok: boolean, id?: string, error?: string, thumbnail?: string}>}
  */
-export const saveGame = async ({ liveParams, preloadedImages } = {}) => {
+export const saveGame = async ({ liveParams, preloadedImages, frameBlob = null } = {}) => {
   const supabase = await client();
   if (!supabase) return fail('Accounts are not enabled on this deployment.');
   if (!liveParams) return fail('Nothing to save yet.');
@@ -112,16 +155,24 @@ export const saveGame = async ({ liveParams, preloadedImages } = {}) => {
     // an on-demand upload closes that race, so Play can never 404 the art.
     if (artId) await ensureUploaded(artId);
 
-    // Card art is cosmetic: a failure leaves thumbnail_path null and the grid
-    // paints the world's gradient instead. It must never fail the save.
+    // Card art. A real captured frame of the running game WINS over anything
+    // composed: the client's verdict on the composed version (its own assets on a
+    // painted ground line, or a sampled colour when the game had no assets at
+    // all) was that the card has to be a frame OF the game. `frameBlob` is that
+    // frame (game/frameCapture.js); compose is the fallback for the cases where
+    // no frame was available yet — an early manual save, or a save that happens
+    // before the scene has rendered a single frame.
+    // Card art is cosmetic: it must NEVER fail the save.
+    const compose = () => (frameBlob ? Promise.resolve(frameBlob) : composeThumbnail({
+      preloadedImages,
+      assetMeta: liveParams.assetMeta,
+      themeKey: liveParams.themeKey
+    }));
     let thumbnailPath = null;
     if (artId) {
-      const blob = await composeThumbnail({
-        preloadedImages,
-        assetMeta: liveParams.assetMeta,
-        themeKey: liveParams.themeKey
-      });
+      const blob = await compose();
       if (blob) thumbnailPath = await server.putThumbnail(artId, blob);
+      else warnOnce('no card art was produced from the game\'s own images');
     }
 
     let rowId = liveParams.savedGameId || null;
@@ -137,13 +188,27 @@ export const saveGame = async ({ liveParams, preloadedImages } = {}) => {
     }
 
     if (rowId) {
+      // `mode` is deliberately NOT sent here. The 2026-09-27 migration granted
+      // UPDATE without it, so naming it in a SET made Postgres reject the whole
+      // statement with "permission denied for column mode" — every save after the
+      // first failed, invisibly. The grant is corrected by
+      // migrations/20260929120000_games_update_grant.sql, but the client must
+      // not DEPEND on that: a saved game's mode can never change anyway (mode
+      // switching is intentionally unsupported — gameEditor refuses it), so the
+      // column has no business being written on re-save.
+      const { mode: _immutableMode, ...updateValues } = values;
+      // thumbnail_path is included ONLY when this save actually produced art.
+      // Sending an explicit null here erased a good card on any re-save that
+      // happened before a frame was available (an immediate slider tweak), which
+      // is how a card that had a real frame went back to a colour swatch.
       const upd = await supabase
         .from('games')
-        .update({ ...values, thumbnail_path: thumbnailPath })
+        .update(thumbnailPath ? { ...updateValues, thumbnail_path: thumbnailPath } : updateValues)
         .eq('id', rowId)
         .select('id')
         .maybeSingle();
       if (upd.error) return fail(upd.error);
+      thumbnailPath = await backfillThumbnail(supabase, rowId, thumbnailPath, compose, warnOnce);
       return { ok: true, id: upd.data?.id || rowId, thumbnail: thumbnailPath || undefined };
     }
 
@@ -153,9 +218,45 @@ export const saveGame = async ({ liveParams, preloadedImages } = {}) => {
       .select('id')
       .maybeSingle();
     if (ins.error) return fail(ins.error);
-    return { ok: true, id: ins.data?.id, thumbnail: thumbnailPath || undefined };
+    const newId = ins.data?.id;
+    // A static-art game has no art_id to key a card on, so the row id takes
+    // that role. The row has to exist first, hence this second write.
+    thumbnailPath = newId
+      ? await backfillThumbnail(supabase, newId, thumbnailPath, compose, warnOnce)
+      : null;
+    return { ok: true, id: newId, thumbnail: thumbnailPath || undefined };
   } catch (err) {
     return fail(err);
+  }
+};
+
+/**
+ * Uploads a captured game frame onto an EXISTING row. The frame is captured a
+ * beat after boot (it has to be a settled scene, not the first black frame), but
+ * auto-save fires as soon as the row is inserted — so on a fast save the frame
+ * arrives after the fact. This closes that gap without re-running the whole save.
+ *
+ * Cosmetic like everything else here: never throws, resolves to the path it set
+ * or null.
+ *
+ * @returns {Promise<string|null>} the stored thumbnail_path
+ */
+export const attachThumbnail = async (rowId, blob) => {
+  if (!rowId || !blob) return null;
+  const supabase = await client();
+  if (!supabase) return null;
+  try {
+    const path = await server.putThumbnail(rowId, blob);
+    if (!path) {
+      warnOnce('no card art was uploaded (no reachable image store — set BLOB_READ_WRITE_TOKEN)');
+      return null;
+    }
+    const upd = await supabase.from('games').update({ thumbnail_path: path }).eq('id', rowId);
+    if (upd.error) warnOnce('card art uploaded but its path could not be saved', upd.error);
+    return path;
+  } catch (err) {
+    warnOnce('card art skipped', err);
+    return null;
   }
 };
 

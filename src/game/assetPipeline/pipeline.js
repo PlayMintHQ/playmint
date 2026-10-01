@@ -361,7 +361,13 @@ export async function generateAssets({
   gridPlan = null,
   // 'shooter' disables the side-view facing-QA mirror correction below — a
   // top-down sprite has no left/right facing for that heuristic to fix.
-  gameType = null
+  gameType = null,
+  // Overrides the per-run image-call backstop for THIS call only. Used by the
+  // boot-time player-animation repair in App, which must stay cheap: it asks for
+  // a single player_sheet (static base + one sheet attempt ≈ 3-4 calls) and must
+  // never escalate into the full rescue ladder. PM_MAX_GEMINI_CALLS still wins
+  // when it is set explicitly — a deliberate budget is a budget.
+  maxImageCalls = null
 }) {
   const preloadedImages = {};
   const meta = {};
@@ -384,12 +390,16 @@ export async function generateAssets({
   //   call) and raises the default budget so THAT extra call volume, now on more
   //   expensive calls, doesn't re-trigger the same starvation the 12→22 bump fixed.
   const demoMode = localStorage.getItem('PM_DEMO_MODE') === '1';
+  const explicitBudget = parseInt(localStorage.getItem('PM_MAX_GEMINI_CALLS'), 10) || (demoMode ? 32 : 22);
   const runState = {
     skipGemini: false,
     demoMode,
     qualityMode: demoMode || localStorage.getItem('PM_QUALITY_MODE') === '1',
     imageCalls: 0,
-    maxImageCalls: parseInt(localStorage.getItem('PM_MAX_GEMINI_CALLS'), 10) || (demoMode ? 32 : 22),
+    maxImageCalls: explicitBudget,
+    // A caller-supplied cap lowers the budget but never raises it above the
+    // deployment's own limit.
+    ...(maxImageCalls != null ? { maxImageCalls: Math.min(maxImageCalls, explicitBudget) } : {}),
     // Probe/experiment knobs (A/B protocol): override the image model for the
     // static player / the sheet without touching slotSpecs. Normal runs leave
     // them unset; a passed probe flips the slotSpecs default instead. Wins over
@@ -1522,7 +1532,7 @@ function reportRunCost(onProgress) {
  * designer so the new art follows the request; the caller merges the returned
  * images/meta over the retained ones and remounts the game.
  */
-export async function regenerateAssetSlots({ config, instruction = '', slots, onProgress = () => {}, cancelToken = null }) {
+export async function regenerateAssetSlots({ config, instruction = '', slots, onProgress = () => {}, cancelToken = null, maxImageCalls = null }) {
   if (!gemini.isGeminiConfigured()) {
     throw new Error('No Gemini API key configured — asset regeneration requires a key.');
   }
@@ -1559,7 +1569,7 @@ export async function regenerateAssetSlots({ config, instruction = '', slots, on
   }
 
   const gridPlan = planPropsGrid(slots, design, namedBySlot, onProgress, config.gameType);
-  const { preloadedImages, meta } = await generateAssets({ finalPrompts, slots, onProgress, cancelToken, gridPlan, gameType: config.gameType });
+  const { preloadedImages, meta } = await generateAssets({ finalPrompts, slots, onProgress, cancelToken, gridPlan, gameType: config.gameType, maxImageCalls });
 
   const updated = Object.values(meta).filter(m => !m.dropped).length;
   onProgress(

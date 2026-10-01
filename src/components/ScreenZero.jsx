@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { GAME_PRESETS } from '../gameConfig';
-import { generateTitle } from '../game/promptUtils';
+import { generateTitle, normalizeRunnerPacing } from '../game/promptUtils';
 import { generateGameConfig } from '../game/geminiService';
 import { isGeminiConfigured, createCancelToken } from '../game/assetPipeline';
 import { generateOrRestoreAssets, makePromptKey, makePresetKey } from '../game/assetCache';
@@ -128,7 +128,7 @@ const WORLDS = [
   }
 ];
 
-const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompleteTransition, currentConfig }) => {
+const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompleteTransition, currentConfig, onMyGames }) => {
   const [prompt, setPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [transitionPhase, setTransitionPhase] = useState('idle'); // idle | compiling | fading | done
@@ -627,7 +627,16 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
     const diff = config.difficulty; // 1 to 10
     if (mode === 'standard') {
       config.runSpeed = 200 + (diff * 40); // 240 to 600
-      config.obstacleDelay = 2000 - (diff * 120); // 1880 to 800
+      // The dial's floor is the shortest interval this jump can clear, not a
+      // fixed 800ms: below one airtime the next obstacle lands while the player
+      // is still airborne, which is unwinnable rather than hard. Difficulty past
+      // that point is expressed by runSpeed, which the same dial already raises.
+      const playableFloor = normalizeRunnerPacing({
+        obstacleDelay: 2000 - (diff * 120),
+        jumpForce: config.jumpForce,
+        gravity: config.gravity
+      }).obstacleDelay;
+      config.obstacleDelay = playableFloor;
     } else if (mode === 'action_quest') {
       config.actionEnemyCount = Math.floor(diff * 1.5); // 1 to 15
       config.actionJumpHeight = 400 + (diff * 30);
@@ -849,8 +858,14 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
             )}
             {/* Account entry point — LAST child so it holds the top-right
                 corner even when the dev toggles overflow leftward on phones.
-                Renders nothing when accounts are not configured. */}
-            <AccountButton />
+                Renders nothing when accounts are not configured.
+
+                onMyGames is REQUIRED, not optional: this toolbar is shared
+                with the in-game overlay, and without it AccountButton falls
+                back to a bare navigate('/my-games') that leaves hasStarted
+                true — the route changed but the grid never mounted, which
+                reads as "My Games is broken" until a refresh. */}
+            <AccountButton onMyGames={onMyGames} />
       </div>
 
       {/* Close button for overlay */}

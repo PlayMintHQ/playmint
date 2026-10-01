@@ -14,7 +14,29 @@
 // which is what lets "Play" on a My Games card re-enter through the same tested
 // share-link import path instead of a second boot route.
 export const stripForShare = (liveParams) => {
-  const { preloadedImages: _pi, assetMeta, ...config } = liveParams || {};
+  // autoSaveExempt is a per-SESSION import marker (getInitialState stamps it on
+  // a config decoded from a shared link) — it must never be persisted into a
+  // saved row's config, or a later replay of that row would arrive pre-exempt
+  // and never auto-save. saveRunId is the same class of thing: a per-boot
+  // identity used only to dedup auto-save and to land a late result on the right
+  // config. Persisting it would let one browser's run id leak into another's
+  // library, and a replayed row would arrive carrying a stale one.
+  //
+  // savedGameId is stripped for a sharper reason: the live URL is rewritten from
+  // this same payload (so F5 works), so it is a URL the user can copy and send.
+  // Carrying the row id in it means a recipient who presses Save targets the
+  // SHARER's row, and — the second the per-user RLS policies are the one thing
+  // still unproven in this deployment — that can write someone else's library.
+  // A replayed AI game still resolves its own row by art_id, which is the match
+  // key the column was designed for.
+  const {
+    preloadedImages: _pi,
+    assetMeta,
+    autoSaveExempt: _exempt,
+    saveRunId: _run,
+    savedGameId: _saved,
+    ...config
+  } = liveParams || {};
   const slots = assetMeta?.slots;
   if (slots) {
     const lite = {};
@@ -45,4 +67,44 @@ export const decodeShareConfig = (encoded) => {
     json = raw; // pre-v2 links were plain Latin-1 btoa output
   }
   return JSON.parse(json);
+};
+
+/**
+ * Lift a share payload's slim slot metadata back into the shape the boot path
+ * reads (`config.assetMeta.slots`), merging with whatever real metadata is
+ * already there.
+ *
+ * `stripForShare` has always written assetMetaLite, and until 2026-09-29
+ * NOTHING read it — the link's `frames` were inert, so a game restored from a
+ * link whose art had fallen out of the cache booted with an assetMeta the
+ * sprite-sheet gates could not see. That is a whole class of "the player is
+ * static" / "the sprite is the wrong size" reports that no amount of art
+ * debugging would explain. It is deliberately tolerant: real metadata always
+ * wins, and a missing field is simply not lifted.
+ *
+ * @param {object} config  a decoded share payload / boot config
+ * @returns {object} the same config, with assetMeta.slots populated from
+ *                   assetMetaLite where real metadata is absent
+ */
+export const hydrateAssetMetaLite = (config) => {
+  const lite = config?.assetMetaLite?.slots;
+  if (!lite || typeof lite !== 'object') return config;
+  const slots = { ...(config.assetMeta?.slots || {}) };
+  let changed = false;
+  for (const [slot, m] of Object.entries(lite)) {
+    const existing = slots[slot];
+    if (!existing) {
+      slots[slot] = { ...m };
+      changed = true;
+    } else {
+      // Real metadata exists: fill only the fields it is missing, so a cache
+      // hit is never degraded by the link's summary.
+      for (const [k, v] of Object.entries(m || {})) {
+        if (existing[k] == null) { existing[k] = v; changed = true; }
+      }
+    }
+  }
+  if (!changed) return config;
+  const { assetMetaLite: _lite, ...rest } = config;
+  return { ...rest, assetMeta: { ...(config.assetMeta || {}), slots } };
 };
