@@ -481,8 +481,9 @@ function App() {
   // populates from measured DOM rects.
 
   useEffect(() => {
+    console.log('[App] update-game-config dispatched, gameType=', liveParams.gameType, 'hasStarted=', hasStarted);
     window.dispatchEvent(new CustomEvent('update-game-config', { detail: liveParams }));
-  }, [liveParams]);
+  }, [liveParams, hasStarted]);
 
   // --- Handlers ---
 

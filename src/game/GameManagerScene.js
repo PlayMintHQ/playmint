@@ -1,4 +1,6 @@
 import Phaser from 'phaser';
+
+let sceneBootCount = 0;
 import { DEFAULT_CONFIG } from '../gameConfig';
 import { getTheme } from './themes';
 import GameModeManager from './GameModeManager';
@@ -111,6 +113,8 @@ export default class GameManagerScene extends Phaser.Scene {
   }
 
   init(data) {
+    this._bootId = ++sceneBootCount;
+    console.log(`[BOOT#${this._bootId}] GameManagerScene.init() — data=${JSON.stringify(data)}`);
     this.gameConfig = {
       ...DEFAULT_CONFIG,
       ...(window.__GAME_LIVE_CONFIG || {}),
@@ -158,6 +162,11 @@ export default class GameManagerScene extends Phaser.Scene {
   }
 
   create() {
+    if (this._creating) return;
+    this._creating = true;
+    this._createTime = this.time.now;
+    console.log(`[BOOT#${this._bootId}] GameManagerScene.create() — START`);
+
     // Boots without preloadedImages (share links / presets) have no dyn_* textures
     // at all, and dynamicAssetUrls truthiness routes EVERY texture pick to dyn_*
     // keys — missing textures render as green boxes. Downgrade to built-in theme
@@ -445,6 +454,8 @@ export default class GameManagerScene extends Phaser.Scene {
     }
     
     this.player = this.physics.add.sprite(playerX, this.LOGICAL_FLOOR_Y - playerYOffset, playerTexture, playerFrame);
+    this._playerCreateCount = (this._playerCreateCount || 0) + 1;
+    console.log(`[BOOT#${this._bootId}] Player #${this._playerCreateCount} created at (${playerX}, ${this.LOGICAL_FLOOR_Y - playerYOffset}) texture=${playerTexture}`);
     let scale = this.gameConfig.playerScale || (playerType === 'fox' || playerType === 'yeti' ? 1.8 : 1.5);
     if (this.useDynPlayer) {
       const textureObj = this.textures.get('dyn_player');
@@ -582,11 +593,18 @@ export default class GameManagerScene extends Phaser.Scene {
     }
 
     // Live tuning integration
+    this._bootGraceUntil = this.time.now + 1000;
     this.updateConfigListener = (e) => {
       const newConfig = e.detail;
       const oldConfig = { ...this.gameConfig };
+      
+      console.log(`[BOOT#${this._bootId}] update-game-config received`,
+        `gameType: ${oldConfig.gameType} -> ${newConfig.gameType}`,
+        `isGameOver: ${this.isGameOver}`,
+        `hasPlayer: ${!!this.player}`);
 
       this.gameConfig = { ...this.gameConfig, ...newConfig };
+      if (this.time.now < this._bootGraceUntil) return;
 
       if (newConfig.gameType !== oldConfig.gameType) {
         // Instant Restart for UX Gap
@@ -656,6 +674,8 @@ export default class GameManagerScene extends Phaser.Scene {
     window.dispatchEvent(new CustomEvent('scene-ready-for-capture'));
 
     this.events.on('shutdown', () => {
+      if (this.player) { this.player.destroy(); this.player = null; }
+      if (this.floor) { this.floor.destroy(); this.floor = null; }
       window.removeEventListener('keydown', this.domKeyDown);
       window.removeEventListener('keyup', this.domKeyUp);
       window.removeEventListener('toggle-pause-game', this.togglePauseListener);
@@ -678,6 +698,7 @@ export default class GameManagerScene extends Phaser.Scene {
         this.gameModeManager.cleanup();
       }
     });
+    this._creating = false;
   }
 
   drawBackground(width, height) {
@@ -1036,6 +1057,18 @@ export default class GameManagerScene extends Phaser.Scene {
 
   hitObstacle(player, obstacle) {
     if (this.isGameOver) return;
+    
+    const gameTime = this.time.now;
+    const sceneUptime = gameTime - (this._createTime || 0);
+    console.error(`[BOOT#${this._bootId}] hitObstacle TRIGGERED!`,
+      `sceneUptime=${Math.round(sceneUptime)}ms`,
+      `player: x=${player.x.toFixed(1)} y=${player.y.toFixed(1)}`,
+      `playerBody: w=${player.body.width} h=${player.body.height}`,
+      `playerBounds: top=${player.body.top.toFixed(1)} bottom=${player.body.bottom.toFixed(1)} left=${player.body.left.toFixed(1)} right=${player.body.right.toFixed(1)}`,
+      `obstacle: x=${obstacle.x.toFixed(1)} y=${obstacle.y.toFixed(1)}`,
+      `obstacleBounds: top=${obstacle.body.top.toFixed(1)} bottom=${obstacle.body.bottom.toFixed(1)} left=${obstacle.body.left.toFixed(1)} right=${obstacle.body.right.toFixed(1)}`
+    );
+
     this.isGameOver = true;
 
     this.physics.pause();

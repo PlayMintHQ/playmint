@@ -26,7 +26,11 @@ const config = {
   }
 };
 
+let gameInstanceCount = 0;
+
 const startGame = (parent) => {
+  gameInstanceCount++;
+  console.log(`[PHASER] Creating Phaser.Game instance #${gameInstanceCount}`);
   const game = new Phaser.Game({ ...config, parent });
   game.scene.add('GameManagerScene', GameManagerScene, true);
   window.__PHASER_GAME = game;

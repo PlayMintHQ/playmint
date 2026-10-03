@@ -43,6 +43,7 @@ export default class RunnerMode extends BaseMode {
     const theme = this.scene.activeTheme || {};
     this.scene.player.setGravityY(this.scene.gameConfig.gravity || (theme.gravity || 1800));
     this.scene.playPlayerAnim('run');
+    this._immuneUntil = this.scene.time.now + 2000;
 
     this.obstacles = this.scene.physics.add.group();
 
@@ -56,7 +57,10 @@ export default class RunnerMode extends BaseMode {
     this.armObstacleTimer();
 
     this.scene.physics.add.collider(this.obstacles, this.scene.floor);
-    this.scene.physics.add.collider(this.scene.player, this.obstacles, this.scene.hitObstacle, null, this.scene);
+    this.scene.physics.add.collider(this.scene.player, this.obstacles, (player, obstacle) => {
+      if (this.scene.time.now < this._immuneUntil) return;
+      this.scene.hitObstacle(player, obstacle);
+    }, null, this);
 
     // Coin pickups: spawned in an arc over obstacles (see spawnCoinArc), collected
     // on overlap for score. Same pattern as PlatformerMode's collectibles.
@@ -213,6 +217,11 @@ export default class RunnerMode extends BaseMode {
 
     const scale = Phaser.Math.FloatBetween(this.scene.gameConfig.obstacleScaleMin || 0.8, this.scene.gameConfig.obstacleScaleMax || 1.2);
     const spawnX = this.nextSpawnX();
+    
+    this._spawnCount = (this._spawnCount || 0) + 1;
+    const sceneUptime = this.scene.time.now - (this.scene._createTime || 0);
+    console.log(`[RUNNER] Obstacle #${this._spawnCount} spawned at x=${spawnX.toFixed(1)}, sceneUptime=${Math.round(sceneUptime)}ms, playerX=${this.scene.player?.x?.toFixed(1)}`);
+
     const obstacleTexture = this.scene.gameConfig.dynamicAssetUrls ? 'dyn_obstacle' : (this.scene.activeTheme?.obstacleTexture || 'crate');
 
     // Obtain frame dimensions for proper obstacle scaling normalization
@@ -278,6 +287,7 @@ export default class RunnerMode extends BaseMode {
         this.scene.fx?.pulse(player, 1.16, 0.84, 90);
       }
       this.scene.playPlayerAnim('run');
+    this._immuneUntil = this.scene.time.now + 2000;
       // Tie playback rate to actual speed. The run cycle is authored at one
       // fixed frame rate, so as speedIncrement ramps the feet visibly skate.
       if (player.anims) {

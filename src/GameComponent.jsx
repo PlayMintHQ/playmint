@@ -16,12 +16,15 @@ const GameComponent = ({ isFullscreen }) => {
     }
 
     // Start the game instance once. Live tuning is handled via events.
+    console.log('[GameComponent] MOUNT — calling startGame');
     gameRef.current = startGame(gameContainerRef.current);
 
     return () => {
+      console.log('[GameComponent] UNMOUNT — calling destroy');
       if (gameRef.current) {
         gameRef.current.destroy(true);
         gameRef.current = null;
+        window.__PHASER_GAME = null;
       }
     };
   }, []);
