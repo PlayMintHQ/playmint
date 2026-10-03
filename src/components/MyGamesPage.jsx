@@ -15,10 +15,10 @@ import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../auth/authContext';
 import AccountButton from '../auth/AccountButton';
 import ConfirmDialog from './ConfirmDialog';
-import { IconPlay } from './Icons';
+import { IconPlay, IconGlobe, IconLock } from './Icons';
 import { navigate } from '../router';
 import { encodeShareConfig } from '../game/shareLink';
-import { listMyGames, renameGame, deleteGame } from '../game/savedGames';
+import { listMyGames, renameGame, deleteGame, setGameVisibility } from '../game/savedGames';
 import { THEME_ART_URLS } from '../game/themes';
 
 // games.mode holds the internal gameType; the UI has always called the
@@ -152,7 +152,21 @@ function GameCard({ game, onRename, onDelete }) {
     if (e.key === 'Escape') { e.preventDefault(); commit(false); }
   };
 
-  return (
+    const [toggling, setToggling] = useState(false);
+    
+    const toggleVisibility = async () => {
+      setToggling(true);
+      const isPublic = game.visibility !== 'public';
+      const res = await setGameVisibility(game.id, isPublic);
+      setToggling(false);
+      if (res.ok) {
+        if (onRename) onRename(game.id, game.title, res.visibility);
+      } else {
+        alert(res.error || 'Failed to change visibility');
+      }
+    };
+    
+    return (
     <article className="pm-library__card">
       <button
         type="button"
@@ -166,14 +180,21 @@ function GameCard({ game, onRename, onDelete }) {
             src={game.thumbnail_url}
             alt=""
             loading="lazy"
-            onError={() => setThumbFailed(true)}
+            onError={(e) => {
+              const retries = parseInt(e.target.dataset.retries || '0', 10);
+              if (retries < 3) {
+                e.target.dataset.retries = retries + 1;
+                setTimeout(() => {
+                  const url = new URL(game.thumbnail_url, window.location.origin);
+                  url.searchParams.set('retry', Date.now());
+                  e.target.src = url.toString();
+                }, 1000 * (retries + 1));
+              } else {
+                setThumbFailed(true);
+              }
+            }}
           />
         ) : (
-          // Last resort for a row that has no captured frame yet (saved before
-          // card art was a real screenshot, or its upload never reached the
-          // store). This paints the BUILT-IN WORLD'S OWN backdrop image rather
-          // than a flat gradient: the client was explicit that a colour swatch
-          // is not a thumbnail. The real frame replaces it on the next save.
           <span
             className="pm-library__artFallback"
             style={{ backgroundImage: `url(${THEME_ART_URLS[themeKey || 'default']?.backdrop || THEME_ART_URLS.default.backdrop})` }}
@@ -216,6 +237,19 @@ function GameCard({ game, onRename, onDelete }) {
               {formatDate(game.updated_at || game.created_at) && (
                 <span className="pm-library__date">{formatDate(game.updated_at || game.created_at)}</span>
               )}
+              <button 
+                type="button" 
+                className="pm-library__visibility-toggle" 
+                onClick={toggleVisibility} 
+                disabled={toggling || busy || editing}
+                title={game.visibility === 'public' ? 'Public — Click to make private' : 'Private — Click to make public'}
+              >
+                {game.visibility === 'public' ? (
+                  <><IconGlobe /> <span>Public</span></>
+                ) : (
+                  <><IconLock /> <span>Private</span></>
+                )}
+              </button>
             </p>
           </>
         )}
@@ -276,8 +310,8 @@ export function MyGamesPage() {
     return () => window.removeEventListener('pm-games-changed', onChanged);
   }, [refreshKey]);
 
-  const handleRenamed = (id, title) => {
-    setLoaded((prev) => (prev ? { ...prev, games: prev.games.map((g) => (g.id === id ? { ...g, title } : g)) } : prev));
+  const handleRenamed = (id, title, visibility) => {
+    setLoaded((prev) => (prev ? { ...prev, games: prev.games.map((g) => (g.id === id ? { ...g, title, ...(visibility ? { visibility } : {}) } : g)) } : prev));
   };
 
   const confirmDelete = async () => {

@@ -966,7 +966,7 @@ body.pm-capture .pm-auth-toast { display: none !important; }
 .pm-library__artFallback {
   position: absolute; inset: 0; display: block;
   background-size: cover;
-  background-position: center;
+  background-position: bottom center;
 }
 .pm-library__artFallback::after {
   content: '';
@@ -996,8 +996,34 @@ body.pm-capture .pm-auth-toast { display: none !important; }
   color: #6ee7b7;
 }
 .pm-library__date { font-size: 12px; color: var(--pm-text-tertiary); }
-.pm-library__actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: auto; padding-top: 4px; }
-.pm-library__play { display: inline-flex; align-items: center; gap: 6px; }
+.pm-library__visibility-toggle {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.15); 
+  padding: 4px 10px; margin-left: auto;
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--pm-text-secondary); border-radius: 6px; cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+.pm-library__visibility-toggle:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12); color: var(--pm-text-primary);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+.pm-library__visibility-toggle:disabled { opacity: 0.5; cursor: default; }
+.pm-library__actions { 
+  display: grid; 
+  grid-template-columns: repeat(3, 1fr); 
+  gap: 8px; 
+  margin-top: auto; 
+  padding-top: 4px; 
+}
+.pm-library__actions .pm-btn { 
+  justify-content: center; 
+  padding-left: 4px; 
+  padding-right: 4px; 
+  font-size: 13px; 
+}
+.pm-library__play { display: inline-flex; align-items: center; gap: 4px; }
 .pm-library__rename { display: flex; flex-direction: column; gap: 8px; }
 .pm-library__renameInput { width: 100%; font-size: 14px; }
 .pm-library__renameActions { display: flex; gap: 8px; }
@@ -1023,5 +1049,4 @@ body.pm-capture .pm-auth-toast { display: none !important; }
 
 @media (max-width: 420px) {
   .pm-library__grid { grid-template-columns: 1fr; }
-  .pm-library__actions .pm-btn { flex: 1 1 auto; justify-content: center; }
 }

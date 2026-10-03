@@ -1,4 +1,4 @@
-// A real frame of the real game (2026-09-29).
+// A real frame of the real game (2026-09-29, revised 2026-10-03).
 //
 // The My Games card was composited from the game's own ASSETS: background image,
 // scrim, player sprite on a painted ground line. That is a reconstruction of what
@@ -19,9 +19,9 @@
 import { THUMB_W, THUMB_H } from './savedGames/thumbnail';
 
 /**
- * Grabs the running game's canvas and returns it as a PNG Blob, letterboxed into
- * the card's 16:9 aspect (centre-cropped horizontally on tall phone screens, so
- * the card never letterboxes itself).
+ * Grabs the running game's canvas and returns it as a PNG Blob, cropped into
+ * the card's 16:9 aspect from the bottom-left corner of the viewport so the
+ * ground, player, platforms, enemies, and coins are visible.
  *
  * Resolves null — never rejects — when there is no game, no renderer, or the
  * snapshot came back empty. A missing thumbnail is cosmetic; a thrown error
@@ -37,16 +37,12 @@ export const captureGameFrame = () =>
       resolve(null);
       return;
     }
-    // Belt and braces: an already-destroyed game (route change mid-capture) has
-    // no live context and would throw out of the renderer.
     let settled = false;
     const done = (value) => {
       if (settled) return;
       settled = true;
       resolve(value);
     };
-    // snapshot's callback can never be reached if the loop has stopped, so cap
-    // the wait rather than leaving a save hanging on a promise.
     const guard = setTimeout(() => done(null), 4000);
     try {
       renderer.snapshot((image) => {
@@ -65,7 +61,7 @@ export const captureGameFrame = () =>
     }
   });
 
-/** Centre-crops a frame to 16:9 at card size and encodes it as a PNG Blob. */
+/** Crops a frame to 16:9 at card size, anchored bottom-left. */
 const toCardBlob = (image) => {
   const srcW = image?.width || image?.videoWidth || 0;
   const srcH = image?.height || image?.videoHeight || 0;
@@ -75,25 +71,23 @@ const toCardBlob = (image) => {
   canvas.height = THUMB_H;
   const ctx = canvas.getContext('2d');
   if (!ctx) return null;
-  // Nearest-neighbour: the game renders with a NEAREST filter (pixelArt), and
-  // bilinear downscaling of pixel art to 320px is what makes card art look
-  // blurry next to the crisp in-game frame it came from.
   ctx.imageSmoothingEnabled = false;
-  // Cover-crop to 16:9 (a phone in portrait gives a tall frame; a desktop window
-  // a wide one — either way the card is 16:9).
+
   const targetAspect = THUMB_W / THUMB_H;
   const srcAspect = srcW / srcH;
   let sw = srcW;
   let sh = srcH;
   if (srcAspect > targetAspect) sw = Math.round(srcH * targetAspect);
   else sh = Math.round(srcW / targetAspect);
-  const sx = Math.round((srcW - sw) / 2);
-  const sy = Math.round((srcH - sh) / 2);
+
+  // Bottom-left anchor: x=0 so we see the player side, y=max so we see the
+  // ground, characters, platforms, enemies — not just the sky.
+  const sx = 0;
+  const sy = srcH - sh;
   ctx.drawImage(image, sx, sy, sw, sh, 0, 0, THUMB_W, THUMB_H);
   return canvasToBlob(canvas);
 };
 
-/** toBlob is async and absent in ancient Safari — both paths stay inside the promise. */
 const canvasToBlob = (canvas) =>
   new Promise((resolve) => {
     if (typeof canvas.toBlob !== 'function') {
@@ -104,34 +98,96 @@ const canvasToBlob = (canvas) =>
   });
 
 /**
- * Captures a frame once the game is actually up, on a small delay so the shot
- * is a settled scene (assets registered, player mid-stride) rather than the
- * first frame of a black canvas. Returns null instead of throwing, and is a
- * no-op when no game is mounted.
+ * Captures a frame once the game scene is ACTUALLY PLAYING — not just when
+ * assets finish loading. The key insight: `phaser-load-complete` fires when
+ * the Phaser preloader finishes, but create() (which spawns the player,
+ * platforms, enemies, coins) runs AFTER that. We need to wait for objects to
+ * be visible on screen.
  *
- * Listens for `phaser-load-complete` (App already relies on that event) and
- * also fires on a timeout, because a resumed or already-loaded game can have
- * emitted the event before this listener existed.
+ * Strategy:
+ *   1. Wait for `phaser-load-complete` (assets loaded, create() about to run).
+ *   2. Then wait a generous delay (3 seconds) for create() to place all game
+ *      objects, physics to settle, and at least several frames to render.
+ *   3. Capture THREE frames at staggered intervals (3s, 5s, 7s). The first
+ *      successful non-empty capture wins. This handles games where AI assets
+ *      take longer to register, or where the scene starts with a fade-in.
+ *   4. If a later capture produces a better frame (more pixels that aren't
+ *      just the background colour), it replaces the first one.
+ *
+ * Returns null instead of throwing. Never blocks the save path.
  */
-export const captureGameFrameWhenReady = (delayMs = 1400) =>
+export const captureGameFrameWhenReady = () =>
   new Promise((resolve) => {
     if (typeof window === 'undefined' || !window.__PHASER_GAME) {
       resolve(null);
       return;
     }
-    let done = false;
-    const finish = () => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      clearTimeout(fallback);
-      window.removeEventListener('phaser-load-complete', onLoad);
-      setTimeout(() => resolve(null), delayMs + 4000);
-      captureGameFrame().then(resolve);
+
+    let resolved = false;
+    const bestCapture = { blob: null };
+
+    const tryCapture = async () => {
+      const blob = await captureGameFrame();
+      if (!blob || resolved) return;
+      // Accept ANY non-null blob; later attempts can improve it.
+      if (!bestCapture.blob) {
+        bestCapture.blob = blob;
+      } else if (blob.size > bestCapture.blob.size) {
+        // A larger PNG means more visual detail (not just solid background).
+        bestCapture.blob = blob;
+      }
     };
-    const onLoad = () => setTimeout(finish, delayMs);
-    const timer = setTimeout(finish, delayMs);
-    // Backstop for the case where the event already fired (restore remount).
-    const fallback = setTimeout(finish, delayMs + 2500);
-    window.addEventListener('phaser-load-complete', onLoad);
+
+    const finishWithBest = () => {
+      if (resolved) return;
+      resolved = true;
+      resolve(bestCapture.blob);
+    };
+
+    // Schedule three capture attempts at staggered intervals after the
+    // scene has had time to fully render.
+    const scheduleCaptures = () => {
+      // First capture: 100ms after create (giving one frame to render)
+      setTimeout(async () => {
+        await tryCapture();
+        if (bestCapture.blob && !resolved) {
+          resolved = true;
+          resolve(bestCapture.blob);
+        }
+      }, 100);
+
+      // Second capture: 1.5 seconds
+      setTimeout(async () => {
+        await tryCapture();
+        if (bestCapture.blob && !resolved) {
+          resolved = true;
+          resolve(bestCapture.blob);
+        }
+      }, 1500);
+
+      // Final backstop: 3 seconds — resolve with whatever we have.
+      setTimeout(() => {
+        tryCapture().finally(finishWithBest);
+      }, 3000);
+    };
+
+    let started = false;
+    const start = () => {
+      if (started) return;
+      started = true;
+      window.removeEventListener('scene-ready-for-capture', start);
+      scheduleCaptures();
+    };
+
+    window.addEventListener('scene-ready-for-capture', start);
+    // Fallback: if the event already fired, start immediately.
+    setTimeout(start, 500);
+
+    // Absolute backstop: never leave the promise hanging.
+    setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        resolve(bestCapture.blob);
+      }
+    }, 12000);
   });

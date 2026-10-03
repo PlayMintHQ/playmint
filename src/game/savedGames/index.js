@@ -246,7 +246,18 @@ export const attachThumbnail = async (rowId, blob) => {
   const supabase = await client();
   if (!supabase) return null;
   try {
-    const path = await server.putThumbnail(rowId, blob);
+    // Look up the row's art_id so we upload to the SAME path that saveGame used.
+    // saveGame uses artId (= liveParams.gameId) for `putThumbnail`, which builds
+    // the blob path as `games/${id}/thumbnail.png`. If we pass rowId instead,
+    // the frame lands at a different path and the card never finds it.
+    const { data: row } = await supabase
+      .from('games')
+      .select('art_id')
+      .eq('id', rowId)
+      .maybeSingle();
+    const uploadId = row?.art_id || rowId;
+
+    const path = await server.putThumbnail(uploadId, blob);
     if (!path) {
       warnOnce('no card art was uploaded (no reachable image store — set BLOB_READ_WRITE_TOKEN)');
       return null;
@@ -303,6 +314,24 @@ export const renameGame = async (id, title) => {
     if (error) return fail(error);
     if (!count) return fail('That game is not in your library.');
     return { ok: true, title: clean };
+  } catch (err) {
+    return fail(err);
+  }
+};
+
+export const setGameVisibility = async (id, isPublic) => {
+  const supabase = await client();
+  if (!supabase) return fail('Accounts are not enabled on this deployment.');
+  if (!id) return fail('Missing game id.');
+  const visibility = isPublic ? 'public' : 'private';
+  try {
+    const { error, count } = await supabase
+      .from('games')
+      .update({ visibility }, { count: 'exact' })
+      .eq('id', id);
+    if (error) return fail(error);
+    if (!count) return fail('That game is not in your library.');
+    return { ok: true, visibility };
   } catch (err) {
     return fail(err);
   }

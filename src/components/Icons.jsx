@@ -77,3 +77,17 @@ export const IconPlay = () => (
     <polygon points="6,3 17,10 6,17" fill="currentColor" stroke="none" />
   </svg>
 );
+
+export const IconGlobe = () => (
+  <svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={s}>
+    <circle cx="10" cy="10" r="8" />
+    <path d="M2 10h16 M10 2c-2.76 0-5 3.58-5 8s2.24 8 5 8 5-3.58 5-8-2.24-8-5-8z" />
+  </svg>
+);
+
+export const IconLock = () => (
+  <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={s}>
+    <rect x="5" y="9" width="10" height="9" rx="2" ry="2" />
+    <path d="M7 9V6a3 3 0 0 1 6 0v3" />
+  </svg>
+);

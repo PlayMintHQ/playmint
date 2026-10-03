@@ -652,6 +652,9 @@ export default class GameManagerScene extends Phaser.Scene {
     };
     window.addEventListener('pm-control-zones', this.controlZonesListener);
 
+    // Let the frame capturer know that the scene is fully created and ready for a snapshot
+    window.dispatchEvent(new CustomEvent('scene-ready-for-capture'));
+
     this.events.on('shutdown', () => {
       window.removeEventListener('keydown', this.domKeyDown);
       window.removeEventListener('keyup', this.domKeyUp);
