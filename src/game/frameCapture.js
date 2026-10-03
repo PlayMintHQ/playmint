@@ -48,7 +48,7 @@ export const captureGameFrame = () =>
       renderer.snapshot((image) => {
         clearTimeout(guard);
         try {
-          done(toCardBlob(image));
+          done(toCardBlob(image, game));
         } catch (err) {
           console.warn('[frameCapture] snapshot returned an unusable image:', err);
           done(null);
@@ -61,8 +61,8 @@ export const captureGameFrame = () =>
     }
   });
 
-/** Crops a frame to 16:9 at card size, anchored bottom-left. */
-const toCardBlob = (image) => {
+/** Crops a frame to 16:9 at card size, smartly tracking the player. */
+const toCardBlob = (image, game) => {
   const srcW = image?.width || image?.videoWidth || 0;
   const srcH = image?.height || image?.videoHeight || 0;
   if (!srcW || !srcH) return null;
@@ -80,10 +80,35 @@ const toCardBlob = (image) => {
   if (srcAspect > targetAspect) sw = Math.round(srcH * targetAspect);
   else sh = Math.round(srcW / targetAspect);
 
-  // Bottom-left anchor: x=0 so we see the player side, y=max so we see the
-  // ground, characters, platforms, enemies — not just the sky.
-  const sx = 0;
-  const sy = srcH - sh;
+  // Default to center crop
+  let px = srcW / 2;
+  let py = srcH / 2;
+
+  // Try to find the player on screen to focus the crop exactly on them
+  if (game) {
+    const scene = game.scene.getScene('GameManagerScene');
+    if (scene && scene.player && scene.cameras.main) {
+      const cam = scene.cameras.main;
+      const vw = cam.worldView.width;
+      const vh = cam.worldView.height;
+      if (vw > 0 && vh > 0) {
+        // Calculate the player's percentage across the camera viewport
+        const pctX = (scene.player.x - cam.worldView.x) / vw;
+        const pctY = (scene.player.y - cam.worldView.y) / vh;
+        px = pctX * srcW;
+        py = pctY * srcH;
+      }
+    }
+  }
+
+  // Center the crop window around the player's coordinates
+  let sx = Math.round(px - sw / 2);
+  let sy = Math.round(py - sh / 2);
+
+  // Clamp strictly to the image bounds so we never draw out of bounds
+  sx = Math.max(0, Math.min(sx, srcW - sw));
+  sy = Math.max(0, Math.min(sy, srcH - sh));
+
   ctx.drawImage(image, sx, sy, sw, sh, 0, 0, THUMB_W, THUMB_H);
   return canvasToBlob(canvas);
 };
