@@ -472,6 +472,7 @@ function App() {
   // Sync live params to Phaser via global + CustomEvent
   if (typeof window !== 'undefined') {
     window.__GAME_LIVE_CONFIG = liveParams;
+    window.__GAME_IS_TRANSITIONING = isTransitioning;
   }
 
   // (Removed 2026-08-20) An effect here used to mirror the --pm-safe-area-*
@@ -1257,6 +1258,8 @@ function App() {
           onCompleteTransition={() => {
             setHasStarted(true);
             setIsTransitioning(false);
+            window.__GAME_IS_TRANSITIONING = false;
+            window.dispatchEvent(new CustomEvent('transition-complete'));
           }}
           isTransitioning={isTransitioning}
         />

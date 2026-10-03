@@ -43,7 +43,6 @@ export default class RunnerMode extends BaseMode {
     const theme = this.scene.activeTheme || {};
     this.scene.player.setGravityY(this.scene.gameConfig.gravity || (theme.gravity || 1800));
     this.scene.playPlayerAnim('run');
-    this._immuneUntil = this.scene.time.now + 2000;
 
     this.obstacles = this.scene.physics.add.group();
 
@@ -57,8 +56,13 @@ export default class RunnerMode extends BaseMode {
     this.armObstacleTimer();
 
     this.scene.physics.add.collider(this.obstacles, this.scene.floor);
+    this._collisionsEnabled = !window.__GAME_IS_TRANSITIONING;
+    if (!this._collisionsEnabled) {
+      this._transitionListener = () => { this._collisionsEnabled = true; };
+      window.addEventListener('transition-complete', this._transitionListener);
+    }
     this.scene.physics.add.collider(this.scene.player, this.obstacles, (player, obstacle) => {
-      if (this.scene.time.now < this._immuneUntil) return;
+      if (!this._collisionsEnabled) return;
       this.scene.hitObstacle(player, obstacle);
     }, null, this);
 
@@ -287,7 +291,6 @@ export default class RunnerMode extends BaseMode {
         this.scene.fx?.pulse(player, 1.16, 0.84, 90);
       }
       this.scene.playPlayerAnim('run');
-    this._immuneUntil = this.scene.time.now + 2000;
       // Tie playback rate to actual speed. The run cycle is authored at one
       // fixed frame rate, so as speedIncrement ramps the feet visibly skate.
       if (player.anims) {
@@ -409,6 +412,10 @@ export default class RunnerMode extends BaseMode {
   cleanup() {
     if (this.obstacleTimer) {
       this.obstacleTimer.remove();
+    if (this._transitionListener) {
+      window.removeEventListener('transition-complete', this._transitionListener);
+      this._transitionListener = null;
+    }
     }
     if (this.resizeTimeout) {
       clearTimeout(this.resizeTimeout);
