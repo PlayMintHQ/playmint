@@ -673,7 +673,9 @@ export default class GameManagerScene extends Phaser.Scene {
     // Let the frame capturer know that the scene is fully created and ready for a snapshot
     window.dispatchEvent(new CustomEvent('scene-ready-for-capture'));
 
-    this.events.on('shutdown', () => {
+    const cleanupScene = () => {
+      if (this._cleanedUp) return;
+      this._cleanedUp = true;
       if (this.player) { this.player.destroy(); this.player = null; }
       if (this.floor) { this.floor.destroy(); this.floor = null; }
       window.removeEventListener('keydown', this.domKeyDown);
@@ -697,7 +699,9 @@ export default class GameManagerScene extends Phaser.Scene {
       if (this.gameModeManager) {
         this.gameModeManager.cleanup();
       }
-    });
+    };
+    this.events.on('shutdown', cleanupScene);
+    this.events.on('destroy', cleanupScene);
     this._creating = false;
   }
 
@@ -1061,13 +1065,19 @@ export default class GameManagerScene extends Phaser.Scene {
     const gameTime = this.time.now;
     const sceneUptime = gameTime - (this._createTime || 0);
     console.error(`[BOOT#${this._bootId}] hitObstacle TRIGGERED!`,
-      `sceneUptime=${Math.round(sceneUptime)}ms`,
-      `player: x=${player.x.toFixed(1)} y=${player.y.toFixed(1)}`,
-      `playerBody: w=${player.body.width} h=${player.body.height}`,
-      `playerBounds: top=${player.body.top.toFixed(1)} bottom=${player.body.bottom.toFixed(1)} left=${player.body.left.toFixed(1)} right=${player.body.right.toFixed(1)}`,
-      `obstacle: x=${obstacle.x.toFixed(1)} y=${obstacle.y.toFixed(1)}`,
-      `obstacleBounds: top=${obstacle.body.top.toFixed(1)} bottom=${obstacle.body.bottom.toFixed(1)} left=${obstacle.body.left.toFixed(1)} right=${obstacle.body.right.toFixed(1)}`
+      `player: x=${player?.x?.toFixed(1)} y=${player?.y?.toFixed(1)}`,
+      `playerBody: w=${player?.body?.width} h=${player?.body?.height}`,
+      `playerBounds: top=${player?.body?.top?.toFixed(1)} bottom=${player?.body?.bottom?.toFixed(1)} left=${player?.body?.left?.toFixed(1)} right=${player?.body?.right?.toFixed(1)}`,
+      `obstacle: x=${obstacle?.x?.toFixed(1)} y=${obstacle?.y?.toFixed(1)}`,
+      `obstacleBounds: top=${obstacle?.body?.top?.toFixed(1)} bottom=${obstacle?.body?.bottom?.toFixed(1)} left=${obstacle?.body?.left?.toFixed(1)} right=${obstacle?.body?.right?.toFixed(1)}`
     );
+      ,
+      ,
+      ,
+      ,
+      
+    );
+      `sceneUptime=${Math.round(sceneUptime)}ms`,
 
     this.isGameOver = true;
 

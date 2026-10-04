@@ -354,7 +354,10 @@ export const SLOT_SPECS = {
       // Fallback for an ignored 8:1 request (API default serve is ~1:1): a 5×2
       // grid on a square-ish canvas (cells 128×192 — tall cells are fine,
       // slicing re-centers and the union-crop normalizes).
-      { cols: 5, rows: 2, canvas: { width: 640, height: 384 } }
+      { cols: 5, rows: 2, canvas: { width: 640, height: 384 } },
+      { cols: 8, rows: 2, canvas: { width: 1024, height: 256 } },
+      { cols: 6, rows: 2, canvas: { width: 768, height: 256 } },
+      { cols: 4, rows: 3, canvas: { width: 512, height: 384 } }
     ],
     fallbackSlot: 'player',
     subjectKey: 'player',

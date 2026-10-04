@@ -1274,10 +1274,27 @@ function pickSheetLayout(img, spec) {
   const layouts = spec.sheetLayouts;
   if (!layouts?.length) return { cols: spec.frames.cols, rows: spec.frames.rows, canvas: spec.canvas };
   let best = null;
-  for (const layout of layouts) {
+  const dynLayouts = [...layouts];
+  if (spec.frames && spec.frames.usedCells) {
+    for (let r = 1; r <= 5; r++) {
+      for (let c = 1; c <= 16; c++) {
+        if (r * c >= spec.frames.usedCells && r * c <= 24) {
+          if (!layouts.some(l => l.cols === c && l.rows === r)) {
+            dynLayouts.push({ cols: c, rows: r, canvas: { width: c * 128, height: r * 128 } });
+          }
+        }
+      }
+    }
+  }
+  for (const layout of dynLayouts) {
     const canvas = drawToCanvas(img, { ...layout.canvas, fit: spec.post.fit });
     const { cutScore } = detectGridCuts(canvas, layout);
-    if (!best || cutScore < best.cutScore - 1e-6) best = { ...layout, cutScore };
+    // Tiebreaker: favor layouts that match the original image aspect ratio
+    const imageAspect = img.width / img.height;
+    const layoutAspect = layout.cols / layout.rows;
+    const aspectPenalty = Math.abs(imageAspect - layoutAspect) * 10;
+    const finalScore = cutScore + aspectPenalty;
+    if (!best || finalScore < best.cutScore - 1e-6) best = { ...layout, cutScore: finalScore };
   }
   return best;
 }

@@ -518,7 +518,7 @@ export default class PlatformerMode extends BaseMode {
 
   handlePlayerEnemyCollision(player, enemy) {
     if (enemy._dying) return;
-    this.scene.hitObstacle();
+    this.scene.hitObstacle(player, enemy);
   }
 
   onConfigUpdate(newConfig, oldConfig) {
