@@ -1069,15 +1069,9 @@ export default class GameManagerScene extends Phaser.Scene {
       `playerBody: w=${player?.body?.width} h=${player?.body?.height}`,
       `playerBounds: top=${player?.body?.top?.toFixed(1)} bottom=${player?.body?.bottom?.toFixed(1)} left=${player?.body?.left?.toFixed(1)} right=${player?.body?.right?.toFixed(1)}`,
       `obstacle: x=${obstacle?.x?.toFixed(1)} y=${obstacle?.y?.toFixed(1)}`,
-      `obstacleBounds: top=${obstacle?.body?.top?.toFixed(1)} bottom=${obstacle?.body?.bottom?.toFixed(1)} left=${obstacle?.body?.left?.toFixed(1)} right=${obstacle?.body?.right?.toFixed(1)}`
+      `obstacleBounds: top=${obstacle?.body?.top?.toFixed(1)} bottom=${obstacle?.body?.bottom?.toFixed(1)} left=${obstacle?.body?.left?.toFixed(1)} right=${obstacle?.body?.right?.toFixed(1)}`,
+      `sceneUptime=${Math.round(sceneUptime)}ms`
     );
-      ,
-      ,
-      ,
-      ,
-      
-    );
-      `sceneUptime=${Math.round(sceneUptime)}ms`,
 
     this.isGameOver = true;
 
