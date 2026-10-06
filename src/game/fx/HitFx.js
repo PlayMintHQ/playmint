@@ -205,7 +205,6 @@ export default class HitFx {
    * (PlatformerMode.damageEnemy) keeps control of it.
    */
   enemyHit(enemy, impactX, impactY) {
-    this.pulse(enemy, 1.25, 0.8, 70);
     this.shake(0.0025, 70);
     this.burst(impactX ?? enemy.x, impactY ?? enemy.y, {
       color: 0xffdd55, count: 6, speed: 150, lifespan: 300, scale: 0.8

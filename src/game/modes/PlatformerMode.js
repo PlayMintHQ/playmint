@@ -486,7 +486,7 @@ export default class PlatformerMode extends BaseMode {
       // their own arcade body — a real emitter is cheaper and reads better.
       this.scene.fx?.enemyKilled(enemy, 100);
       this.scene.fx?.hitstop(60);
-      if (enemy.scene) this.enemies.remove(enemy, true, true);
+      if (enemy.scene) enemy.destroy();
 
       this.awardScore(100);
     } else {
