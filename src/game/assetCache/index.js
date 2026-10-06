@@ -19,7 +19,7 @@ import * as server from './serverBackend.js';
 import { matchCachedGame, localMatch } from './matcher.js';
 import { mark as timeMark, annotate as timeAnnotate } from '../metrics.js';
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 // Redraw economics for the matcher's partial-reuse verdicts (tryMatchedReuse).
 // Weights ≈ image calls the individual redraw path spends per slot: a player

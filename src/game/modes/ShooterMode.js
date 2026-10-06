@@ -462,18 +462,7 @@ export default class ShooterMode extends BaseMode {
 
       scene.fx?.enemyKilled(enemy, 100);
       scene.fx?.hitstop(60);
-
-      scene.tweens.add({
-        targets: enemy,
-        alpha: 0,
-        scaleX: 0,
-        scaleY: 0,
-        duration: 200,
-        ease: 'Power2',
-        onComplete: () => {
-          if (enemy.scene) this.enemies.remove(enemy, true, true);
-        }
-      });
+      if (enemy.scene) this.enemies.remove(enemy, true, true);
 
       this.awardScore(100);
     } else {

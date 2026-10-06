@@ -556,6 +556,8 @@ function App() {
     setLiveParams(withRunId(customConfig));
     setHasStarted(true);
     setIsPromptOpen(false);
+    setIsGameOver(false);
+    setGameOverData(null);
   };
 
   const handleOverlayGenerate = (key, customConfig) => {
@@ -563,6 +565,8 @@ function App() {
     setGameKey(k => k + 1);
     setLiveParams(withRunId(customConfig));
     setIsPromptOpen(false);
+    setIsGameOver(false);
+    setGameOverData(null);
   };
 
   const handleReopenPrompt = () => {
@@ -1063,6 +1067,8 @@ function App() {
       setGameKey(k => k + 1);
       setPresetKey('custom');
       setLiveParams(withRunId({ ...gen.config, preloadedImages: gen.preloadedImages, assetMeta: gen.assetMeta }));
+      setIsGameOver(false);
+      setGameOverData(null);
     } catch (err) {
       console.error('[App.jsx] Prompt generation failed:', err);
       metrics.cancelRun(); // no boot follows a failed regeneration
