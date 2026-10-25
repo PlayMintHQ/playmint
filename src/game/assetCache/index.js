@@ -16,7 +16,7 @@ import { resetUsageTally, getUsageTally } from '../assetPipeline/providers/gemin
 import { loadImage } from '../assetPipeline/postprocess.js';
 import * as backend from './idbBackend.js';
 import * as server from './serverBackend.js';
-import { matchCachedGame, localMatch } from './matcher.js';
+import { matchCachedGame, localMatch, validateSemanticMatch } from './matcher.js';
 import { mark as timeMark, annotate as timeAnnotate } from '../metrics.js';
 
 const SCHEMA_VERSION = 2;
@@ -300,6 +300,16 @@ async function tryMatchedReuse({ config, userPrompt, promptKey, onProgress, canc
   // Cache-only never spends: reuse the whole set as-is even when the matcher
   // suggested redraws.
   let slots = cacheOnly ? [] : (verdict.replaceSlots || []);
+
+  const matchedCandidate = candidates.find((c) => c.id === verdict.matchId);
+  const validation = validateSemanticMatch({ userPrompt, candidate: matchedCandidate, replaceSlots: slots });
+  if (!validation.valid) {
+    const matchRejected = validation.reason;
+    timeAnnotate({ matchRejected, rejectedReplaceSlots: slots.length });
+    onProgress?.(`[CACHE] Best cached match rejected (${matchRejected}) — generating a fresh set.`, null);
+    return null;
+  }
+
   // Cost-aware acceptance (2026-08-28, replacing the flat >3-slot cap that sent
   // world-fitting matches to a ~$0.49 fresh run): weigh the redraw in image
   // calls and accept while it stays well under a fresh set. Two rejections

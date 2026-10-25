@@ -6,7 +6,7 @@
  * retrying and downgrading the run to built-in static theme art.
  */
 import { GoogleGenAI } from '@google/genai';
-import { GEMINI_IMAGE_FALLBACK_MODEL, GEMINI_TEXT_MODEL } from '../slotSpecs';
+import { GEMINI_IMAGE_FALLBACK_MODEL, GEMINI_TEXT_MODEL } from '../slotSpecs.js';
 
 export class ProviderError extends Error {
   /** @param {'no-key'|'auth'|'invalid-request'|'quota'|'safety'|'no-image'|'network'|'timeout'} kind */
@@ -22,11 +22,26 @@ export function getGeminiKey() {
   return (import.meta.env.VITE_GEMINI_API_KEY || localStorage.getItem('GEMINI_API_KEY') || '').trim();
 }
 
+let serverGenerateAvailable = null;
+
+async function getAuthHeader() {
+  try {
+    const { getSupabase } = await import('../../../auth/supabaseClient.js');
+    const supabase = await getSupabase();
+    if (!supabase) return {};
+    const { data } = await supabase.auth.getSession();
+    const token = data?.session?.access_token;
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  } catch {
+    return {};
+  }
+}
+
 export function isGeminiConfigured() {
-  // Gemini is the only image provider — configured simply means a key is present
-  // (env or entered via the UI). Without one, generation downgrades to the
-  // built-in static theme asset set.
-  return !!getGeminiKey();
+  // Configured if a local key is present OR if the server-side generation proxy is available
+  if (getGeminiKey()) return true;
+  if (typeof window !== 'undefined' && serverGenerateAvailable !== false) return true;
+  return false;
 }
 
 let cachedClient = null;
@@ -47,10 +62,10 @@ function toProviderError(err) {
   if (err instanceof ProviderError) return err;
   const status = err?.status ?? err?.code;
   const message = err?.message || String(err);
-  if (status === 429) {
+  if (status === 429 || status === 402 || /credits are depleted|resource_exhausted/i.test(message)) {
     const delayMatch = message.match(/retry.{0,10}?(\d+(?:\.\d+)?)\s*s/i);
     const retryDelayMs = delayMatch ? Math.ceil(parseFloat(delayMatch[1]) * 1000) : null;
-    return new ProviderError(`Gemini quota exceeded: ${message}`, 'quota', retryDelayMs);
+    return new ProviderError(`Gemini quota/billing exhausted: ${message}`, 'quota', retryDelayMs);
   }
   if (status === 401 || status === 403) {
     return new ProviderError(`Gemini rejected the request: ${message}`, 'auth');
@@ -119,6 +134,7 @@ const MODEL_PRICES = {
   'gemini-3.1-flash-lite-image': 30,
   'gemini-3.1-flash-image': 60,
   'gemini-3-pro-image': 120,
+  'gemini-nano-banana-2.1': 60,
   'gemini-2.5-flash-image': 30
 };
 const DEFAULT_IMAGE_PRICE = 60;
@@ -247,7 +263,6 @@ export async function generateImage({
   imageSize = null,
   label = null
 }) {
-  const ai = getClient();
   const t0 = performance.now(); // wall time per call (incl. retries + decode probe)
 
   const refs = referenceImageDataUrls || (referenceImageDataUrl ? [referenceImageDataUrl] : []);
@@ -266,6 +281,57 @@ export async function generateImage({
 
   const requested = model || GEMINI_IMAGE_FALLBACK_MODEL;
   let activeModel = unavailableImageModels.has(requested) ? GEMINI_IMAGE_FALLBACK_MODEL : requested;
+
+  // 1. Server-Side Protected Gateway (Production & Preview)
+  if (typeof window !== 'undefined' && serverGenerateAvailable !== false && !localStorage.getItem('GEMINI_API_KEY')) {
+    try {
+      const authHeaders = await getAuthHeader();
+      const serverRes = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({
+          action: 'image',
+          prompt,
+          aspectRatio,
+          referenceImageDataUrls: refs,
+          model: activeModel,
+          imageSize,
+          label
+        })
+      });
+      if (serverRes.status === 404) {
+        serverGenerateAvailable = false; // Plain Vite dev server without /api
+      } else if (!serverRes.ok) {
+        const errJson = await serverRes.json().catch(() => ({}));
+        if (serverRes.status === 429) {
+          throw new ProviderError(errJson.error || 'Generation rate limit reached', 'quota');
+        }
+        if (serverRes.status === 402) {
+          throw new ProviderError(errJson.error || 'Gemini billing credits depleted', 'quota');
+        }
+        throw toProviderError(errJson.error ? new Error(errJson.error) : new Error(`Server error ${serverRes.status}`));
+      } else {
+        serverGenerateAvailable = true;
+        const resData = await serverRes.json();
+        const dataUrl = resData.dataUrl;
+        let served = null;
+        try { served = await imageDims(dataUrl); } catch { /* dimension probe is optional */ }
+        recordUsage('image', resData.model || activeModel, resData.usage, {
+          label,
+          requestedSize: imageSize || null,
+          served,
+          elapsedMs: Math.round(performance.now() - t0)
+        });
+        return { dataUrl, provider: 'gemini', model: resData.model || activeModel, width: served?.w, height: served?.h };
+      }
+    } catch (err) {
+      if (err instanceof ProviderError) throw err;
+      if (!getGeminiKey()) throw toProviderError(err);
+    }
+  }
+
+  // 2. Client-Side SDK Fallback
+  const ai = getClient();
 
   let response;
   // Generic last-resort for a 400 the specific detectors don't recognize: drop the
@@ -364,8 +430,48 @@ export async function generateImage({
  * inlineData part. Any failure surfaces as a ProviderError so callers can fall back.
  */
 export async function generateJson({ prompt, responseSchema, imageDataUrl = null, timeoutMs = 12000, label = null }) {
-  const ai = getClient();
   const t0 = performance.now();
+
+  // 1. Server-Side Protected Gateway (when not uploading inline image and in browser)
+  if (typeof window !== 'undefined' && serverGenerateAvailable !== false && !localStorage.getItem('GEMINI_API_KEY') && !imageDataUrl) {
+    try {
+      const authHeaders = await getAuthHeader();
+      const serverRes = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({
+          action: 'json',
+          prompt,
+          responseSchema,
+          model: GEMINI_TEXT_MODEL,
+          label
+        })
+      });
+      if (serverRes.status === 404) {
+        serverGenerateAvailable = false;
+      } else if (!serverRes.ok) {
+        const errJson = await serverRes.json().catch(() => ({}));
+        if (serverRes.status === 429) {
+          throw new ProviderError(errJson.error || 'Generation rate limit reached', 'quota');
+        }
+        if (serverRes.status === 402) {
+          throw new ProviderError(errJson.error || 'Gemini billing credits depleted', 'quota');
+        }
+        throw toProviderError(errJson.error ? new Error(errJson.error) : new Error(`Server error ${serverRes.status}`));
+      } else {
+        serverGenerateAvailable = true;
+        const resData = await serverRes.json();
+        recordUsage('vision', resData.model || GEMINI_TEXT_MODEL, resData.usage, { label, elapsedMs: Math.round(performance.now() - t0) });
+        return resData.data;
+      }
+    } catch (err) {
+      if (err instanceof ProviderError) throw err;
+      if (!getGeminiKey()) throw toProviderError(err);
+    }
+  }
+
+  // 2. Client-Side SDK Fallback
+  const ai = getClient();
 
   let contents = prompt;
   if (imageDataUrl) {
@@ -430,3 +536,50 @@ export async function generateJson({ prompt, responseSchema, imageDataUrl = null
     throw new ProviderError('Gemini structured call returned unparseable JSON.', 'no-image');
   }
 }
+
+/**
+ * Diagnostic preflight check callable from the browser console or health checks.
+ */
+export async function checkGeminiConnection() {
+  const t0 = performance.now();
+  const key = getGeminiKey();
+  if (!key) {
+    return { ok: false, kind: 'no-key', message: 'No Gemini API key configured.' };
+  }
+  try {
+    const res = await generateJson({
+      prompt: 'Respond with JSON: {"status": "ok"}',
+      responseSchema: { type: 'OBJECT', properties: { status: { type: 'STRING' } }, required: ['status'] },
+      timeoutMs: 10000,
+      label: 'diagnostic-check'
+    });
+    return {
+      ok: res?.status === 'ok',
+      latencyMs: Math.round(performance.now() - t0),
+      model: GEMINI_TEXT_MODEL,
+      keyMasked: key.length > 8 ? `${key.slice(0, 4)}...${key.slice(-4)}` : '****'
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      kind: err?.kind || 'unknown',
+      message: err?.message || String(err),
+      latencyMs: Math.round(performance.now() - t0)
+    };
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.__PM_GEMINI_CHECK = async () => {
+    console.log('%c[PlayMint] Running Gemini API Diagnostic Check...', 'color: #00E599; font-weight: bold;');
+    const result = await checkGeminiConnection();
+    console.table([result]);
+    if (result.ok) {
+      console.log('%c[PlayMint] Gemini connection OK!', 'color: #00E599; font-weight: bold;');
+    } else {
+      console.warn(`%c[PlayMint] Gemini diagnostic failed: [${result.kind}] ${result.message}`, 'color: #FF5555; font-weight: bold;');
+    }
+    return result;
+  };
+}
+

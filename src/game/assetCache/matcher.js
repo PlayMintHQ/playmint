@@ -27,8 +27,62 @@ const sameView = (c, view) => (c.assetMeta?.view || 'side') === view;
 // Prompt-generated configs carry themeKey since 2026-09-22 (geminiService
 // stamps it); the parsePromptKeywords fallback covers legacy cache entries
 // saved before that.
-const candidateTheme = (c) =>
-  c.config?.themeKey || parsePromptKeywords(c.sourcePrompt || '').themeKey || null;
+export const candidateTheme = (c) =>
+  c?.config?.themeKey || parsePromptKeywords(c?.sourcePrompt || '').themeKey || null;
+
+const STOP_WORDS = new Set([
+  'the', 'and', 'with', 'for', 'from', 'into', 'that', 'this', 'have',
+  'game', 'runner', 'platformer', 'quest', 'shooter', 'arena', 'play', 'make',
+  'mode', 'level', 'style', 'like', 'inspired', 'action', 'adventure'
+]);
+
+export function tokenizePrompt(text) {
+  if (typeof text !== 'string') return [];
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .map(norm)
+    .filter((w) => w && w.length > 2 && !STOP_WORDS.has(w));
+}
+
+export function validateSemanticMatch({ userPrompt = '', candidate, replaceSlots = [] }) {
+  if (!candidate) return { valid: false, reason: 'candidate-not-found' };
+
+  // 1. Strict Theme Conflict Barrier:
+  // Both have known themes and they differ -> strict rejection.
+  const promptTheme = parsePromptKeywords(userPrompt).themeKey;
+  const candTheme = candidateTheme(candidate);
+  if (promptTheme && candTheme && promptTheme !== candTheme) {
+    return { valid: false, reason: 'world-theme-mismatch' };
+  }
+
+  // 2. Semantic Overlap Floor:
+  // When either prompt or candidate is a custom/non-standard theme, require
+  // semantic token overlap between the prompt and the candidate's metadata.
+  if (!promptTheme || !candTheme) {
+    const promptTokens = tokenizePrompt(userPrompt);
+    const candidateTokens = new Set([
+      ...tokenizePrompt(candidate.sourcePrompt || ''),
+      ...(candidate.assetMeta?.tags || []).flatMap(tokenizePrompt),
+      ...tokenizePrompt(candidate.config?.gameName || ''),
+      ...Object.values(entityMap(candidate)).flatMap(tokenizePrompt)
+    ]);
+    const matches = promptTokens.filter((t) => candidateTokens.has(t));
+    if (promptTokens.length > 0 && matches.length === 0) {
+      return { valid: false, reason: 'custom-world-low-overlap' };
+    }
+  }
+
+  // 3. World slot clash barrier:
+  const WORLD_SLOTS = ['background_far', 'background_mid', 'background_near', 'floor'];
+  const worldClashes = replaceSlots.filter((s) => WORLD_SLOTS.includes(s)).length;
+  if (worldClashes >= 2) {
+    return { valid: false, reason: 'world-clash' };
+  }
+
+  return { valid: true };
+}
 
 const entityMap = (c) => Object.fromEntries(
   Object.entries(c.assetMeta?.slots || {})
@@ -58,8 +112,8 @@ const MATCH_SCHEMA = {
   required: ['matchId', 'replaceSlots', 'reason']
 };
 
-const buildMatchPrompt = (userPrompt, payload) => (
-  `A player asked for a new 2D game: "${userPrompt}".\n\n` +
+const buildMatchPrompt = (userPrompt, payload, userTheme = null) => (
+  `A player asked for a new 2D game: "${userPrompt}"${userTheme ? ` (detected world theme: "${userTheme}")` : ''}.\n\n` +
   `Previously generated art sets (id, sourcePrompt, name, theme, tags, entities per slot):\n` +
   `${JSON.stringify(payload)}\n\n` +
   `Decide whether ONE of these sets visually fits the new request well enough to reuse its images.\n` +
@@ -80,6 +134,7 @@ const buildMatchPrompt = (userPrompt, payload) => (
 export async function matchCachedGame({ userPrompt, candidates, view = 'side' }) {
   candidates = candidates.filter((c) => sameView(c, view));
   if (!candidates.length) return null;
+  const userTheme = parsePromptKeywords(userPrompt || '').themeKey;
   const payload = candidates.map((c) => ({
     id: c.id,
     sourcePrompt: c.sourcePrompt || '',
@@ -90,7 +145,7 @@ export async function matchCachedGame({ userPrompt, candidates, view = 'side' })
     entities: entityMap(c)
   }));
   const result = await generateJson({
-    prompt: buildMatchPrompt(userPrompt, payload),
+    prompt: buildMatchPrompt(userPrompt, payload, userTheme),
     responseSchema: MATCH_SCHEMA,
     timeoutMs: 12000,
     label: 'cache-match'

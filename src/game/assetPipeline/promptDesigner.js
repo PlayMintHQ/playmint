@@ -6,8 +6,8 @@
  * descriptors plus a style guide; the slot scaffolds in slotSpecs.js append the
  * non-negotiable constraints (white background, facing right, tileability, framing).
  */
-import { SLOT_SPECS, BASELINE_SLOTS, BG_CLAUSE, GAPS_CLAUSE, PROPS_GRID_SPEC } from './slotSpecs';
-import { isGeminiConfigured, generateJson } from './providers/geminiImage';
+import { SLOT_SPECS, BASELINE_SLOTS, BG_CLAUSE, GAPS_CLAUSE, PROPS_GRID_SPEC } from './slotSpecs.js';
+import { isGeminiConfigured, generateJson } from './providers/geminiImage.js';
 
 /**
  * Theme subject tables — the local fallback recipe.

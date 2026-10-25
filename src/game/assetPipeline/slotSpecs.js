@@ -14,7 +14,7 @@
 export const GEMINI_SLOT_MODEL = 'gemini-3.1-flash-lite-image'; // static scenery/props — cheaper than legacy 2.5
 export const GEMINI_SHEET_MODEL = 'gemini-3.1-flash-image';     // player + sheet + per-frame: the consistency workhorse
 export const GEMINI_PRO_SHEET_MODEL = 'gemini-3-pro-image';     // ONE rescue attempt on sheet failure — QUALITY MODE (PM_QUALITY_MODE='1') only
-export const GEMINI_IMAGE_FALLBACK_MODEL = 'gemini-2.5-flash-image';
+export const GEMINI_IMAGE_FALLBACK_MODEL = 'gemini-3.1-flash-image';
 // Rolling alias on purpose: fixed text-model IDs get sunset for new projects
 // (gemini-2.5-flash 404s with "no longer available to new users")
 export const GEMINI_TEXT_MODEL = 'gemini-flash-latest';
@@ -139,7 +139,7 @@ export const SLOT_SPECS = {
     // (the "blocky background" complaint). If the model rejects/drops the size
     // field the smaller serve just gets a smooth upscale — no worse than before.
     canvas: { width: 2048, height: 1024 },
-    gen: { aspectRatio: '16:9', model: GEMINI_SLOT_MODEL, imageSize: '2K' },
+    gen: { aspectRatio: '16:9', model: GEMINI_SLOT_MODEL },
     post: { fit: 'cover', keying: null, trimBorder: false, crop: false },
     scaffold: (subject, style) =>
       `Paint a wide side-scrolling video game background: ${subject}. Distant landscape ` +
@@ -280,7 +280,7 @@ export const SLOT_SPECS = {
     // stays the expensive consistency task; this static base is its identity
     // reference, so if animation quality drops, restore with
     // localStorage PM_MODEL_PLAYER='gemini-3.1-flash-image'.
-    gen: { aspectRatio: '1:1', model: GEMINI_SLOT_MODEL, imageSize: '0.5K' },
+    gen: { aspectRatio: '1:1', model: GEMINI_SLOT_MODEL },
     post: { fit: 'stretch', keying: 'flood', trimBorder: false, crop: true, outline: true, pocketClean: true },
     qa: { facing: true },
     // Front-loaded pose language ("mid-run stride") avoids stiff standing poses;

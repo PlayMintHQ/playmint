@@ -49,15 +49,17 @@ const now = () => performance.now();
 const TIER_SCENARIOS = {
   fresh: 'fresh',
   exact: 'exact',
-  reuse: 'cache-assisted',
-  'reuse-partial': 'cache-assisted',
+  reuse: 'matched-reuse',
+  'reuse-partial': 'partial',
+  'cache-assisted': 'partial',
   restored: 'share-link',
   restyle: 'restyle'
 };
 
 export const SCENARIO_LABELS = {
   fresh: 'Fresh generation (new prompt)',
-  'cache-assisted': 'Cache-assisted generation',
+  partial: 'Partial redraw (cache-assisted)',
+  'matched-reuse': 'Matched reuse (whole set)',
   exact: 'Exact cache hit',
   'share-link': 'Shared/config link load',
   'share-link-miss': 'Shared link (no cached art)',

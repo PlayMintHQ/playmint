@@ -3,7 +3,7 @@
  * Prompt Parsing and Parameter Generation Utilities
  */
 
-import { ACTION_PLATFORM_TILE_W, actionJumpReach, actionJumpRise, runnerMinJumpForce, runnerMinObstacleInterval } from '../gameConfig';
+import { ACTION_PLATFORM_TILE_W, actionJumpReach, actionJumpRise, runnerMinJumpForce, runnerMinObstacleInterval } from '../gameConfig.js';
 
 // Automated mechanics tuning table mapping keywords to gameplay variables
 //

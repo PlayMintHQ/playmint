@@ -25,7 +25,8 @@ const UI_FADE_MS = 2000;
 
 const SCENARIO_ORDER = [
   'fresh',
-  'cache-assisted',
+  'partial',
+  'matched-reuse',
   'exact',
   'share-link',
   'share-link-miss',
