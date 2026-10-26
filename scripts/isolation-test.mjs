@@ -21,6 +21,18 @@
 //   to a file unless --out is passed, and the output contains NO tokens — only
 //   the verdict per check.
 //
+// PASSWORD HYGIENE: the A/B passwords are real account credentials. Pass them as
+// flags in YOUR OWN terminal and never paste them into chat, a commit, an issue,
+// or a shared doc. Use throwaway accounts rather than personal ones: --out records
+// both account emails in a file that gets committed.
+//
+// PREFLIGHT (no accounts needed, read-only, safe to run any time):
+//
+//   node scripts/isolation-test.mjs --preflight
+//
+//   Proves the September migration is applied using only the public anon key. No
+//   user JWTs, no service role, no writes. Run this before the full test.
+//
 // Exit code is 0 only when every check passes, so it can gate CI later.
 
 import { readFile } from 'node:fs/promises';
@@ -147,10 +159,23 @@ const run = async () => {
   // --- No session at all (bare anon key) must see nothing and write nothing.
   // Checked FIRST, while the table is still empty apart from other users' rows,
   // so the assertion is about the GRANT/RLS, not about the data.
+  //
+  // "Sees no rows" has TWO correct shapes, and asserting only the first one made
+  // this check report FAIL against a correctly secured database: the migration
+  // does `revoke all on public.games from anon`, so the anon request is refused
+  // outright (401/403 with a {code:"42501"} body) instead of returning `[]`.
+  // Requiring an empty array therefore failed the check on a table that was
+  // locked down exactly as intended. Denied is at least as safe as empty — it is
+  // strictly stronger, since the rows are never even addressable.
   const anonList = await fetch(`${URL_BASE}/rest/v1/games?select=id&limit=5`, { headers: { apikey: ANON } });
   const anonListBody = await anonList.json().catch(() => null);
+  const anonDenied = anonList.status === 401 || anonList.status === 403;
   const anonRows = Array.isArray(anonListBody) ? anonListBody.length : null;
-  record('anonymous key sees no rows', anonRows === 0, `GET /games with the anon key → ${anonRows === null ? anonList.status : `${anonRows} row(s)`}`);
+  const anonSeesNothing = anonDenied || anonRows === 0;
+  record('anonymous key sees no rows', anonSeesNothing,
+    anonDenied
+      ? `GET /games with the anon key → ${anonList.status} (refused outright, code ${anonListBody?.code || 'n/a'})`
+      : `${anonRows === null ? `HTTP ${anonList.status}, unparseable body` : `${anonRows} row(s)`}`);
 
   const anonInsert = await fetch(`${URL_BASE}/rest/v1/games`, {
     method: 'POST',
@@ -260,6 +285,80 @@ const run = async () => {
   finish();
 };
 
+// ── --preflight ────────────────────────────────────────────────────────────────
+// Proves the September migration is applied, using ONLY the public anon key: no
+// accounts, no user JWTs, no service role, no writes. Run it as often as you like
+// — it cannot mutate anything.
+//
+// The subtlety that makes it work: PostgREST answers a MISSING relation and a
+// DENIED one very differently, and only the second proves the table exists.
+//   404 PGRST205  → "Could not find the table 'public.x' in the schema cache"
+//                   The relation was never resolved. The query never ran.
+//   401 42501    → "permission denied for table games"
+//                   Resolved by PostgREST, then refused by Postgres on the GRANT.
+//                   The table is there, and `revoke all … from anon` is live.
+// So a naive "did I get 200" probe would report a correctly locked-down table as
+// missing. The control table below is what turns an ambiguous status into a
+// conclusion.
+//
+// It is also a real SECURITY check, not just an existence check: if `games` ever
+// answers 200 with rows to a bare anon key, every saved game in the deployment
+// is world-readable, and that is a FAIL.
+const preflight = async () => {
+  if (!URL_BASE || !ANON) {
+    console.error('Missing --url/--anon (or VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY in .env).');
+    process.exit(2);
+  }
+
+  const probeAnon = async (table) => {
+    const r = await fetch(`${URL_BASE}/rest/v1/${table}?select=id&limit=5`, { headers: { apikey: ANON } });
+    const body = await r.json().catch(() => null);
+    return { status: r.status, ok: r.ok, code: body?.code || null, rows: Array.isArray(body) ? body.length : null };
+  };
+
+  const control = await probeAnon('zzz_pm_control_missing_table');
+  const games = await probeAnon('games');
+
+  // A 42501 naming the TABLE (not the schema) means Postgres resolved the
+  // relation and then refused it. A schema-level denial would say "permission
+  // denied for schema public" instead.
+  const resolved = games.status === 401 || games.status === 403;
+  const missing = games.status === 404 || games.code === 'PGRST205' || games.code === '42P01';
+  const worldReadable = games.ok && games.rows > 0;
+  const applied = resolved || (games.ok && games.rows === 0);
+
+  const report = {
+    ranAt: new Date().toISOString(),
+    mode: 'preflight',
+    project: URL_BASE.replace(/https?:\/\/([^.]+)\..*/, '$1…'),
+    gamesTable: applied ? 'ok' : 'missing',
+    evidence: {
+      controlRelation: `${control.status} ${control.code || ''}`.trim(),
+      gamesRelation: `${games.status} ${games.code || ''}`.trim()
+    },
+    anonCanReadGames: worldReadable,
+    note: 'Read-only probe with the public anon key. PGRST205 on the control relation confirms the differing status is a real grant denial, not a missing table.'
+  };
+
+  console.log(`control relation : ${report.evidence.controlRelation}`);
+  console.log(`games relation   : ${report.evidence.gamesRelation}`);
+  console.log(`games table      : ${report.gamesTable}`);
+
+  if (worldReadable) {
+    console.error('\nFAIL — the anon key can READ the games table. Every saved game in this deployment is world-readable.');
+  } else if (missing) {
+    console.error('\nThe `games` table is not in the schema. Apply supabase/migrations/20260927000000_games.sql first.');
+  } else if (applied) {
+    console.log('\nPASS — migration applied and the anon key cannot read it.');
+  }
+
+  if (args.out) {
+    writeFileSync(args.out, `${JSON.stringify(report, null, 2)}\n`);
+    console.log(`Written to ${args.out}`);
+  }
+  process.exit(worldReadable || !applied ? 1 : 0);
+};
+
 const finish = () => {
   const summary = {
     ranAt: new Date().toISOString(),
@@ -277,4 +376,5 @@ const finish = () => {
   process.exit(failures === 0 ? 0 : 1);
 };
 
-run();
+if (args.preflight) preflight();
+else run();
