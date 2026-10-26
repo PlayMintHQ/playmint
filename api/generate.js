@@ -175,7 +175,7 @@ export default async function handler(req, res) {
           aspectRatio: aspectRatio || '1:1',
           ...(imageSize ? { imageSize } : {})
         },
-        thinkingConfig: { thinkingBudget: 0, thinkingLevel: 'MINIMAL' }
+        thinkingConfig: { thinkingBudget: 0 }
       };
 
       const result = await ai.models.generateContent({
@@ -213,7 +213,7 @@ export default async function handler(req, res) {
         config: {
           responseMimeType: 'application/json',
           ...(responseSchema ? { responseSchema } : {}),
-          thinkingConfig: { thinkingBudget: 0, thinkingLevel: 'MINIMAL' }
+          thinkingConfig: { thinkingBudget: 0 }
         }
       });
 

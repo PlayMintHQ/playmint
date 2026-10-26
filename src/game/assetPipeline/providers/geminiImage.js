@@ -358,7 +358,7 @@ export async function generateImage({
           config: {
             responseModalities: ['IMAGE'],
             imageConfig: { ...(aspectActive ? { aspectRatio } : {}), ...(sizeActive ? { imageSize } : {}) },
-            ...(thinkActive ? { thinkingConfig: { thinkingBudget: 0, thinkingLevel: 'MINIMAL' } } : {})
+            ...(thinkActive ? { thinkingConfig: { thinkingBudget: 0 } } : {})
           }
         }),
         timeoutMs,
@@ -510,7 +510,7 @@ export async function generateJson({ prompt, responseSchema, imageDataUrl = null
             // billing ~850 thinking tokens/call — thinkingLevel MINIMAL is the
             // 3.x-era switch. Models that reject the combo hit the defensive
             // retry below and run without the field.
-            ...(thinkActive ? { thinkingConfig: { thinkingBudget: 0, thinkingLevel: 'MINIMAL' } } : {})
+            ...(thinkActive ? { thinkingConfig: { thinkingBudget: 0 } } : {})
           }
         }),
         timeoutMs,
