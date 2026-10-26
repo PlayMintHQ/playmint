@@ -33,7 +33,7 @@ const GUEST_DAILY_LIMIT = 25;
 const AUTH_DAILY_LIMIT = 200;
 const WINDOW_MS = 24 * 60 * 60 * 1000;
 
-function checkRateLimit(identifier, isAuth = false) {
+function checkRateLimitInMemory(identifier, isAuth = false) {
   cleanExpiredLimits();
   const now = Date.now();
   const limit = isAuth ? AUTH_DAILY_LIMIT : GUEST_DAILY_LIMIT;
@@ -48,7 +48,46 @@ function checkRateLimit(identifier, isAuth = false) {
   const remaining = Math.max(0, limit - record.count);
   const exceeded = record.count > limit;
 
-  return { exceeded, limit, remaining, resetAt: record.resetAt };
+  return { exceeded, limit, remaining, resetAt: record.resetAt, persistent: false };
+}
+
+async function checkRateLimit(identifier, isAuth = false) {
+  const limit = isAuth ? AUTH_DAILY_LIMIT : GUEST_DAILY_LIMIT;
+  const supabaseUrl = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').replace(/\/+$/, '');
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+
+  if (supabaseUrl && supabaseKey) {
+    try {
+      const rpcRes = await fetch(`${supabaseUrl}/rest/v1/rpc/check_and_increment_rate_limit`, {
+        method: 'POST',
+        headers: {
+          apikey: supabaseKey,
+          Authorization: `Bearer ${supabaseKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          p_identifier: identifier,
+          p_limit: limit,
+          p_window_seconds: Math.floor(WINDOW_MS / 1000)
+        })
+      });
+
+      if (rpcRes.ok) {
+        const data = await rpcRes.json();
+        return {
+          exceeded: Boolean(data.exceeded),
+          limit: Number(data.limit),
+          remaining: Number(data.remaining),
+          resetAt: Number(data.reset_at) * 1000,
+          persistent: true
+        };
+      }
+    } catch {
+      // Degrade gracefully to in-memory sliding window if Supabase RPC is unreachable
+    }
+  }
+
+  return checkRateLimitInMemory(identifier, isAuth);
 }
 
 const ALLOWED_IMAGE_MODELS = new Set([
@@ -120,7 +159,7 @@ export default async function handler(req, res) {
   const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket?.remoteAddress || 'unknown-guest';
   const rateLimitKey = isAuth ? `user:${userId}` : `ip:${clientIp}`;
 
-  const rateStatus = checkRateLimit(rateLimitKey, isAuth);
+  const rateStatus = await checkRateLimit(rateLimitKey, isAuth);
   res.setHeader('X-RateLimit-Limit', rateStatus.limit);
   res.setHeader('X-RateLimit-Remaining', rateStatus.remaining);
   res.setHeader('X-RateLimit-Reset', Math.ceil(rateStatus.resetAt / 1000));
@@ -137,7 +176,7 @@ export default async function handler(req, res) {
   }
 
   // 2. Validate Request Body
-  const { action, prompt, model, aspectRatio, imageSize, referenceImageDataUrls, responseSchema, label } = req.body || {};
+  const { action, prompt, model, aspectRatio, imageSize, referenceImageDataUrls, responseSchema, imageDataUrl, label } = req.body || {};
 
   if (!action || (action !== 'image' && action !== 'json')) {
     return res.status(400).json({ error: 'Invalid action. Must be "image" or "json".' });
@@ -207,9 +246,22 @@ export default async function handler(req, res) {
     if (action === 'json') {
       const activeModel = model && ALLOWED_TEXT_MODELS.has(model) ? model : 'gemini-flash-latest';
 
+      let contents = prompt;
+      if (imageDataUrl) {
+        const match = imageDataUrl.match(/^data:([^;]+);base64,(.*)$/s);
+        if (match) {
+          contents = [{
+            parts: [
+              { text: prompt },
+              { inlineData: { mimeType: match[1], data: match[2] } }
+            ]
+          }];
+        }
+      }
+
       const result = await ai.models.generateContent({
         model: activeModel,
-        contents: prompt,
+        contents,
         config: {
           responseMimeType: 'application/json',
           ...(responseSchema ? { responseSchema } : {}),
