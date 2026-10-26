@@ -794,68 +794,70 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
         >
           🎬 Demo mode{demoMode ? ' ✓' : ''}
         </button>
-        {HAS_ENV_GEMINI_KEY ? (
-              <button
-                onClick={() => showToast('Using Gemini key from environment (.env)')}
-                title="Gemini key active (from .env)"
-                style={API_KEY_TICK_STYLE}
-              >
-                ✓
-              </button>
-            ) : (apiKey && !isEditingKey) ? (
-              <button
-                onClick={() => { setKeyInput(apiKey); setIsEditingKey(true); }}
-                title="Gemini key saved — click to change"
-                style={API_KEY_TICK_STYLE}
-              >
-                ✓
-              </button>
-            ) : (
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  const trimmed = keyInput.trim();
-                  localStorage.setItem('GEMINI_API_KEY', trimmed);
-                  setApiKey(trimmed);
-                  setIsEditingKey(false);
-                  showToast(trimmed ? 'Gemini key saved — assets will use Gemini AI.' : 'No key — games will use built-in theme artwork.');
-                }}
+        {!import.meta.env.PROD && (
+          HAS_ENV_GEMINI_KEY ? (
+            <button
+              onClick={() => showToast('Using Gemini key from environment (.env)')}
+              title="Gemini key active (from .env)"
+              style={API_KEY_TICK_STYLE}
+            >
+              ✓
+            </button>
+          ) : (apiKey && !isEditingKey) ? (
+            <button
+              onClick={() => { setKeyInput(apiKey); setIsEditingKey(true); }}
+              title="Gemini key saved — click to change"
+              style={API_KEY_TICK_STYLE}
+            >
+              ✓
+            </button>
+          ) : (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const trimmed = keyInput.trim();
+                localStorage.setItem('GEMINI_API_KEY', trimmed);
+                setApiKey(trimmed);
+                setIsEditingKey(false);
+                showToast(trimmed ? 'Gemini key saved — assets will use Gemini AI.' : 'No key — games will use built-in theme artwork.');
+              }}
+              style={{
+                display: 'flex', gap: '6px', alignItems: 'center',
+                background: 'rgba(10, 15, 24, 0.85)',
+                border: '1px solid rgba(255,255,255,0.15)',
+                borderRadius: '8px', padding: '6px 8px',
+                backdropFilter: 'blur(8px)'
+              }}
+            >
+              <label htmlFor="pm-gemini-key-input" style={{ color: '#fff', fontSize: '12px', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                Insert Gemini API key:
+              </label>
+              <input
+                id="pm-gemini-key-input"
+                type="password"
+                value={keyInput}
+                onChange={(e) => setKeyInput(e.target.value)}
+                placeholder="AIza..."
+                autoComplete="off"
                 style={{
-                  display: 'flex', gap: '6px', alignItems: 'center',
-                  background: 'rgba(10, 15, 24, 0.85)',
-                  border: '1px solid rgba(255,255,255,0.15)',
-                  borderRadius: '8px', padding: '6px 8px',
-                  backdropFilter: 'blur(8px)'
+                  width: '150px', padding: '5px 8px', fontSize: '12px',
+                  background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(255,255,255,0.12)',
+                  borderRadius: '6px', color: '#fff', outline: 'none'
+                }}
+              />
+              <button
+                type="submit"
+                style={{
+                  background: 'rgba(162, 89, 255, 0.2)', border: '1px solid #a259ff',
+                  color: '#a259ff', fontSize: '12px', fontWeight: 700,
+                  padding: '5px 10px', borderRadius: '6px', cursor: 'pointer'
                 }}
               >
-                <label htmlFor="pm-gemini-key-input" style={{ color: '#fff', fontSize: '12px', fontWeight: 600, whiteSpace: 'nowrap' }}>
-                  Insert Gemini API key:
-                </label>
-                <input
-                  id="pm-gemini-key-input"
-                  type="password"
-                  value={keyInput}
-                  onChange={(e) => setKeyInput(e.target.value)}
-                  placeholder="AIza..."
-                  autoComplete="off"
-                  style={{
-                    width: '150px', padding: '5px 8px', fontSize: '12px',
-                    background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(255,255,255,0.12)',
-                    borderRadius: '6px', color: '#fff', outline: 'none'
-                  }}
-                />
-                <button
-                  type="submit"
-                  style={{
-                    background: 'rgba(162, 89, 255, 0.2)', border: '1px solid #a259ff',
-                    color: '#a259ff', fontSize: '12px', fontWeight: 700,
-                    padding: '5px 10px', borderRadius: '6px', cursor: 'pointer'
-                  }}
-                >
-                  Save
-                </button>
-              </form>
-            )}
+                Save
+              </button>
+            </form>
+          )
+        )}
             {/* Account entry point — LAST child so it holds the top-right
                 corner even when the dev toggles overflow leftward on phones.
                 Renders nothing when accounts are not configured.

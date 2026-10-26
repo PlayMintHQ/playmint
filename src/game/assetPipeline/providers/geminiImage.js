@@ -18,7 +18,23 @@ export class ProviderError extends Error {
   }
 }
 
+export function isProduction() {
+  if (import.meta.env?.PROD) return true;
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    if (host && host !== 'localhost' && host !== '127.0.0.1' && !host.endsWith('.local')) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function getGeminiKey() {
+  if (isProduction()) {
+    // In production, Gemini is strictly executed server-side via /api/generate.
+    // Client keys are never read from env or localStorage to prevent key leaks and quota bypasses.
+    return '';
+  }
   return (import.meta.env.VITE_GEMINI_API_KEY || localStorage.getItem('GEMINI_API_KEY') || '').trim();
 }
 
@@ -38,7 +54,11 @@ async function getAuthHeader() {
 }
 
 export function isGeminiConfigured() {
-  // Configured if a local key is present OR if the server-side generation proxy is available
+  if (isProduction()) {
+    // In production, serverGenerateAvailable is the sole determinant of whether Gemini is active.
+    return typeof window !== 'undefined' && serverGenerateAvailable !== false;
+  }
+  // In development, configured if a local key is present OR if the server-side generation proxy is available
   if (getGeminiKey()) return true;
   if (typeof window !== 'undefined' && serverGenerateAvailable !== false) return true;
   return false;
@@ -48,6 +68,9 @@ let cachedClient = null;
 let cachedKey = null;
 
 function getClient() {
+  if (isProduction()) {
+    throw new ProviderError('Client-side Gemini API execution is strictly disabled in production.', 'auth');
+  }
   const key = getGeminiKey();
   if (!key) throw new ProviderError('No Gemini API key configured.', 'no-key');
   // Re-instantiate when the key changes so a key entered via the UI works without reload
@@ -283,7 +306,8 @@ export async function generateImage({
   let activeModel = unavailableImageModels.has(requested) ? GEMINI_IMAGE_FALLBACK_MODEL : requested;
 
   // 1. Server-Side Protected Gateway (Production & Preview)
-  if (typeof window !== 'undefined' && serverGenerateAvailable !== false && !localStorage.getItem('GEMINI_API_KEY')) {
+  const useServerGateway = typeof window !== 'undefined' && (isProduction() || (serverGenerateAvailable !== false && !localStorage.getItem('GEMINI_API_KEY')));
+  if (useServerGateway) {
     try {
       const authHeaders = await getAuthHeader();
       const serverRes = await fetch('/api/generate', {
@@ -300,6 +324,9 @@ export async function generateImage({
         })
       });
       if (serverRes.status === 404) {
+        if (isProduction()) {
+          throw new ProviderError('Server generation endpoint /api/generate was not found.', 'network');
+        }
         serverGenerateAvailable = false; // Plain Vite dev server without /api
       } else if (!serverRes.ok) {
         const errJson = await serverRes.json().catch(() => ({}));
@@ -325,12 +352,21 @@ export async function generateImage({
         return { dataUrl, provider: 'gemini', model: resData.model || activeModel, width: served?.w, height: served?.h };
       }
     } catch (err) {
+      if (isProduction()) {
+        recordFailure('image', { label, model: activeModel, reason: err?.message?.slice(0, 120), elapsedMs: Math.round(performance.now() - t0) });
+        throw toProviderError(err);
+      }
       if (err instanceof ProviderError) throw err;
       if (!getGeminiKey()) throw toProviderError(err);
     }
   }
 
-  // 2. Client-Side SDK Fallback
+  // In production, execution must NEVER proceed to client-side SDK
+  if (isProduction()) {
+    throw new ProviderError('Server generation endpoint is unavailable and client fallback is disabled in production.', 'network');
+  }
+
+  // 2. Client-Side SDK Fallback (Development Only)
   const ai = getClient();
 
   let response;
@@ -432,8 +468,9 @@ export async function generateImage({
 export async function generateJson({ prompt, responseSchema, imageDataUrl = null, timeoutMs = 12000, label = null }) {
   const t0 = performance.now();
 
-  // 1. Server-Side Protected Gateway (when not uploading inline image and in browser)
-  if (typeof window !== 'undefined' && serverGenerateAvailable !== false && !localStorage.getItem('GEMINI_API_KEY') && !imageDataUrl) {
+  // 1. Server-Side Protected Gateway
+  const useServerGateway = typeof window !== 'undefined' && (isProduction() || (serverGenerateAvailable !== false && !localStorage.getItem('GEMINI_API_KEY')));
+  if (useServerGateway) {
     try {
       const authHeaders = await getAuthHeader();
       const serverRes = await fetch('/api/generate', {
@@ -443,11 +480,15 @@ export async function generateJson({ prompt, responseSchema, imageDataUrl = null
           action: 'json',
           prompt,
           responseSchema,
+          imageDataUrl,
           model: GEMINI_TEXT_MODEL,
           label
         })
       });
       if (serverRes.status === 404) {
+        if (isProduction()) {
+          throw new ProviderError('Server generation endpoint /api/generate was not found.', 'network');
+        }
         serverGenerateAvailable = false;
       } else if (!serverRes.ok) {
         const errJson = await serverRes.json().catch(() => ({}));
@@ -465,12 +506,21 @@ export async function generateJson({ prompt, responseSchema, imageDataUrl = null
         return resData.data;
       }
     } catch (err) {
+      if (isProduction()) {
+        recordFailure('vision', { label, model: GEMINI_TEXT_MODEL, reason: err?.message?.slice(0, 120), elapsedMs: Math.round(performance.now() - t0) });
+        throw toProviderError(err);
+      }
       if (err instanceof ProviderError) throw err;
       if (!getGeminiKey()) throw toProviderError(err);
     }
   }
 
-  // 2. Client-Side SDK Fallback
+  // In production, execution must NEVER proceed to client-side SDK
+  if (isProduction()) {
+    throw new ProviderError('Server generation endpoint is unavailable and client fallback is disabled in production.', 'network');
+  }
+
+  // 2. Client-Side SDK Fallback (Development Only)
   const ai = getClient();
 
   let contents = prompt;

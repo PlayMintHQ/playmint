@@ -319,11 +319,16 @@ function App() {
     return () => window.removeEventListener('popstate', onPop);
   }, [hasStarted]);
 
-  // Persist environment variables to localStorage on startup to prevent cached/stale build variables
+  // In development, persist environment variables to localStorage for quick iteration.
+  // In production, ensure no client-side Gemini API key persists in localStorage.
   useEffect(() => {
-    const geminiEnv = import.meta.env.VITE_GEMINI_API_KEY;
-    if (geminiEnv) {
-      localStorage.setItem('GEMINI_API_KEY', geminiEnv);
+    if (!import.meta.env.PROD) {
+      const geminiEnv = import.meta.env.VITE_GEMINI_API_KEY;
+      if (geminiEnv) {
+        localStorage.setItem('GEMINI_API_KEY', geminiEnv);
+      }
+    } else {
+      localStorage.removeItem('GEMINI_API_KEY');
     }
     // Dev/ops console tool: bulk cache population (see assetCache/bulkRunner.js).
     // Lazy import keeps the runner + prompt list out of the hot path.
