@@ -39,3 +39,4 @@ CLAUDE.md
 # Supabase CLI working dirs (migrations/ and drafts/ ARE tracked)
 supabase/.temp
 supabase/.branches
+.playwright-mcp/
