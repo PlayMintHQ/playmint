@@ -8,8 +8,9 @@ revised 28 Aug and is otherwise stale (it still lists audio + RPG as the
 September plan). What actually shipped in September, per contract steps 1-2:
   - Week 1: Supabase accounts (email+password w/ confirmation + Google), auth
     dialog, protected routes, /my-games route, optional-auth posture.
-  - Week 2 (27 Sep): public.games table + owner-only RLS (migration APPROVED,
-    PENDING application in the Supabase SQL editor), auto-save on generation,
+  - Week 2 (27 Sep): public.games table + owner-only RLS (migration approved, and
+    APPLIED in production 29 Sep — verified by the read-only `--preflight` probe),
+    auto-save on generation,
     manual Save in the HUD and the Creator Panel, My Games card grid with
     thumbnails, Play via the share-link restore path, rename, delete with
     confirmation, two-account isolation script + walkthrough, daily Supabase
@@ -61,9 +62,10 @@ MONTH 4 — RPG COMPLETION & WEB AUTH
 MONTH 5 — CLOUD SAVE ARCHITECTURE
 [x] Production relational DB schemas + Row Level Security per user
     <<(public.games + profiles APPROVED 27 Sep 2026, owner-only RLS, column-
-    restricted INSERT/UPDATE, SECURITY INVOKER 200-row cap. PENDING: the client
-    pastes the migration into the Supabase SQL editor — the app degrades to an
-    empty library until then) >>
+    restricted INSERT/UPDATE, SECURITY INVOKER 200-row cap. APPLIED in production
+    29 Sep: `node scripts/isolation-test.mjs --preflight` answers 401 42501 on
+    games vs 404 PGRST205 on a missing control relation — resolved then denied,
+    so the table exists and anon cannot read it) >>
 [x] Serialization of AI gameConfig matrices/asset URLs/tuning into JSON rows
     <<(a saved row's `config` IS the share-link payload, so a game round-trips
     through one representation; art is referenced by art_id, never copied) >>
@@ -122,9 +124,9 @@ MONTH 10 — SECURITY AUDIT & V1 LAUNCH
 
 SUMMARY
 - M1 (July) and M2 (August) fully complete; the M2 shooter shipped 25 Aug.
-- September contract steps 1-2 (accounts + saved games) shipped on the 27th;
-  the only outstanding item is applying the approved `games` migration in the
-  client's Supabase project and filing the two-account isolation log.
+- September contract steps 1-2 (accounts + saved games) shipped on the 27th; the
+  `games` migration was applied in production on the 29th. The ONLY outstanding
+  item is filing the two-account isolation log (needs two confirmed accounts).
 - Delivered ahead of plan (M5-M6 territory pulled forward): server asset cache
   with smart reuse (~45% measured), cross-device share links, per-game tagging,
   cost telemetry and pricing projections.

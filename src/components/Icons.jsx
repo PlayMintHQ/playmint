@@ -91,3 +91,11 @@ export const IconLock = () => (
     <path d="M7 9V6a3 3 0 0 1 6 0v3" />
   </svg>
 );
+
+export const IconRemix = () => (
+  <svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={s}>
+    <path d="M12 2l1.5 3.5L17 7l-3.5 1.5L12 12l-1.5-3.5L7 7l3.5-1.5L12 2z" />
+    <path d="M5 13l1 2 2 1-2 1-1 2-1-2-2-1 2-1 1-2z" />
+  </svg>
+);
+

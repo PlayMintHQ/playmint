@@ -15,10 +15,11 @@ import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../auth/authContext';
 import AccountButton from '../auth/AccountButton';
 import ConfirmDialog from './ConfirmDialog';
-import { IconPlay, IconGlobe, IconLock } from './Icons';
+import { IconPlay, IconGlobe, IconLock, IconShare, IconRemix } from './Icons';
 import { navigate } from '../router';
 import { encodeShareConfig } from '../game/shareLink';
-import { listMyGames, renameGame, deleteGame, setGameVisibility } from '../game/savedGames';
+import { listMyGames, listPublicGames, renameGame, deleteGame, setGameVisibility } from '../game/savedGames';
+import { shareLink } from '../utils/shareUtils';
 import { THEME_ART_URLS } from '../game/themes';
 
 // games.mode holds the internal gameType; the UI has always called the
@@ -95,7 +96,7 @@ const playSavedGame = (game) => {
   }
 };
 
-function GameCard({ game, onRename, onDelete }) {
+function GameCard({ game, onRename, onDelete, isCommunity = false }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(game.title || '');
   const [busy, setBusy] = useState(false);
@@ -152,21 +153,35 @@ function GameCard({ game, onRename, onDelete }) {
     if (e.key === 'Escape') { e.preventDefault(); commit(false); }
   };
 
-    const [toggling, setToggling] = useState(false);
-    
-    const toggleVisibility = async () => {
-      setToggling(true);
-      const isPublic = game.visibility !== 'public';
-      const res = await setGameVisibility(game.id, isPublic);
-      setToggling(false);
-      if (res.ok) {
-        if (onRename) onRename(game.id, game.title, res.visibility);
-      } else {
-        alert(res.error || 'Failed to change visibility');
-      }
-    };
-    
-    return (
+  const [toggling, setToggling] = useState(false);
+  const [shareStatus, setShareStatus] = useState('idle');
+
+  const toggleVisibility = async () => {
+    setToggling(true);
+    const isPublic = game.visibility !== 'public';
+    const res = await setGameVisibility(game.id, isPublic);
+    setToggling(false);
+    if (res.ok) {
+      if (onRename) onRename(game.id, game.title, res.visibility);
+    } else {
+      alert(res.error || 'Failed to change visibility');
+    }
+  };
+
+  const handleShare = async () => {
+    const url = `${window.location.origin}/g/${game.id}`;
+    const res = await shareLink({
+      title: game.title,
+      text: `Play "${game.title}" on PlayMint!`,
+      url
+    });
+    if (res.ok) {
+      setShareStatus(res.method === 'share' ? 'shared' : 'copied');
+      setTimeout(() => setShareStatus('idle'), 2500);
+    }
+  };
+
+  return (
     <article className="pm-library__card">
       <button
         type="button"
@@ -234,22 +249,54 @@ function GameCard({ game, onRename, onDelete }) {
             <h2 className="pm-library__title" title={game.title}>{game.title}</h2>
             <p className="pm-library__meta">
               <span className="pm-library__mode">{modeLabel(game.mode)}</span>
+              {isCommunity && game.creator_name && (
+                <span className="pm-library__mode" style={{ opacity: 0.9 }}>by {game.creator_name}</span>
+              )}
+              {game.remix_parent_id && (
+                <span className="pm-library__mode" style={{ color: 'var(--pm-accent-amber, #f59e0b)', borderColor: 'rgba(245, 158, 11, 0.4)' }} title="Remixed from an existing game">
+                  <IconRemix /> Remix
+                </span>
+              )}
               {formatDate(game.updated_at || game.created_at) && (
                 <span className="pm-library__date">{formatDate(game.updated_at || game.created_at)}</span>
               )}
-              <button 
-                type="button" 
-                className="pm-library__visibility-toggle" 
-                onClick={toggleVisibility} 
-                disabled={toggling || busy || editing}
-                title={game.visibility === 'public' ? 'Public — Click to make private' : 'Private — Click to make public'}
-              >
-                {game.visibility === 'public' ? (
-                  <><IconGlobe /> <span>Public</span></>
-                ) : (
-                  <><IconLock /> <span>Private</span></>
-                )}
-              </button>
+              {!isCommunity && (
+                <button 
+                  type="button" 
+                  className="pm-library__visibility-toggle" 
+                  onClick={toggleVisibility} 
+                  disabled={toggling || busy || editing}
+                  title={game.visibility === 'public' ? 'Public — Click to make private' : 'Private — Click to make public'}
+                >
+                  {game.visibility === 'public' ? (
+                    <><IconGlobe /> <span>Public</span></>
+                  ) : (
+                    <><IconLock /> <span>Private</span></>
+                  )}
+                </button>
+              )}
+              {game.visibility === 'public' && (
+                <a
+                  href={`/g/${game.id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    fontSize: '0.75rem',
+                    color: 'var(--pm-accent-teal, #14b8a6)',
+                    textDecoration: 'none',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '2px',
+                    padding: '2px 6px',
+                    borderRadius: '4px',
+                    background: 'rgba(20, 184, 166, 0.1)',
+                    border: '1px solid rgba(20, 184, 166, 0.25)'
+                  }}
+                  title="Open public share page in a new tab"
+                >
+                  View Page ↗
+                </a>
+              )}
             </p>
           </>
         )}
@@ -258,12 +305,37 @@ function GameCard({ game, onRename, onDelete }) {
           <button type="button" className="pm-btn pm-btn-primary pm-library__play" onClick={() => playSavedGame(game)}>
             <IconPlay /> Play
           </button>
-          <button type="button" className="pm-btn pm-btn-outline" onClick={startEdit} disabled={busy || editing}>
-            Rename
+          {isCommunity && (
+            <button
+              type="button"
+              className="pm-btn pm-btn-outline"
+              onClick={() => {
+                navigate(`/g/${game.id}`);
+              }}
+              style={{ color: 'var(--pm-accent-amber, #f59e0b)', borderColor: 'rgba(245, 158, 11, 0.4)' }}
+              title="View public details and remix"
+            >
+              <IconRemix /> Remix
+            </button>
+          )}
+          <button
+            type="button"
+            className="pm-btn pm-btn-outline"
+            onClick={handleShare}
+            title={game.visibility === 'public' ? 'Share / Copy public link' : 'Share link (note: game is currently private)'}
+          >
+            <IconShare /> {shareStatus === 'copied' ? 'Copied!' : shareStatus === 'shared' ? 'Shared!' : 'Share'}
           </button>
-          <button type="button" className="pm-btn pm-btn-danger" onClick={() => onDelete(game)} disabled={busy}>
-            Delete
-          </button>
+          {!isCommunity && (
+            <>
+              <button type="button" className="pm-btn pm-btn-outline" onClick={startEdit} disabled={busy || editing}>
+                Rename
+              </button>
+              <button type="button" className="pm-btn pm-btn-danger" onClick={() => onDelete(game)} disabled={busy}>
+                Delete
+              </button>
+            </>
+          )}
         </div>
       </div>
     </article>
@@ -272,6 +344,10 @@ function GameCard({ game, onRename, onDelete }) {
 
 export function MyGamesPage() {
   const { status, user, displayName, openSignIn } = useAuth();
+  const [activeTab, setActiveTab] = useState('mine');
+  const [publicData, setPublicData] = useState(null);
+  const [loadingPublic, setLoadingPublic] = useState(false);
+
   // The loaded library is stored WITH the user id it belongs to, and rendered
   // only while that id still matches. Two reasons, one mechanism:
   //   • a sign-out → sign-in as someone else in the same tab can never show the
@@ -289,10 +365,10 @@ export function MyGamesPage() {
   const error = mine?.error || '';
   const schemaMissing = !!mine?.schemaMissing;
 
-  // Protected view: a guest landing here gets the sign-in dialog straight away.
+  // Protected view for My Games: a guest landing here gets the sign-in dialog
   useEffect(() => {
-    if (status === 'guest') openSignIn('my-games');
-  }, [status, openSignIn]);
+    if (activeTab === 'mine' && status === 'guest') openSignIn('my-games');
+  }, [activeTab, status, openSignIn]);
 
   const refreshKey = status === 'authed' ? (user?.id || null) : null;
 
@@ -301,14 +377,30 @@ export function MyGamesPage() {
     loadLibrary(refreshKey).then(setLoaded);
   }, [refreshKey]);
 
+  // Load public community games when switching to public tab
+  useEffect(() => {
+    if (activeTab === 'public' && !publicData && !loadingPublic) {
+      setLoadingPublic(true);
+      listPublicGames().then((res) => {
+        setPublicData(res);
+        setLoadingPublic(false);
+      });
+    }
+  }, [activeTab, publicData, loadingPublic]);
+
   // A save fired while a game is running dispatches this, so the grid is current
   // the moment the user walks in rather than showing a pre-save snapshot.
   useEffect(() => {
     if (refreshKey === null) return undefined;
-    const onChanged = () => { loadLibrary(refreshKey).then(setLoaded); };
+    const onChanged = () => {
+      loadLibrary(refreshKey).then(setLoaded);
+      if (activeTab === 'public') {
+        listPublicGames().then(setPublicData);
+      }
+    };
     window.addEventListener('pm-games-changed', onChanged);
     return () => window.removeEventListener('pm-games-changed', onChanged);
-  }, [refreshKey]);
+  }, [refreshKey, activeTab]);
 
   const handleRenamed = (id, title, visibility) => {
     setLoaded((prev) => (prev ? { ...prev, games: prev.games.map((g) => (g.id === id ? { ...g, title, ...(visibility ? { visibility } : {}) } : g)) } : prev));
@@ -329,65 +421,127 @@ export function MyGamesPage() {
   };
 
   return (
-    <RouteShell title="My Games">
-      {status === 'loading' && <p className="pm-route__text">Loading your account…</p>}
+    <RouteShell title={activeTab === 'mine' ? 'My Games' : 'Community Games'}>
+      {/* Tab Switcher: My Games | Community Games */}
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '1.25rem', borderBottom: '1px solid rgba(255, 255, 255, 0.1)', paddingBottom: '0.75rem', flexWrap: 'wrap' }}>
+        <button
+          type="button"
+          className={`pm-btn ${activeTab === 'mine' ? 'pm-btn-primary' : 'pm-btn-outline'}`}
+          onClick={() => setActiveTab('mine')}
+        >
+          My Games {mine?.games?.length ? `(${mine.games.length})` : ''}
+        </button>
+        <button
+          type="button"
+          className={`pm-btn ${activeTab === 'public' ? 'pm-btn-primary' : 'pm-btn-outline'}`}
+          onClick={() => setActiveTab('public')}
+        >
+          <IconGlobe /> Community Games {publicData?.games?.length ? `(${publicData.games.length})` : ''}
+        </button>
+      </div>
 
-      {status === 'disabled' && (
-        <p className="pm-route__text">Accounts are not enabled on this deployment.</p>
-      )}
-
-      {status === 'guest' && (
-        <div className="pm-card pm-route__card">
-          <p className="pm-route__text">Sign in to see the games you have saved. Playing never needs an account.</p>
-          <div className="pm-route__actions">
-            <button type="button" className="pm-btn pm-btn-primary" onClick={() => openSignIn('my-games')}>Sign in</button>
-            <button type="button" className="pm-btn pm-btn-muted" onClick={() => navigate('/')}>Back to PlayMint</button>
-          </div>
-        </div>
-      )}
-
-      {status === 'authed' && (
+      {activeTab === 'public' && (
         <>
           <p className="pm-route__text">
-            Signed in as <strong>{displayName}</strong>. Games you generate are saved here automatically.
+            Explore and play public games created and shared by the PlayMint community.
           </p>
 
-          {error && !schemaMissing && (
-            <p className="pm-library__error" role="alert">{error}</p>
-          )}
-          {schemaMissing && (
-            <p className="pm-library__error" role="alert">
-              The games table has not been created in this Supabase project yet — the September migration still needs to be
-              applied. PlayMint itself keeps working; only the library is unavailable.
-            </p>
+          {loadingPublic && <p className="pm-route__text">Loading community games…</p>}
+
+          {!loadingPublic && publicData?.error && (
+            <p className="pm-library__error" role="alert">{publicData.error}</p>
           )}
 
-          {loading && <p className="pm-route__text">Loading your games…</p>}
-
-          {!loading && !schemaMissing && games.length === 0 && !error && (
+          {!loadingPublic && (!publicData?.games || publicData.games.length === 0) && !publicData?.error && (
             <div className="pm-card pm-route__card">
-              <p className="pm-route__text">Nothing saved yet. Make a game and it lands here on its own.</p>
+              <p className="pm-route__text">No public community games published yet. Make a game and click the Public toggle to share it with everyone!</p>
               <div className="pm-route__actions">
                 <button type="button" className="pm-btn pm-btn-primary" onClick={() => navigate('/')}>Make a game</button>
               </div>
             </div>
           )}
 
-          {!loading && games.length > 0 && (
+          {!loadingPublic && publicData?.games && publicData.games.length > 0 && (
             <>
               <div className="pm-library__grid">
-                {games.map((game) => (
+                {publicData.games.map((game) => (
                   <GameCard
                     key={game.id}
                     game={game}
-                    onRename={handleRenamed}
-                    onDelete={(g) => { setDeleteError(''); setPendingDelete(g); }}
+                    isCommunity={true}
                   />
                 ))}
               </div>
               <div className="pm-route__actions pm-library__footer">
                 <button type="button" className="pm-btn pm-btn-primary" onClick={() => navigate('/')}>Make a game</button>
               </div>
+            </>
+          )}
+        </>
+      )}
+
+      {activeTab === 'mine' && (
+        <>
+          {status === 'loading' && <p className="pm-route__text">Loading your account…</p>}
+
+          {status === 'disabled' && (
+            <p className="pm-route__text">Accounts are not enabled on this deployment.</p>
+          )}
+
+          {status === 'guest' && (
+            <div className="pm-card pm-route__card">
+              <p className="pm-route__text">Sign in to see the games you have saved. Playing never needs an account.</p>
+              <div className="pm-route__actions">
+                <button type="button" className="pm-btn pm-btn-primary" onClick={() => openSignIn('my-games')}>Sign in</button>
+                <button type="button" className="pm-btn pm-btn-muted" onClick={() => setActiveTab('public')}>Explore Community Games</button>
+              </div>
+            </div>
+          )}
+
+          {status === 'authed' && (
+            <>
+              <p className="pm-route__text">
+                Signed in as <strong>{displayName}</strong>. Games you generate are saved here automatically.
+              </p>
+
+              {error && !schemaMissing && (
+                <p className="pm-library__error" role="alert">{error}</p>
+              )}
+              {schemaMissing && (
+                <p className="pm-library__error" role="alert">
+                  The games table has not been created in this Supabase project yet — the September migration still needs to be
+                  applied. PlayMint itself keeps working; only the library is unavailable.
+                </p>
+              )}
+
+              {loading && <p className="pm-route__text">Loading your games…</p>}
+
+              {!loading && !schemaMissing && games.length === 0 && !error && (
+                <div className="pm-card pm-route__card">
+                  <p className="pm-route__text">Nothing saved yet. Make a game and it lands here on its own.</p>
+                  <div className="pm-route__actions">
+                    <button type="button" className="pm-btn pm-btn-primary" onClick={() => navigate('/')}>Make a game</button>
+                  </div>
+                </div>
+              )}
+
+              {!loading && games.length > 0 && (
+                <>
+                  <div className="pm-library__grid">
+                    {games.map((game) => (
+                      <GameCard
+                        key={game.id}
+                        game={game}
+                        onRename={handleRenamed}
+                        onDelete={(g) => { setDeleteError(''); setPendingDelete(g); }}
+                      />
+                    ))}
+                  </div>
+                  <div className="pm-route__actions pm-library__footer">
+                    <button type="button" className="pm-btn pm-btn-primary" onClick={() => navigate('/')}>Make a game</button>
+                  </div>
+                </>
+              )}
             </>
           )}
         </>

@@ -1,0 +1,37 @@
+- generic [ref=e4]:
+  - generic [ref=e10]:
+    - button "💾 Cache only" [ref=e11] [cursor=pointer]
+    - button "✨ Force fresh" [ref=e12] [cursor=pointer]
+    - button "🎬 Demo mode" [ref=e13] [cursor=pointer]
+    - button "✓" [ref=e14] [cursor=pointer]
+  - generic [ref=e15]:
+    - generic:
+      - img "PlayMint"
+      - paragraph: From words to worlds
+    - generic [ref=e18]:
+      - generic [ref=e19]:
+        - textbox "e.g. 'city runner lava' or 'forest quest'" [ref=e20]
+        - button "Generate" [ref=e21] [cursor=pointer]
+        - button "Quick Start" [ref=e22] [cursor=pointer]
+      - generic [ref=e23]:
+        - generic [ref=e24]:
+          - paragraph [ref=e25]: Select game mode
+          - button "View Game Mode Details" [ref=e26] [cursor=pointer]
+        - generic [ref=e29]:
+          - button "Runner" [ref=e30] [cursor=pointer]
+          - button "Action Quest" [ref=e32] [cursor=pointer]
+          - button "Shooter Arena" [ref=e34] [cursor=pointer]
+        - generic [ref=e36]: Coming Soon
+        - generic [ref=e38]:
+          - button "RPG Adventure" [ref=e39] [cursor=pointer]
+          - button "Empire Builder" [ref=e40] [cursor=pointer]
+          - button "Fighting Arena" [ref=e41] [cursor=pointer]
+          - button "Racing Rush" [ref=e42] [cursor=pointer]
+          - button "Survival Mode" [ref=e43] [cursor=pointer]
+          - button "Simulator World" [ref=e44] [cursor=pointer]
+      - generic [ref=e45]:
+        - button "lava runner" [ref=e46] [cursor=pointer]
+        - button "ice quest" [ref=e47] [cursor=pointer]
+        - button "forest sprint" [ref=e48] [cursor=pointer]
+        - button "city runner lava" [ref=e49] [cursor=pointer]
+        - button "space quest" [ref=e50] [cursor=pointer]

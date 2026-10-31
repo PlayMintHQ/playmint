@@ -118,7 +118,7 @@ const client = async () => {
   return getSupabase();
 };
 
-const COLUMNS = 'id,title,mode,prompt,config,art_id,thumbnail_path,visibility,created_at,updated_at';
+const COLUMNS = 'id,title,mode,prompt,config,art_id,thumbnail_path,visibility,published_at,allow_remix,remix_parent_id,created_at,updated_at';
 
 /**
  * Save (or re-save) the running game for the signed-in user.
@@ -147,6 +147,8 @@ export const saveGame = async ({ liveParams, preloadedImages, frameBlob = null }
     config,
     asset_meta: assetMeta,
     art_id: artId,
+    remix_parent_id: liveParams.remixParentId || null,
+    allow_remix: liveParams.allowRemix !== undefined ? Boolean(liveParams.allowRemix) : true,
   };
 
   try {
@@ -298,6 +300,52 @@ export const listMyGames = async () => {
   }
 };
 
+/**
+ * List all public community games across all players, newest first.
+ * Readable by anyone (anon and authed) thanks to RLS public read policy.
+ */
+export const listPublicGames = async ({ limit = 60 } = {}) => {
+  const supabase = await client();
+  if (!supabase) return { ok: false, games: [], configured: false, error: 'Accounts are not enabled on this deployment.' };
+  try {
+    const { data, error } = await supabase
+      .from('games')
+      .select(`${COLUMNS},owner_id`)
+      .eq('visibility', 'public')
+      .order('updated_at', { ascending: false })
+      .limit(limit);
+    if (error) {
+      if (isSchemaMissing(error)) return { ok: false, games: [], configured: true, schemaMissing: true, error: error.message };
+      return { ok: false, games: [], configured: true, error: error.message };
+    }
+    const games = data || [];
+    const ownerIds = [...new Set(games.map(g => g.owner_id).filter(Boolean))];
+    const profileMap = new Map();
+    if (ownerIds.length > 0) {
+      try {
+        const { data: profs } = await supabase
+          .from('profiles')
+          .select('id,display_name')
+          .in('id', ownerIds);
+        if (profs) {
+          profs.forEach(p => profileMap.set(p.id, p.display_name));
+        }
+      } catch {
+        /* profile lookup failure is non-fatal */
+      }
+    }
+    await Promise.all(games.map(async (g) => {
+      g.creator_name = profileMap.get(g.owner_id) || 'Community Creator';
+      if (!g.thumbnail_path) return;
+      const url = await server.publicUrl(g.thumbnail_path);
+      g.thumbnail_url = url || null;
+    }));
+    return { ok: true, games, configured: true };
+  } catch (err) {
+    return { ok: false, games: [], configured: true, error: err?.message || String(err) };
+  }
+};
+
 export const renameGame = async (id, title) => {
   const supabase = await client();
   if (!supabase) return fail('Accounts are not enabled on this deployment.');
@@ -324,14 +372,91 @@ export const setGameVisibility = async (id, isPublic) => {
   if (!supabase) return fail('Accounts are not enabled on this deployment.');
   if (!id) return fail('Missing game id.');
   const visibility = isPublic ? 'public' : 'private';
+  const published_at = isPublic ? new Date().toISOString() : null;
   try {
     const { error, count } = await supabase
       .from('games')
-      .update({ visibility }, { count: 'exact' })
+      .update({ visibility, published_at }, { count: 'exact' })
       .eq('id', id);
     if (error) return fail(error);
     if (!count) return fail('That game is not in your library.');
-    return { ok: true, visibility };
+    return { ok: true, visibility, published_at };
+  } catch (err) {
+    return fail(err);
+  }
+};
+
+/**
+ * Fetch a published or unlisted game for public playback.
+ * Permitted by RLS for anon and authenticated visitors.
+ *
+ * @param {string} id UUID of the game
+ * @returns {Promise<{ok: boolean, game?: object, error?: string}>}
+ */
+export const getPublicGame = async (id) => {
+  const supabase = await client();
+  if (!supabase) return fail('Accounts are not enabled on this deployment.');
+  if (!id) return fail('Missing game id.');
+
+  try {
+    const { data, error } = await supabase
+      .from('games')
+      .select('id,owner_id,title,mode,prompt,config,asset_meta,art_id,thumbnail_path,visibility,created_at,published_at,allow_remix,remix_parent_id')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (error) {
+      if (isSchemaMissing(error)) return fail('Games library schema is not yet configured.');
+      return fail(error);
+    }
+    if (!data) {
+      return fail('Game not found or is private.');
+    }
+
+    let thumbnailUrl = null;
+    if (data.thumbnail_path) {
+      thumbnailUrl = await server.publicUrl(data.thumbnail_path);
+    }
+
+    let creatorName = 'Community Creator';
+    if (data.owner_id) {
+      try {
+        const { data: prof } = await supabase
+          .from('profiles')
+          .select('display_name')
+          .eq('id', data.owner_id)
+          .maybeSingle();
+        if (prof?.display_name) {
+          creatorName = prof.display_name;
+        }
+      } catch {
+        /* profile lookup failure is non-fatal */
+      }
+    }
+
+    let parentGame = null;
+    if (data.remix_parent_id) {
+      try {
+        const { data: parent } = await supabase
+          .from('games')
+          .select('id,title,mode')
+          .eq('id', data.remix_parent_id)
+          .maybeSingle();
+        if (parent) parentGame = parent;
+      } catch {
+        /* parent lookup failure is non-fatal */
+      }
+    }
+
+    return {
+      ok: true,
+      game: {
+        ...data,
+        thumbnail_url: thumbnailUrl,
+        creator_name: creatorName,
+        parent_game: parentGame,
+      }
+    };
   } catch (err) {
     return fail(err);
   }

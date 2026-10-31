@@ -19,6 +19,7 @@ import AuthDialog from './auth/AuthDialog';
 import { useAuth } from './auth/authContext';
 import { useRoute, navigate } from './router';
 import { MyGamesPage, RouteStubPage } from './components/MyGamesPage';
+import { PublicGamePage } from './components/PublicGamePage';
 import { saveGame, attachThumbnail } from './game/savedGames';
 import { captureGameFrameWhenReady } from './game/frameCapture';
 
@@ -185,7 +186,7 @@ function App() {
   // running: /my-games and the reserved /g/:id replace ScreenZero. The sign-in
   // dialog pauses the game exactly like the Creator Panel does.
   const route = useRoute();
-  const { dialog: authDialog, status: authStatus, requireAuth } = useAuth();
+  const { dialog: authDialog, status: authStatus, user, requireAuth } = useAuth();
   const isSignInOpen = !!authDialog;
 
   // Saved games (2026-09-27, contract §2B). 'idle' | 'saving' | 'saved' | 'error'
@@ -618,6 +619,67 @@ function App() {
   const handleGoMyGames = () => {
     leaveRunningGame();
     navigate('/my-games');
+  };
+
+  // Play a public game directly on /g/:id
+  const handlePlayPublicGame = (publicGame) => {
+    if (!publicGame) return;
+    const isOwner = authStatus === 'authed' && user?.id === publicGame.owner_id;
+    const config = {
+      ...(publicGame.config || {}),
+      gameId: publicGame.art_id || publicGame.config?.gameId || null,
+      gameName: publicGame.title || publicGame.config?.gameName || 'PlayMint Game',
+      gameType: publicGame.mode || publicGame.config?.gameType || 'runner',
+      sourcePrompt: publicGame.prompt || publicGame.config?.sourcePrompt || '',
+      creatorName: publicGame.creator_name || 'Community Creator',
+      isPublicGame: true,
+      remixParentId: publicGame.id,
+      remixParentTitle: publicGame.title,
+      savedGameId: isOwner ? publicGame.id : null,
+      autoSaveExempt: !isOwner,
+      assetMeta: publicGame.asset_meta || null,
+    };
+    setLiveParams(withRunId(config));
+    setHasStarted(true);
+    setGameKey(k => k + 1);
+
+    // If art_id is available, hydrate from asset cache or Blob store
+    const artId = publicGame.art_id;
+    if (artId) {
+      getGameById(artId).then((cached) => {
+        if (!cached) return;
+        setLiveParams(prev => ({
+          ...prev,
+          dynamicAssetUrls: true,
+          preloadedImages: cached.preloadedImages,
+          assetMeta: hydrateAssetMetaLite({ assetMeta: cached.assetMeta }).assetMeta
+        }));
+        setGameKey(k => k + 1);
+      }).catch(() => {});
+    }
+  };
+
+  // Minimal Remix: carry forward prompt, mode, theme, and lineage
+  const handleRemix = (gameOrParams) => {
+    leaveRunningGame();
+    const source = gameOrParams || liveParams;
+    const parentId = source.id || source.savedGameId || source.remixParentId || null;
+    const parentTitle = source.title || source.gameName || 'PlayMint Game';
+    const parentPrompt = source.prompt || source.sourcePrompt || '';
+    const parentType = source.mode || source.gameType || 'runner';
+    const parentTheme = source.config?.themeKey || source.themeKey || 'default';
+
+    setLiveParams(prev => ({
+      ...prev,
+      sourcePrompt: parentPrompt,
+      gameType: parentType,
+      themeKey: parentTheme,
+      remixParentId: parentId,
+      remixParentTitle: parentTitle,
+      savedGameId: null, // remixed variants are saved as fresh rows
+      autoSaveExempt: false,
+    }));
+    navigate('/');
   };
 
   // ── Saved games (contract §2B, 2026-09-27) ─────────────────────────────────
@@ -1127,6 +1189,7 @@ function App() {
               saveState={saveState}
               canSave={authStatus !== 'disabled'}
               playerAnimState={repairState === 'done' ? null : repairState}
+              onRemix={() => handleRemix(liveParams)}
             />
 
             {captureMode && (
@@ -1233,6 +1296,7 @@ function App() {
           gameType={gameOverData.gameType}
           onRestart={handleRestartGame}
           onTweakSettings={handleTweakSettings}
+          onRemix={() => handleRemix(liveParams)}
         />
       )}
       <GameSelectorModal
@@ -1253,14 +1317,22 @@ function App() {
           flag render neither the grid nor a way out. `!hasStarted` is the real
           "a game owns the screen" condition and both branches already use it. */}
       {!hasStarted && route.name === 'my-games' && <MyGamesPage />}
-      {!hasStarted && (route.name === 'game' || route.name === 'not-found') && (
-        <RouteStubPage kind={route.name} />
+      {!hasStarted && route.name === 'game' && (
+        <PublicGamePage
+          gameId={route.params.id}
+          onPlay={handlePlayPublicGame}
+          onRemix={handleRemix}
+        />
+      )}
+      {!hasStarted && route.name === 'not-found' && (
+        <RouteStubPage kind="not-found" />
       )}
 
       {/* ScreenZero rendered if NOT started and NOT on another route */}
       {!hasStarted && route.name === 'home' && (
         <ScreenZero
           onMyGames={handleGoMyGames}
+          currentConfig={liveParams}
           onStartTransition={(config) => {
             setGameKey(k => k + 1);
             setIsTransitioning(true);

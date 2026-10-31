@@ -1,5 +1,6 @@
 {
   "rewrites": [
+    { "source": "/g/:id", "destination": "/api/game-preview?id=:id" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],
   "crons": [

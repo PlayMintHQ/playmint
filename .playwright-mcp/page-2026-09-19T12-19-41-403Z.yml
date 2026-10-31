@@ -1,0 +1,35 @@
+- generic [ref=f2e4]:
+  - generic [ref=f2e10]:
+    - button "💾 Cache only" [ref=f2e11] [cursor=pointer]
+    - button "✨ Force fresh" [ref=f2e12] [cursor=pointer]
+    - button "🎬 Demo mode" [ref=f2e13] [cursor=pointer]
+    - generic [ref=f2e14]:
+      - generic [ref=f2e15]: "Insert Gemini API key:"
+      - textbox "Insert Gemini API key:" [ref=f2e16]:
+        - /placeholder: AIza...
+      - button "Save" [ref=f2e17] [cursor=pointer]
+    - button "Sign in" [ref=f2e18] [cursor=pointer]
+  - generic [ref=f2e23]:
+    - generic:
+      - img "PlayMint"
+      - paragraph: From words to worlds
+    - generic [ref=f2e26]:
+      - generic [ref=f2e27]:
+        - textbox "e.g. 'city runner lava' or 'forest quest'" [ref=f2e28]
+        - button "Generate" [ref=f2e29] [cursor=pointer]
+      - generic [ref=f2e30]:
+        - generic [ref=f2e31]:
+          - paragraph [ref=f2e32]: Select game mode
+          - button "View Game Mode Details" [ref=f2e33] [cursor=pointer]
+        - generic [ref=f2e36]:
+          - button "Runner" [ref=f2e37] [cursor=pointer]
+          - button "Action Quest" [ref=f2e39] [cursor=pointer]
+          - button "Shooter Arena" [ref=f2e41] [cursor=pointer]
+        - generic [ref=f2e43]: Coming Soon
+        - generic [ref=f2e45]:
+          - button "RPG Adventure" [ref=f2e46] [cursor=pointer]
+          - button "Empire Builder" [ref=f2e47] [cursor=pointer]
+          - button "Fighting Arena" [ref=f2e48] [cursor=pointer]
+          - button "Racing Rush" [ref=f2e49] [cursor=pointer]
+          - button "Survival Mode" [ref=f2e50] [cursor=pointer]
+          - button "Simulator World" [ref=f2e51] [cursor=pointer]

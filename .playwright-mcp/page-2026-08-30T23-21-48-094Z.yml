@@ -1,0 +1,40 @@
+- generic [ref=e3]:
+  - generic:
+    - generic:
+      - generic:
+        - button [ref=e56] [cursor=pointer]:
+          - img "PlayMint" [ref=e57]
+        - heading "Permafrost Salvo" [level=1]
+        - generic [ref=e58]:
+          - generic: "SCORE: 0"
+          - button "Fullscreen" [ref=e59] [cursor=pointer]
+          - button [ref=e63] [cursor=pointer]
+    - generic [ref=e75]:
+      - generic [ref=e76]:
+        - heading "Creator Panel" [level=2] [ref=e78]
+        - button "✕" [ref=e79] [cursor=pointer]
+      - generic [ref=e80]:
+        - button "✓ Gemini Key Detected & Usable" [ref=e82] [cursor=pointer]
+        - generic [ref=e83]:
+          - generic [ref=e84]: Game Name
+          - textbox "Enter Game Name" [ref=e85]: Permafrost Salvo
+        - generic [ref=e86]:
+          - generic [ref=e87]: Regenerate with Prompt
+          - generic [ref=e88]:
+            - textbox "e.g. lava runner" [ref=e89]
+            - button "▶" [ref=e90] [cursor=pointer]
+        - button "Share Game" [ref=e91] [cursor=pointer]
+        - generic [ref=e98]:
+          - generic [ref=e99]: Game Type
+          - button "Browse All Game Types ⋯" [ref=e100] [cursor=pointer]
+        - generic [ref=e101]:
+          - generic [ref=e102]: Mode Options
+          - button "Custom Tuning" [ref=e103] [cursor=pointer]
+        - generic [ref=e105]:
+          - generic [ref=e106]:
+            - button "Home" [ref=e107] [cursor=pointer]
+            - button "Export Config" [ref=e111] [cursor=pointer]
+            - button "Import Config" [ref=e115] [cursor=pointer]
+          - button "Reset" [ref=e119] [cursor=pointer]
+    - generic:
+      - paragraph: WASD / Arrows Move · F / Click Fire at Nearest Enemy

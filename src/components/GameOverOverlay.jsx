@@ -44,9 +44,10 @@ const ScoreTicker = ({ targetScore }) => {
   return <span>{count}</span>;
 };
 
-const GameOverOverlay = ({ isWin, score, themeKey, gameType, onRestart, onTweakSettings }) => {
+const GameOverOverlay = ({ isWin, score, themeKey, gameType, onRestart, onTweakSettings, onRemix }) => {
   const [isBtnHovered, setIsBtnHovered] = useState(false);
   const [isTweakHovered, setIsTweakHovered] = useState(false);
+  const [isRemixHovered, setIsRemixHovered] = useState(false);
   const [highScore, setHighScore] = useState(0);
   const [isNewRecord, setIsNewRecord] = useState(false);
 
@@ -370,6 +371,36 @@ const GameOverOverlay = ({ isWin, score, themeKey, gameType, onRestart, onTweakS
           >
             Play Again
           </button>
+
+          {/* Remix Game Button */}
+          {onRemix && (
+            <button
+              onClick={onRemix}
+              onMouseEnter={() => setIsRemixHovered(true)}
+              onMouseLeave={() => setIsRemixHovered(false)}
+              style={{
+                width: '100%',
+                height: '42px',
+                background: isRemixHovered ? 'rgba(245, 158, 11, 0.18)' : 'rgba(245, 158, 11, 0.08)',
+                border: '1px solid rgba(245, 158, 11, 0.4)',
+                borderRadius: '12px',
+                color: 'var(--pm-accent-amber, #f59e0b)',
+                fontSize: '13px',
+                fontFamily: 'var(--font-primary)',
+                fontWeight: '600',
+                cursor: 'pointer',
+                transform: isRemixHovered ? 'translateY(-1px)' : 'translateY(0)',
+                transition: 'all 0.15s ease',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                outline: 'none',
+                gap: '6px'
+              }}
+            >
+              Remix Game
+            </button>
+          )}
 
           {/* Tweak Settings Button */}
           <button

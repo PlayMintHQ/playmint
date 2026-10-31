@@ -1,5 +1,5 @@
 import React from 'react';
-import { IconFullscreen, IconFullscreenExit, IconMenu, IconSave } from './Icons';
+import { IconFullscreen, IconFullscreenExit, IconMenu, IconSave, IconRemix } from './Icons';
 import AccountButton from '../auth/AccountButton';
 
 const HudHeader = ({
@@ -16,6 +16,7 @@ const HudHeader = ({
   saveState,
   canSave,
   playerAnimState,
+  onRemix,
 }) => {
   return (
     <div className="hud-header" onPointerDown={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()}>
@@ -28,9 +29,14 @@ const HudHeader = ({
 
         {/* CENTER: Title (hidden on mobile, shown inline on desktop) */}
         {liveParams.gameName && (
-          <h1 className="hud-header__title hud-header__title--inline">
-            {liveParams.gameName}
-          </h1>
+          <div className="hud-header__title hud-header__title--inline">
+            <h1 style={{ margin: 0, fontSize: 'inherit', display: 'inline' }}>{liveParams.gameName}</h1>
+            {liveParams.creatorName && (
+              <span style={{ fontSize: '0.8rem', opacity: 0.75, marginLeft: '8px', fontWeight: 'normal', color: 'var(--pm-text-muted, #94a3b8)' }}>
+                by {liveParams.creatorName}
+              </span>
+            )}
+          </div>
         )}
 
         {/* RIGHT: Controls */}
@@ -82,6 +88,19 @@ const HudHeader = ({
             </button>
           )}
 
+          {/* Remix button (available on public / shared games) */}
+          {onRemix && (
+            <button
+              className="pm-btn pm-btn-outline hud-header__icon-btn"
+              onClick={onRemix}
+              title="Remix this game with your own custom prompts or settings"
+              aria-label="Remix game"
+              style={{ color: 'var(--pm-accent-amber, #f59e0b)', borderColor: 'rgba(245, 158, 11, 0.4)' }}
+            >
+              <IconRemix />
+            </button>
+          )}
+
           <button className="pm-btn pm-btn-primary hud-header__icon-btn" onClick={onMenuOpen}>
             <IconMenu />
           </button>
@@ -90,9 +109,14 @@ const HudHeader = ({
 
       {/* Mobile title row: shown below the icon bar on small screens */}
       {liveParams.gameName && (
-        <h1 className="hud-header__title hud-header__title--mobile">
-          {liveParams.gameName}
-        </h1>
+        <div className="hud-header__title hud-header__title--mobile">
+          <span>{liveParams.gameName}</span>
+          {liveParams.creatorName && (
+            <span style={{ fontSize: '0.75rem', opacity: 0.75, marginLeft: '6px', fontWeight: 'normal', color: 'var(--pm-text-muted, #94a3b8)' }}>
+              by {liveParams.creatorName}
+            </span>
+          )}
+        </div>
       )}
 
       {/* Player-animation repair. This game's sprite sheet failed its quality

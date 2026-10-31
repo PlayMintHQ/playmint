@@ -7,6 +7,7 @@ import { generateOrRestoreAssets, makePromptKey, makePresetKey } from '../game/a
 import * as metrics from '../game/metrics';
 import { THEMES } from '../game/themes';
 import AccountButton from '../auth/AccountButton';
+import { IconRemix } from './Icons';
 
 const BANNED_WORDS = ['fuck', 'shit', 'bitch', 'cunt', 'ass', 'dick', 'pussy', 'cock', 'nigger', 'faggot'];
 
@@ -129,10 +130,29 @@ const WORLDS = [
 ];
 
 const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompleteTransition, currentConfig, onMyGames }) => {
-  const [prompt, setPrompt] = useState('');
+  const modeKeyMap = {
+    runner: 'standard',
+    platformer: 'action_quest',
+    shooter: 'shooter_arena',
+  };
+  const [prompt, setPrompt] = useState(() => currentConfig?.sourcePrompt || '');
   const [isGenerating, setIsGenerating] = useState(false);
   const [transitionPhase, setTransitionPhase] = useState('idle'); // idle | compiling | fading | done
-  const [selectedMode, setSelectedMode] = useState(null); // null | 'standard' | 'action_quest' | 'shooter_arena'
+  const [selectedMode, setSelectedMode] = useState(() => {
+    if (currentConfig?.gameType && modeKeyMap[currentConfig.gameType]) {
+      return modeKeyMap[currentConfig.gameType];
+    }
+    return null;
+  });
+
+  useEffect(() => {
+    if (currentConfig?.sourcePrompt && !prompt) {
+      setPrompt(currentConfig.sourcePrompt);
+    }
+    if (currentConfig?.gameType && !selectedMode && modeKeyMap[currentConfig.gameType]) {
+      setSelectedMode(modeKeyMap[currentConfig.gameType]);
+    }
+  }, [currentConfig]);
   const [showInfoModal, setShowInfoModal] = useState(false);
   const [terminalLogs, setTerminalLogs] = useState([]);
   const [progress, setProgress] = useState(0);
@@ -459,7 +479,13 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
 
       metrics.mark('assets-ready');
       setTerminalLogs(prev => [...prev, '[ENGINE] Booting game scene and registering WebGL textures...']);
-      onStartTransition({ ...presetBootConfig(newConfig, gen), preloadedImages: gen.preloadedImages, assetMeta: gen.assetMeta });
+      onStartTransition({
+        ...presetBootConfig(newConfig, gen),
+        remixParentId: currentConfig?.remixParentId || null,
+        remixParentTitle: currentConfig?.remixParentTitle || null,
+        preloadedImages: gen.preloadedImages,
+        assetMeta: gen.assetMeta
+      });
     } catch (err) {
       metrics.mark('assets-failed');
       // Stay in the 'compiling' phase: the static boot fires phaser-load-complete,
@@ -468,7 +494,11 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
       if (!err.cacheOnlyMiss) { // cache-only miss already explained itself via onProgress
         setTerminalLogs(prev => [...prev, '[ASSETS] AI generation unavailable — launching with built-in theme artwork. Add a Gemini API key (top right) for AI assets.']);
       }
-      onStartTransition(toStaticThemeConfig(newConfig));
+      onStartTransition({
+        ...toStaticThemeConfig(newConfig),
+        remixParentId: currentConfig?.remixParentId || null,
+        remixParentTitle: currentConfig?.remixParentTitle || null
+      });
     }
   };
 
@@ -584,7 +614,13 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
 
       metrics.mark('assets-ready');
       setTerminalLogs(prev => [...prev, '[ENGINE] Booting game scene and registering WebGL textures...']);
-      onStartTransition({ ...gen.config, preloadedImages: gen.preloadedImages, assetMeta: gen.assetMeta });
+      onStartTransition({
+        ...gen.config,
+        remixParentId: currentConfig?.remixParentId || null,
+        remixParentTitle: currentConfig?.remixParentTitle || null,
+        preloadedImages: gen.preloadedImages,
+        assetMeta: gen.assetMeta
+      });
     } catch (err) {
       metrics.mark('assets-failed');
       console.error('[Compilation Error] Game generation or preloading failed:', err);
@@ -594,7 +630,11 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
         if (!err.cacheOnlyMiss) { // cache-only miss already explained itself via onProgress
           setTerminalLogs(prev => [...prev, '[ASSETS] AI generation unavailable — launching with built-in theme artwork. Add a Gemini API key (top right) for AI assets.']);
         }
-        onStartTransition(toStaticThemeConfig(generatedConfig));
+        onStartTransition({
+          ...toStaticThemeConfig(generatedConfig),
+          remixParentId: currentConfig?.remixParentId || null,
+          remixParentTitle: currentConfig?.remixParentTitle || null
+        });
       } else {
         // Config generation itself failed (local, near-infallible) — plain reset
         metrics.cancelRun();
@@ -994,6 +1034,11 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
             <div ref={formRef} className="pm-screenzero-content">
               {/* Input card */}
               <div className="pm-prompt-card">
+                {currentConfig?.remixParentTitle && (
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', background: 'rgba(245, 158, 11, 0.15)', border: '1px solid rgba(245, 158, 11, 0.35)', borderRadius: '12px', fontSize: '12px', color: 'var(--pm-accent-amber, #f59e0b)', marginBottom: '8px' }}>
+                    <IconRemix /> Remixing: <strong>{currentConfig.remixParentTitle}</strong>
+                  </div>
+                )}
                 <form onSubmit={handleGenerate}>
                   <input
                     type="text"

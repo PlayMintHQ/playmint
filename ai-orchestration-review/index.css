@@ -1,0 +1,609 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Outfit:wght@400;500;600;700;900&family=Impact&display=swap');
+
+:root {
+  /* PlayMint Color Palette */
+  --pm-bg-main: #0A0D14;
+  --pm-bg-panel: rgba(18, 24, 37, 0.7);
+  --pm-bg-panel-light: #121825;
+  --pm-bg-input: #0A0D14;
+  
+  --pm-accent-teal: #00E599;
+  --pm-accent-teal-hover: #00cca8;
+  --pm-accent-teal-glow: rgba(0, 229, 153, 0.3);
+  
+  --pm-accent-orange: #FF8C00;
+  --pm-accent-orange-glow: rgba(255, 140, 0, 0.3);
+  
+  --pm-accent-purple: #8A2BE2;
+  --pm-accent-blue: #3182CE;
+  
+  --pm-text-primary: #FFFFFF;
+  --pm-text-secondary: #9CA3AF;
+  --pm-text-tertiary: #6B7280;
+  
+  --pm-border: rgba(255, 255, 255, 0.08);
+  --pm-border-focus: rgba(0, 229, 153, 0.5);
+  
+  --pm-shadow-glow: 0 0 15px var(--pm-accent-teal-glow);
+  --pm-shadow-panel: 0 10px 25px rgba(0, 0, 0, 0.5);
+
+  --font-primary: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-heading: 'Outfit', system-ui, -apple-system, sans-serif;
+  --font-game: 'Impact', 'Arial Black', sans-serif;
+
+  --pm-safe-area-top: env(safe-area-inset-top);
+  --pm-safe-area-right: env(safe-area-inset-right);
+  --pm-safe-area-bottom: env(safe-area-inset-bottom);
+  --pm-safe-area-left: env(safe-area-inset-left);
+}
+
+html, body {
+  margin: 0;
+  background-color: var(--pm-bg-main);
+  color: var(--pm-text-primary);
+  font-family: var(--font-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
+
+canvas {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+@media (max-width: 640px) {
+  .pm-input {
+    font-size: 14px;
+  }
+}
+
+#root {
+  width: 100%;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Typography Utilities */
+.pm-heading {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  margin: 0;
+}
+
+.pm-text-gradient {
+  background: linear-gradient(90deg, var(--pm-accent-teal) 0%, var(--pm-accent-orange) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  color: transparent;
+  display: inline-block;
+}
+
+/* Base Components Structure */
+.pm-glass-panel {
+  background: rgba(19, 23, 34, 0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--pm-border);
+  box-shadow: var(--pm-shadow-panel);
+}
+
+.pm-card {
+  background: var(--pm-bg-panel);
+  border: 1px solid var(--pm-border);
+  border-radius: 12px;
+  padding: 20px;
+  transition: all 0.2s ease-in-out;
+}
+.pm-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.15);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+}
+
+/* Buttons */
+.pm-btn {
+  font-family: var(--font-primary);
+  font-weight: 600;
+  border-radius: 12px;
+  padding: 12px 24px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.pm-btn-primary {
+  background: linear-gradient(90deg, #219B86 0%, #D49D33 100%);
+  color: #ffffff;
+  border: none;
+  box-shadow: 0 4px 15px rgba(33, 155, 134, 0.3);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+.pm-btn-primary:hover {
+  filter: brightness(1.15);
+  box-shadow: 0 6px 20px rgba(212, 157, 51, 0.4);
+}
+
+.pm-btn-outline {
+  background-color: transparent;
+  color: var(--pm-text-primary);
+  border: 1px solid transparent;
+  background-image: linear-gradient(var(--pm-bg-main), var(--pm-bg-main)), linear-gradient(90deg, #219B86, #D49D33);
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+}
+.pm-btn-outline:hover {
+  background-image: linear-gradient(rgba(255,255,255,0.05), rgba(255,255,255,0.05)), linear-gradient(90deg, #219B86, #D49D33);
+  filter: brightness(1.2);
+}
+
+.pm-btn-danger {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+.pm-btn-danger:hover {
+  background: rgba(239, 68, 68, 0.2);
+}
+
+.pm-btn-muted {
+  background: transparent;
+  color: var(--pm-text-secondary);
+  border: 1px solid var(--pm-border);
+}
+.pm-btn-muted:hover {
+  background: var(--pm-bg-panel-light);
+  color: var(--pm-text-primary);
+}
+
+/* Form Elements */
+.pm-input {
+  width: 100%;
+  background: var(--pm-bg-input);
+  border: 1px solid var(--pm-border);
+  color: var(--pm-text-primary);
+  border-radius: 8px;
+  padding: 12px 16px;
+  font-family: var(--font-primary);
+  font-size: 14px;
+  transition: border-color 0.2s;
+  box-sizing: border-box;
+  outline: none;
+}
+.pm-input:focus {
+  border-color: var(--pm-border-focus);
+}
+
+.pm-label {
+  display: block;
+  color: var(--pm-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Custom Range Sliders */
+.pm-slider {
+  -webkit-appearance: none;
+  width: 100%;
+  height: 6px;
+  background: var(--pm-bg-input);
+  border-radius: 3px;
+  outline: none;
+}
+.pm-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--pm-accent-teal);
+  cursor: pointer;
+  box-shadow: 0 0 10px var(--pm-accent-teal-glow);
+  transition: transform 0.1s;
+}
+.pm-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+/* Badges */
+.pm-badge {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  padding: 4px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+}
+.pm-badge-teal { background: rgba(0, 229, 153, 0.15); color: var(--pm-accent-teal); }
+.pm-badge-orange { background: rgba(255, 140, 0, 0.15); color: var(--pm-accent-orange); }
+.pm-badge-blue { background: rgba(49, 130, 206, 0.15); color: var(--pm-accent-blue); }
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--pm-bg-main);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--pm-bg-panel-light);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,0.2);
+}
+
+/* ===== HUD Header ===== */
+.hud-header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  padding: clamp(8px, 2vw, 16px) clamp(12px, 3vw, 24px);
+  z-index: 900;
+  box-sizing: border-box;
+  pointer-events: none;
+  background: linear-gradient(to bottom, rgba(11,14,20,0.85) 0%, rgba(11,14,20,0.4) 70%, transparent 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hud-header__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  gap: 8px;
+}
+
+.hud-header__logo {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  pointer-events: auto;
+}
+.hud-header__logo img {
+  height: clamp(22px, 4vw, 32px);
+}
+
+.hud-header__title {
+  margin: 0;
+  color: var(--pm-text-primary);
+  font-family: var(--font-game);
+  font-style: italic;
+  font-weight: 900;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  text-shadow: 2px 2px 0 #000, 4px 4px 15px rgba(0,229,153,0.3);
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Inline title (desktop only) */
+.hud-header__title--inline {
+  flex: 1 1 0;
+  text-align: center;
+  min-width: 0;
+  padding: 0 12px;
+  font-size: clamp(16px, 2.5vw, 36px);
+  display: none;
+}
+
+/* Mobile title (below icon row) */
+.hud-header__title--mobile {
+  text-align: center;
+  font-size: clamp(14px, 4vw, 22px);
+  padding: 2px 0 0 0;
+  display: block;
+}
+
+.hud-header__controls {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: clamp(6px, 1.5vw, 16px);
+  pointer-events: auto;
+}
+
+.hud-header__score {
+  font-size: clamp(12px, 2.5vw, 18px);
+  font-weight: 700;
+  color: #fff;
+  font-family: var(--font-heading);
+  letter-spacing: 0.5px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  cursor: default;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* Hide "SCORE:" label on mobile to save space */
+.hud-header__score-label {
+  display: inline;
+}
+@media (max-width: 480px) {
+  .hud-header__score-label {
+    display: none;
+  }
+}
+
+.hud-header__icon-btn {
+  padding: 6px 8px !important;
+  border-radius: 8px !important;
+  font-size: 14px;
+}
+
+/* Hide fullscreen button on mobile (browsers handle it natively) */
+@media (max-width: 480px) {
+  .hud-header__fullscreen-btn {
+    display: none;
+  }
+}
+
+/* Landscape / short-height mobile: ultra-compact HUD */
+@media (max-height: 480px) {
+  .hud-header {
+    padding: 4px 8px;
+    gap: 0;
+  }
+  .hud-header__row {
+    gap: 4px;
+  }
+  .hud-header__logo img {
+    height: 16px;
+  }
+  .hud-header__score {
+    font-size: 11px;
+    padding: 2px 6px;
+  }
+  .hud-header__icon-btn {
+    padding: 2px 5px !important;
+    font-size: 11px;
+  }
+  .hud-header__title--mobile {
+    display: none !important;
+  }
+}
+
+/* Desktop: show inline title, hide mobile title */
+@media (min-width: 600px) {
+  .hud-header__title--inline {
+    display: block;
+  }
+  .hud-header__title--mobile {
+    display: none;
+  }
+  .hud-header__score {
+    padding: 8px 16px;
+    font-size: clamp(14px, 2.5vw, 18px);
+  }
+}
+
+@media (max-width: 480px) {
+  .hud-header {
+    padding: 6px 10px;
+  }
+  .hud-header__logo img {
+    height: 20px;
+  }
+  .hud-header__score {
+    font-size: 12px;
+    padding: 4px 8px;
+  }
+  .hud-header__icon-btn {
+    padding: 4px 6px !important;
+    font-size: 12px;
+  }
+  .hud-header__title--mobile {
+    display: none;
+  }
+}
+
+@keyframes forgeDrift {
+  0% { transform: translate(0, 0) scale(1); opacity: 0.15; }
+  50% { opacity: 0.4; }
+  100% { transform: translate(-12px, -20px) scale(1.3); opacity: 0.1; }
+}
+
+/* Premium Mobile Virtual Controls Overlay Styling */
+.pm-mobile-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 100;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  box-sizing: border-box;
+  /* Button geometry lives in these three custom properties so every rule below
+     scales together — and so the footprint MobileControls measures for the
+     camera gutter stays truthful when the sizes change. vmin (not vw/vh) keeps
+     a button the same size in both orientations. */
+  --pm-btn: clamp(46px, 12vmin, 58px);
+  --pm-btn-jump: clamp(54px, 14vmin, 66px);
+  --pm-btn-gap: clamp(8px, 2.5vmin, 14px);
+  /* env(x, fallback) only uses the fallback where env() is UNSUPPORTED, so the
+     old `env(safe-area-inset-left, 20px)` resolved to 0 on every ordinary phone
+     and the buttons sat flush against the screen edge. max() is a real minimum. */
+  padding-top: max(8px, env(safe-area-inset-top));
+  padding-right: max(12px, env(safe-area-inset-right));
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+  padding-left: max(12px, env(safe-area-inset-left));
+  width: 100%;
+  height: 100%;
+}
+
+/* Landscape phones are the worst case — full-size buttons against a ~390px
+   tall viewport. Same breakpoint the HUD header already compacts at. */
+@media (max-height: 480px) {
+  .pm-mobile-overlay {
+    --pm-btn: clamp(42px, 11vmin, 50px);
+    --pm-btn-jump: clamp(46px, 12vmin, 56px);
+    --pm-btn-gap: 8px;
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+  }
+}
+
+.pm-mobile-dpad {
+  pointer-events: auto;
+  display: flex;
+  gap: var(--pm-btn-gap);
+  align-items: center;
+}
+
+.pm-mobile-actions {
+  pointer-events: auto;
+  display: flex;
+  gap: var(--pm-btn-gap);
+  align-items: center;
+}
+
+/* Glassmorphic touch buttons, sized from the custom properties above. */
+.pm-touch-btn {
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  width: var(--pm-btn);
+  height: var(--pm-btn);
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(18, 24, 37, 0.6);
+  color: #ffffff;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  /* Resting translucency is the direct lever on "the controls hide gameplay".
+     No backdrop-filter here any more: a per-frame GPU blur over an animating
+     canvas costs real frames on exactly the phones this is meant to help, and
+     at this opacity the blur was invisible anyway. */
+  opacity: 0.6;
+  transition: transform 0.05s ease, opacity 0.12s ease, background 0.1s ease, border-color 0.1s ease, box-shadow 0.1s ease;
+  padding: 0;
+  margin: 0;
+  outline: none;
+}
+
+/* Pressed: full opacity + theme glow, so touch feedback is unmistakable. */
+.pm-touch-btn:active {
+  opacity: 1;
+  transform: scale(0.9);
+  background: var(--theme-accent-semi, rgba(0, 229, 153, 0.25));
+  border-color: var(--theme-accent, #00E599);
+  box-shadow: 0 0 16px var(--theme-accent, #00E599), inset 0 1px 2px rgba(255, 255, 255, 0.1);
+}
+
+.pm-touch-btn svg {
+  width: calc(var(--pm-btn) * 0.44);
+  height: calc(var(--pm-btn) * 0.44);
+  fill: currentColor;
+  pointer-events: none;
+}
+
+/* The primary action stays the largest and least transparent target. */
+.pm-touch-btn--jump {
+  width: var(--pm-btn-jump);
+  height: var(--pm-btn-jump);
+  border-color: rgba(255, 255, 255, 0.28);
+  opacity: 0.68;
+}
+
+.pm-touch-btn--jump svg {
+  width: calc(var(--pm-btn-jump) * 0.44);
+  height: calc(var(--pm-btn-jump) * 0.44);
+}
+
+/* Combat cluster: ONE row (shoot · melee · jump), never a stack. A stacked
+   cluster is ~130px tall and its top sits ABOVE the floor line — that is the
+   exact overlap the "enemies under the buttons" complaint was about, and the
+   reason the ground once had to be lifted. One row keeps the tallest control
+   at the jump button's height, so the floor's top edge clears it everywhere. */
+.pm-mobile-actions-stack {
+  display: flex;
+  flex-direction: row;
+  gap: var(--pm-btn-gap);
+  align-items: flex-end;
+}
+
+.pm-mobile-actions-row {
+  display: flex;
+  gap: var(--pm-btn-gap);
+  align-items: flex-end;
+}
+
+/* ── Capture mode (?capture=1 / ?capture=clean) ──────────────────────────────
+   A chrome-free view for recording demos and marketing material. Everything is
+   driven by one class on <body>, so no component needs to know the mode exists
+   and nothing has to be threaded through props. App.jsx owns the flag; the URL
+   owns the truth, so a recording setup is reproducible and survives the remounts
+   that restyles and share-link restores trigger. */
+body.pm-capture .hud-header,
+body.pm-capture .pm-keyboard-hint {
+  display: none !important;
+}
+
+/* The touch controls stay usable — someone still has to PLAY the demo — but
+   drop far enough back to be effectively invisible on camera. ?capture=clean
+   removes them outright, for footage recorded on desktop with a keyboard. */
+body.pm-capture .pm-touch-btn {
+  opacity: 0.12;
+}
+
+body.pm-capture .pm-touch-btn:active {
+  opacity: 0.35;
+}
+
+body.pm-capture--clean .pm-mobile-overlay {
+  display: none !important;
+}
+
+/* The way out. It must be reachable at any moment yet never show up in the
+   recording, so it announces itself for a couple of seconds on entry and then
+   fades to fully transparent — still hoverable, still focusable, still
+   tappable at the top-left corner on a phone. Esc works throughout. */
+.pm-capture-exit {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 12000;
+  margin: 6px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(11, 14, 20, 0.9);
+  color: #ffffff;
+  font-family: Inter, system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  pointer-events: auto;
+  opacity: 0;
+  animation: pm-capture-exit-hint 3.6s ease forwards;
+}
+
+.pm-capture-exit:hover,
+.pm-capture-exit:focus-visible {
+  animation: none;
+  opacity: 1;
+}
+
+@keyframes pm-capture-exit-hint {
+  0%, 65% { opacity: 1; }
+  100% { opacity: 0; }
+}

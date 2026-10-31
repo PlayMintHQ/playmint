@@ -7,6 +7,7 @@ import { getRecords as getTimingRecords } from '../game/metrics';
 import { encodeShareConfig } from '../game/shareLink';
 import { ensureUploaded } from '../game/assetCache';
 import { normalizeRunnerPacing } from '../game/promptUtils';
+import { shareLink } from '../utils/shareUtils';
 
 const RunnerControls = ({ liveParams, onSliderChange }) => (
   <>
@@ -213,19 +214,28 @@ const ConfigActions = ({ liveParams, setLiveParams, setPresetKey, onHomeClick })
 /* Extracted share button with its own state */
 const ShareGameButton = ({ liveParams }) => {
   const [status, setStatus] = useState('idle');
-  const handleShare = () => {
+  const handleShare = async () => {
     try {
-      // Backfill the server cache so this link carries real art cross-device
-      // (covers pre-server games and failed background uploads). Non-blocking —
-      // the copy happens regardless.
-      ensureUploaded(liveParams.gameId);
-      // Slim v2 payload (strips images/assetMeta bulk, keeps gameId for the
-      // asset cache) — see src/game/shareLink.js.
-      const configString = encodeShareConfig(liveParams);
-      const shareUrl = `${window.location.origin}${window.location.pathname}${window.location.search}#config=${configString}`;
-      navigator.clipboard.writeText(shareUrl);
-      setStatus('copied');
-      setTimeout(() => setStatus('idle'), 2000);
+      if (liveParams?.gameId) {
+        ensureUploaded(liveParams.gameId);
+      }
+      let shareUrl;
+      if (liveParams?.savedGameId) {
+        shareUrl = `${window.location.origin}/g/${liveParams.savedGameId}`;
+      } else {
+        const configString = encodeShareConfig(liveParams);
+        shareUrl = `${window.location.origin}/#config=${configString}`;
+      }
+
+      const res = await shareLink({
+        title: liveParams?.gameName || 'PlayMint game',
+        text: `Play "${liveParams?.gameName || 'this game'}" on PlayMint!`,
+        url: shareUrl
+      });
+      if (res.ok) {
+        setStatus(res.method === 'share' ? 'shared' : 'copied');
+        setTimeout(() => setStatus('idle'), 2000);
+      }
     } catch (e) {
       console.error(e);
     }
@@ -237,7 +247,7 @@ const ShareGameButton = ({ liveParams }) => {
       title="Share Game"
       style={{ justifyContent: 'center', width: '100%', gap: '6px' }}
     >
-      {status === 'copied' ? '✓' : <IconShare />}
+      {status === 'copied' ? '✓ Copied' : status === 'shared' ? '✓ Shared' : <><IconShare /> Share Game</>}
     </button>
   );
 };

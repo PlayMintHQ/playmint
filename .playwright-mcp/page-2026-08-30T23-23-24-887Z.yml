@@ -1,0 +1,115 @@
+- generic [ref=f2e3]:
+  - generic:
+    - generic:
+      - generic:
+        - button [ref=f2e56] [cursor=pointer]:
+          - img "PlayMint" [ref=f2e57]
+        - heading "Frost Onslaught" [level=1]
+        - generic [ref=f2e58]:
+          - generic: "SCORE: 0"
+          - button "Fullscreen" [ref=f2e59] [cursor=pointer]
+          - button [ref=f2e63] [cursor=pointer]
+    - generic [ref=f2e75]:
+      - generic [ref=f2e76]:
+        - heading "Creator Panel" [level=2] [ref=f2e78]
+        - button "✕" [ref=f2e79] [cursor=pointer]
+      - generic [ref=f2e80]:
+        - button "✓ Gemini Key Detected & Usable" [ref=f2e82] [cursor=pointer]
+        - generic [ref=f2e83]:
+          - generic [ref=f2e84]: Game Name
+          - textbox "Enter Game Name" [ref=f2e85]: Frost Onslaught
+        - generic [ref=f2e86]:
+          - generic [ref=f2e87]: Regenerate with Prompt
+          - generic [ref=f2e88]:
+            - textbox "e.g. lava runner" [ref=f2e89]
+            - button "▶" [ref=f2e90] [cursor=pointer]
+        - button "Share Game" [ref=f2e91] [cursor=pointer]
+        - generic [ref=f2e98]:
+          - generic [ref=f2e99]: Game Type
+          - button "Browse All Game Types ⋯" [ref=f2e100] [cursor=pointer]
+        - generic [ref=f2e101]:
+          - generic [ref=f2e102]: Mode Options
+          - button "Custom Tuning" [ref=f2e103] [cursor=pointer]
+        - generic [ref=f2e105]:
+          - generic [ref=f2e106]:
+            - button "Home" [ref=f2e107] [cursor=pointer]
+            - button "Export Config" [ref=f2e111] [cursor=pointer]
+            - button "Import Config" [ref=f2e115] [cursor=pointer]
+          - button "Reset" [ref=f2e119] [cursor=pointer]
+    - generic:
+      - paragraph: WASD / Arrows Move · F / Click Fire at Nearest Enemy
+  - generic [ref=f2e4]:
+    - generic [ref=f2e10]:
+      - button "💾 Cache only ✓" [disabled] [ref=f2e11] [cursor=pointer]
+      - button "✨ Force fresh" [disabled] [ref=f2e12] [cursor=pointer]
+      - button "🎬 Demo mode" [disabled] [ref=f2e13] [cursor=pointer]
+      - button "✓" [ref=f2e14] [cursor=pointer]
+    - generic [ref=f2e15]:
+      - generic:
+        - img "PlayMint"
+        - paragraph: From words to worlds
+      - generic [ref=f2e17]:
+        - generic [ref=f2e18]: PLAYMINT COMPILER v2.0
+        - generic [ref=f2e128]:
+          - generic [ref=f2e129]: "[SYSTEM] Booting PlayMint Generative Engine v2.0..."
+          - generic [ref=f2e130]: "[PROMPT] Input -> \"Random Preset\""
+          - generic [ref=f2e131]: "[THEME] Mapping assets -> [ICE THEME, SHOOTER ARENA]"
+          - generic [ref=f2e132]: "[PHYSIC] Move: 260px/s · Waves: 5 · Diff: 6/10"
+          - generic [ref=f2e133]: "[ENGINE] Synchronizing WebGL canvas & establishing world gate..."
+          - generic [ref=f2e134]: "[ASSETS] Starting asset generation via Gemini AI..."
+          - generic [ref=f2e135]: "[CACHE] Cache only is ON — no cached game matches this prompt. Launching built-in theme art (no image spend). Turn the toggle off (top right) to generate fresh AI art."
+          - generic [ref=f2e136]: "[Asset Loader] Loaded asset texture: coin..."
+          - generic [ref=f2e137]: "[Asset Loader] Loaded asset texture: topdown_player..."
+          - generic [ref=f2e138]: "[Asset Loader] Loaded asset texture: topdown_enemy..."
+          - generic [ref=f2e139]: "[Asset Loader] Loaded asset texture: laser..."
+          - generic [ref=f2e140]: "[Asset Loader] Loaded asset texture: fireball..."
+          - generic [ref=f2e141]: "[Asset Loader] Loaded asset texture: projectile..."
+          - generic [ref=f2e142]: "[Asset Loader] Loaded asset texture: slash_f1..."
+          - generic [ref=f2e143]: "[Asset Loader] Loaded asset texture: slash_f2..."
+          - generic [ref=f2e144]: "[Asset Loader] Loaded asset texture: dude..."
+          - generic [ref=f2e145]: "[Asset Loader] Loaded asset texture: fox..."
+          - generic [ref=f2e146]: "[Asset Loader] Loaded asset texture: fox..."
+          - generic [ref=f2e147]: "[Asset Loader] Loaded asset texture: fox..."
+          - generic [ref=f2e148]: "[Asset Loader] Loaded asset texture: crate..."
+          - generic [ref=f2e149]: "[Asset Loader] Loaded asset texture: ground..."
+          - generic [ref=f2e150]: "[Asset Loader] Loaded asset texture: slash_f3..."
+          - generic [ref=f2e151]: "[Asset Loader] Loaded asset texture: slash_f4..."
+          - generic [ref=f2e152]: "[Asset Loader] Loaded asset texture: slash_f0..."
+          - generic [ref=f2e153]: "[Asset Loader] Loaded asset texture: slash_f5..."
+          - generic [ref=f2e154]: "[Asset Loader] Loaded asset texture: shuriken..."
+          - generic [ref=f2e155]: "[Asset Loader] Loaded asset texture: stone_tile..."
+          - generic [ref=f2e156]: "[Asset Loader] Loaded asset texture: ice_tile..."
+          - generic [ref=f2e157]: "[Asset Loader] Loaded asset texture: bg_lava_base..."
+          - generic [ref=f2e158]: "[Asset Loader] Loaded asset texture: bg_lava_sky..."
+          - generic [ref=f2e159]: "[Asset Loader] Loaded asset texture: bg_lava_mountains..."
+          - generic [ref=f2e160]: "[Asset Loader] Loaded asset texture: bg_lava_clouds..."
+          - generic [ref=f2e161]: "[Asset Loader] Loaded asset texture: bg_default_base..."
+          - generic [ref=f2e162]: "[Asset Loader] Loaded asset texture: bg_ice_mountains..."
+          - generic [ref=f2e163]: "[Asset Loader] Loaded asset texture: bg_ice_clouds..."
+          - generic [ref=f2e164]: "[Asset Loader] Loaded asset texture: forest_bg_mid..."
+          - generic [ref=f2e165]: "[Asset Loader] Loaded asset texture: bg_ice_sky..."
+          - generic [ref=f2e166]: "[Asset Loader] Loaded asset texture: forest_bg_far..."
+          - generic [ref=f2e167]: "[Asset Loader] Loaded asset texture: forest_ground..."
+          - generic [ref=f2e168]: "[Asset Loader] Loaded asset texture: forest_platform..."
+          - generic [ref=f2e169]: "[Asset Loader] Loaded asset texture: winter_bg_1..."
+          - generic [ref=f2e170]: "[Asset Loader] Loaded asset texture: winter_bg_2..."
+          - generic [ref=f2e171]: "[Asset Loader] Loaded asset texture: winter_bg_3..."
+          - generic [ref=f2e172]: "[Asset Loader] Loaded asset texture: winter_ground_1..."
+          - generic [ref=f2e173]: "[Asset Loader] Loaded asset texture: lava_ground..."
+          - generic [ref=f2e174]: "[Asset Loader] Loaded asset texture: lava_tile..."
+          - generic [ref=f2e175]: "[Asset Loader] Loaded asset texture: pine_snow..."
+          - generic [ref=f2e176]: "[Asset Loader] Loaded asset texture: city_ground..."
+          - generic [ref=f2e177]: "[Asset Loader] Loaded asset texture: city_bg_near..."
+          - generic [ref=f2e178]: "[Asset Loader] Loaded asset texture: space_ground..."
+          - generic [ref=f2e179]: "[Asset Loader] Loaded asset texture: space_bg_stars..."
+          - generic [ref=f2e180]: "[Asset Loader] Loaded asset texture: city_bg_far..."
+          - generic [ref=f2e181]: "[Asset Loader] Loaded asset texture: city_tile..."
+          - generic [ref=f2e182]: "[Asset Loader] Loaded asset texture: space_tile..."
+          - generic [ref=f2e183]: "[Asset Loader] Loaded asset texture: space_bg_planet..."
+          - generic [ref=f2e184]: "[Asset Loader] Loaded asset texture: city_bg_mid..."
+          - generic [ref=f2e185]: "[Asset Loader] Loaded asset texture: space_bg_nebula..."
+          - generic [ref=f2e186]: "[ENGINE] WebGL dynamic textures bound successfully."
+          - generic [ref=f2e187]: "[ENGINE] World gate synchronized! Starting game..."
+        - generic [ref=f2e189]:
+          - generic [ref=f2e190]: Compiling World Matrix
+          - generic [ref=f2e191]: 100%
