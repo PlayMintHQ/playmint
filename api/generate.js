@@ -29,14 +29,26 @@ function cleanExpiredLimits() {
 // Limits per 24 hours:
 // Guests: 25 API slot calls (approx. 2-3 full games)
 // Authenticated Users: 200 API slot calls (approx. 20 full games)
-const GUEST_DAILY_LIMIT = 25;
-const AUTH_DAILY_LIMIT = 200;
+// Budget counts IMAGE generations only (the paid calls). A full game is ~8-10
+// image calls, so 25 = 2-3 games for a guest. Text/vision calls (art direction,
+// cache matcher, vision QA, editor) are cheap and get their own, larger bucket so
+// they can never starve the image budget. Both are env-overridable.
+const envInt = (name, fallback) => {
+  const n = parseInt(process.env[name] || '', 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+};
+const GUEST_DAILY_LIMIT = envInt('GUEST_DAILY_IMAGE_LIMIT', 25);
+const AUTH_DAILY_LIMIT = envInt('AUTH_DAILY_IMAGE_LIMIT', 200);
+const GUEST_DAILY_TEXT_LIMIT = envInt('GUEST_DAILY_TEXT_LIMIT', 150);
+const AUTH_DAILY_TEXT_LIMIT = envInt('AUTH_DAILY_TEXT_LIMIT', 1000);
+// Image prompts reach ~3.6k chars (the 10-pose sheet scaffold); a 2.5k cap made
+// every animated-sheet request fail with a 400.
+const MAX_PROMPT_CHARS = 16000;
 const WINDOW_MS = 24 * 60 * 60 * 1000;
 
-function checkRateLimitInMemory(identifier, isAuth = false) {
+function checkRateLimitInMemory(identifier, limit) {
   cleanExpiredLimits();
   const now = Date.now();
-  const limit = isAuth ? AUTH_DAILY_LIMIT : GUEST_DAILY_LIMIT;
 
   let record = rateLimits.get(identifier);
   if (!record || now > record.resetAt) {
@@ -51,8 +63,7 @@ function checkRateLimitInMemory(identifier, isAuth = false) {
   return { exceeded, limit, remaining, resetAt: record.resetAt, persistent: false };
 }
 
-async function checkRateLimit(identifier, isAuth = false) {
-  const limit = isAuth ? AUTH_DAILY_LIMIT : GUEST_DAILY_LIMIT;
+async function checkRateLimit(identifier, limit) {
   const supabaseUrl = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').replace(/\/+$/, '');
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
 
@@ -87,7 +98,7 @@ async function checkRateLimit(identifier, isAuth = false) {
     }
   }
 
-  return checkRateLimitInMemory(identifier, isAuth);
+  return checkRateLimitInMemory(identifier, limit);
 }
 
 const ALLOWED_IMAGE_MODELS = new Set([
@@ -102,9 +113,9 @@ const ALLOWED_TEXT_MODELS = new Set([
   'gemini-flash-latest'
 ]);
 
-const getApiKey = () => {
-  return (process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY || '').trim();
-};
+// Server-side only. Deliberately NOT falling back to a VITE_ variable: those are
+// compiled into the public client bundle.
+const getApiKey = () => (process.env.GEMINI_API_KEY || '').trim();
 
 let cachedClient = null;
 let cachedKey = null;
@@ -117,6 +128,29 @@ function getServerClient() {
     cachedKey = key;
   }
   return cachedClient;
+}
+
+// Models differ in which optional fields they accept (imageSize on lite models,
+// thinkingConfig on some tiers). A 400 INVALID_ARGUMENT is retried ONCE with the
+// optional fields stripped instead of failing the slot.
+const isInvalidArgument = (err) =>
+  (err?.status ?? err?.code) === 400 || /invalid[_ ]argument/i.test(err?.message || '');
+
+async function generateWithOptionalFallback(ai, params, stripPaths) {
+  try {
+    return await ai.models.generateContent(params);
+  } catch (err) {
+    if (!isInvalidArgument(err)) throw err;
+    const config = { ...params.config };
+    for (const path of stripPaths) {
+      if (path === 'thinkingConfig') delete config.thinkingConfig;
+      if (path === 'imageSize' && config.imageConfig) {
+        config.imageConfig = { ...config.imageConfig };
+        delete config.imageConfig.imageSize;
+      }
+    }
+    return ai.models.generateContent({ ...params, config });
+  }
 }
 
 export default async function handler(req, res) {
@@ -156,25 +190,6 @@ export default async function handler(req, res) {
     }
   }
 
-  const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket?.remoteAddress || 'unknown-guest';
-  const rateLimitKey = isAuth ? `user:${userId}` : `ip:${clientIp}`;
-
-  const rateStatus = await checkRateLimit(rateLimitKey, isAuth);
-  res.setHeader('X-RateLimit-Limit', rateStatus.limit);
-  res.setHeader('X-RateLimit-Remaining', rateStatus.remaining);
-  res.setHeader('X-RateLimit-Reset', Math.ceil(rateStatus.resetAt / 1000));
-
-  if (rateStatus.exceeded) {
-    return res.status(429).json({
-      error: isAuth
-        ? 'Daily generation quota exceeded. Please return tomorrow.'
-        : 'Guest generation limit reached. Please sign in to create more games.',
-      kind: 'quota',
-      isAuth,
-      remaining: 0
-    });
-  }
-
   // 2. Validate Request Body
   const { action, prompt, model, aspectRatio, imageSize, referenceImageDataUrls, responseSchema, imageDataUrl, label } = req.body || {};
 
@@ -186,8 +201,33 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Prompt is required and must be non-empty.' });
   }
 
-  if (prompt.length > 2500) {
-    return res.status(400).json({ error: 'Prompt exceeds maximum length (2500 characters).' });
+  if (prompt.length > MAX_PROMPT_CHARS) {
+    return res.status(400).json({ error: 'Prompt exceeds maximum length (16000 characters).' });
+  }
+
+
+  const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket?.remoteAddress || 'unknown-guest';
+  const rateLimitKey = isAuth ? `user:${userId}` : `ip:${clientIp}`;
+  const isImage = action === 'image';
+  const bucketKey = isImage ? rateLimitKey : `text:${rateLimitKey}`;
+  const bucketLimit = isImage
+    ? (isAuth ? AUTH_DAILY_LIMIT : GUEST_DAILY_LIMIT)
+    : (isAuth ? AUTH_DAILY_TEXT_LIMIT : GUEST_DAILY_TEXT_LIMIT);
+
+  const rateStatus = await checkRateLimit(bucketKey, bucketLimit);
+  res.setHeader('X-RateLimit-Limit', rateStatus.limit);
+  res.setHeader('X-RateLimit-Remaining', rateStatus.remaining);
+  res.setHeader('X-RateLimit-Reset', Math.ceil(rateStatus.resetAt / 1000));
+
+  if (rateStatus.exceeded) {
+    return res.status(429).json({
+      error: isAuth
+        ? 'Daily generation quota exceeded. Please return tomorrow.'
+        : 'Guest generation limit reached. Sign in to create more games.',
+      kind: 'quota',
+      isAuth,
+      remaining: 0
+    });
   }
 
   // 3. Process Action
@@ -217,11 +257,11 @@ export default async function handler(req, res) {
         thinkingConfig: { thinkingBudget: 0 }
       };
 
-      const result = await ai.models.generateContent({
+      const result = await generateWithOptionalFallback(ai, {
         model: activeModel,
         contents,
         config
-      });
+      }, ['imageSize', 'thinkingConfig']);
 
       const candidate = result?.candidates?.[0];
       const imagePart = candidate?.content?.parts?.find(p => p.inlineData?.data);
@@ -259,7 +299,7 @@ export default async function handler(req, res) {
         }
       }
 
-      const result = await ai.models.generateContent({
+      const result = await generateWithOptionalFallback(ai, {
         model: activeModel,
         contents,
         config: {
@@ -267,7 +307,7 @@ export default async function handler(req, res) {
           ...(responseSchema ? { responseSchema } : {}),
           thinkingConfig: { thinkingBudget: 0 }
         }
-      });
+      }, ['thinkingConfig']);
 
       let parsed = null;
       try {

@@ -299,13 +299,24 @@ export function parsePromptKeywords(text) {
   let keywordsMatched = 0;
 
   // 1. Parse Mode Intent
-  // Shooter Arena requires explicit multi-word phrases, checked BEFORE the
-  // action_quest pattern — a bare "shoot" ("a platformer where you shoot
-  // arrows") still routes to Action Quest.
+  // "modeExplicit" means the request NAMED a mode. It outranks a sticky UI
+  // selection: opening the prompt overlay on a runner and typing "action quest
+  // with skeletons" must not silently stay a runner. Generic words ("fight",
+  // "run") still lose to the user's explicit mode buttons.
+  let modeExplicit = false;
   if (lower.match(/(shooter arena|arena shooter|top[- ]?down shooter|twin[- ]?stick|bullet hell)/)) {
     mode = 'shooter_arena';
+    modeExplicit = true;
     keywordsMatched++;
-  } else if (lower.match(/(action|quest|fight|platformer|enemies|shoot|kill|combat)/)) {
+  } else if (lower.match(/(action quest|platformer|side[- ]?scroll(?:ing)?|jump[- ]and[- ]run)/)) {
+    mode = 'action_quest';
+    modeExplicit = true;
+    keywordsMatched++;
+  } else if (lower.match(/(endless runner|auto[- ]?runner|runner game|running game)/)) {
+    mode = 'standard';
+    modeExplicit = true;
+    keywordsMatched++;
+  } else if (lower.match(/(action|quest|fight|enemies|shoot|kill|combat)/)) {
     mode = 'action_quest';
     keywordsMatched++;
   } else if (lower.match(/(run|dash|runner|dodge|sprint)/)) {
@@ -314,21 +325,30 @@ export function parsePromptKeywords(text) {
   }
 
   // 2. Parse Theme Intent
+  // Word boundaries matter: the old substring regexes matched `ash` in "crash",
+  // `ice` in "justice" and `star` in "start", which silently sent prompts to a
+  // lava/ice/space world. A theme word is a whole word (or a compound listed here).
+  // STRONG words name a world outright. WEAK words are incidental props/verbs
+  // ("fire arrows", "wooden sword", "star score") and only pick a world when no
+  // strong word appears anywhere in the prompt — "forest with fire arrows" is a
+  // forest, "fire world" is lava.
   const themeDefs = [
-    { key: 'lava', regex: /(lava|volcano|molten|inferno|ash)/ },
-    { key: 'ice', regex: /(ice|snow|frost|glacier|winter)/ },
-    { key: 'forest', regex: /(forest|jungle|wood|trees|verdant)/ },
-    { key: 'city', regex: /(city|urban|town|building|skyscraper|street|sidewalk|neon)/ },
-    { key: 'space', regex: /(space|cosmic|galaxy|nebula|planet|asteroid|star|solar|alien)/ }
+    { key: 'lava', strong: /\b(lava|volcano|volcanic|molten|inferno|magma)\b/, weak: /\b(ash|fire|fiery|flame|flames|burning|ember|embers)\b/ },
+    { key: 'ice', strong: /\b(ice|icy|snow|snowy|frost|frosty|frozen|glacier|winter|arctic|tundra)\b/, weak: null },
+    { key: 'forest', strong: /\b(forest|jungle|rainforest|verdant|grove|woodland|woods)\b/, weak: /\b(wood|wooden|tree|trees)\b/ },
+    { key: 'city', strong: /\b(city|urban|town|skyscraper|skyscrapers|cyberpunk|neon|metropolis)\b/, weak: /\b(building|buildings|street|streets|sidewalk)\b/ },
+    { key: 'space', strong: /\b(space|cosmic|galaxy|nebula|planet|asteroid|solar|orbit|alien|aliens)\b/, weak: /\b(star|stars)\b/ }
   ];
 
-  const matchedThemes = [];
+  const strongMatches = [];
+  const weakMatches = [];
   themeDefs.forEach(t => {
-    const match = lower.match(t.regex);
-    if (match) {
-      matchedThemes.push({ key: t.key, index: match.index });
-    }
+    const sm = lower.match(t.strong);
+    if (sm) strongMatches.push({ key: t.key, index: sm.index });
+    const wm = t.weak ? lower.match(t.weak) : null;
+    if (wm) weakMatches.push({ key: t.key, index: wm.index });
   });
+  const matchedThemes = strongMatches.length ? strongMatches : weakMatches;
 
   matchedThemes.sort((a, b) => a.index - b.index);
 
@@ -407,6 +427,7 @@ export function parsePromptKeywords(text) {
 
   return {
     mode,
+    modeExplicit,
     themeKey,
     secondaryThemeKey,
     modifiers,

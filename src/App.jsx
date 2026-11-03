@@ -13,6 +13,7 @@ import { generateTitle } from './game/promptUtils';
 import { interpretEditPrompt, resolveAssetTargets } from './game/gameEditor';
 import GameOverOverlay from './components/GameOverOverlay';
 import RegenOverlay from './components/RegenOverlay';
+import QuickEditOverlay from './components/QuickEditOverlay';
 import MobileControls from './components/MobileControls';
 import * as metrics from './game/metrics';
 import AuthDialog from './auth/AuthDialog';
@@ -172,6 +173,7 @@ function App() {
   // portrait). Self-clearing: it is guidance, not a modal.
   const [fullscreenHint, setFullscreenHint] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isQuickEditOpen, setIsQuickEditOpen] = useState(false);
   const [isSelectorOpen, setIsSelectorOpen] = useState(false);
   const [score, setScore] = useState(0);
   const [isPromptOpen, setIsPromptOpen] = useState(false);
@@ -180,6 +182,8 @@ function App() {
   const [gameOverData, setGameOverData] = useState(null);
   const [gameKey, setGameKey] = useState(0);
   const [activeError, setActiveError] = useState(null);
+  // Run ids whose "built-in world" notice was dismissed (or timed out).
+  const [dismissedNotice, setDismissedNotice] = useState(null);
   const [captureMode, setCaptureMode] = useState(readCaptureMode);
 
   // Accounts + routes (2026-09-19). `route` only matters while no game is
@@ -430,7 +434,14 @@ function App() {
   // Pause game when the CreatorPanel menu OR the sign-in dialog is open. ONE
   // derived flag on purpose: closing the panel must not resume the game under a
   // still-open dialog.
-  const shouldPause = isMenuOpen || isSignInOpen;
+  useEffect(() => {
+    if (!liveParams?.staticNotice || !liveParams.saveRunId) return undefined;
+    const runId = liveParams.saveRunId;
+    const t = setTimeout(() => setDismissedNotice(runId), 14000);
+    return () => clearTimeout(t);
+  }, [liveParams?.staticNotice, liveParams?.saveRunId]);
+
+  const shouldPause = isMenuOpen || isSignInOpen || isQuickEditOpen;
   useEffect(() => {
     window.dispatchEvent(new CustomEvent('toggle-pause-game', { detail: { isPaused: shouldPause } }));
     if (!shouldPause) return undefined;
@@ -575,11 +586,6 @@ function App() {
     setGameOverData(null);
   };
 
-  const handleReopenPrompt = () => {
-    setIsPromptOpen(true);
-    setIsMenuOpen(false);
-  };
-
   // Automatically blur active input element when the game starts, config updates, or game restarts
   // to ensure keyboard focus shifts back to the game/body.
   useEffect(() => {
@@ -587,6 +593,11 @@ function App() {
     // Never steal focus from the sign-in dialog / account menu (on iOS a blur
     // also dismisses the keyboard mid-typing).
     if (active && active.closest?.('[data-pm-modal]')) return;
+    // Nor from ANY text field: this effect runs on every liveParams change, and a
+    // background update (auto-save stamp, art restore, repair) used to close the
+    // phone keyboard mid-word in the Creator Panel's name/prompt inputs.
+    const tag = active?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || active?.isContentEditable) return;
     if (active && typeof active.blur === 'function') {
       active.blur();
     }
@@ -602,6 +613,7 @@ function App() {
   const leaveRunningGame = () => {
     setHasStarted(false);
     setIsMenuOpen(false);
+    setIsQuickEditOpen(false);
     setIsPromptOpen(false);
     setIsGameOver(false);
     setGameOverData(null);
@@ -610,6 +622,8 @@ function App() {
 
   const handleGoHome = () => {
     leaveRunningGame();
+    // A clean Create screen: no leftover "Remixing: X" banner or parent link.
+    setLiveParams(prev => ({ ...prev, remixParentId: null, remixParentTitle: null, sourcePrompt: '' }));
     // Leaving the game: drop the share hash so a reload lands on ScreenZero.
     // Pinned to '/' (not the current pathname) now that the app has routes.
     navigate('/', { replace: true });
@@ -633,10 +647,15 @@ function App() {
       sourcePrompt: publicGame.prompt || publicGame.config?.sourcePrompt || '',
       creatorName: publicGame.creator_name || 'Community Creator',
       isPublicGame: true,
-      remixParentId: publicGame.id,
-      remixParentTitle: publicGame.title,
+      // Ownership facts travel IN the config so they survive F5 / a copied URL.
+      // (Playing a game must NOT stamp it as the remix parent — only an actual
+      // Remix does, in handleRemix. Doing it here made owners their own parents.)
+      rowId: publicGame.id,
+      ownerId: publicGame.owner_id || null,
+      visibility: publicGame.visibility || null,
       savedGameId: isOwner ? publicGame.id : null,
       autoSaveExempt: !isOwner,
+      allowRemix: publicGame.allow_remix === true,
       assetMeta: publicGame.asset_meta || null,
     };
     setLiveParams(withRunId(config));
@@ -659,15 +678,30 @@ function App() {
     }
   };
 
-  // Minimal Remix: carry forward prompt, mode, theme, and lineage
+  // The viewer owns this game when it has no recorded owner (generated here, this
+  // session) or the recorded owner is the signed-in user.
+  const isViewerOwner = !liveParams?.ownerId
+    || (authStatus === 'authed' && user?.id === liveParams.ownerId);
+  // A creator can switch remixing off. The owner can always remix their own game;
+  // anyone else only while the flag is explicitly on.
+  const canRemix = isViewerOwner || liveParams?.allowRemix === true;
+
+  // Minimal Remix: carry forward prompt, mode, theme, and lineage. Accepts a DB
+  // row (public page / community card) or the live game's params. Enforced here,
+  // not just by hiding buttons.
   const handleRemix = (gameOrParams) => {
-    leaveRunningGame();
     const source = gameOrParams || liveParams;
-    const parentId = source.id || source.savedGameId || source.remixParentId || null;
+    const isRow = source && source.allow_remix !== undefined;
+    const allowed = isRow
+      ? (source.allow_remix === true || (authStatus === 'authed' && !!user?.id && user.id === source.owner_id))
+      : canRemix;
+    if (!allowed) return;
+    leaveRunningGame();
+    const parentId = isRow ? source.id : (source.savedGameId || source.rowId || null);
     const parentTitle = source.title || source.gameName || 'PlayMint Game';
     const parentPrompt = source.prompt || source.sourcePrompt || '';
     const parentType = source.mode || source.gameType || 'runner';
-    const parentTheme = source.config?.themeKey || source.themeKey || 'default';
+    const parentTheme = source.config?.themeKey || source.themeKey || null;
 
     setLiveParams(prev => ({
       ...prev,
@@ -677,6 +711,9 @@ function App() {
       remixParentId: parentId,
       remixParentTitle: parentTitle,
       savedGameId: null, // remixed variants are saved as fresh rows
+      rowId: null,
+      ownerId: null,
+      allowRemix: true,
       autoSaveExempt: false,
     }));
     navigate('/');
@@ -690,6 +727,17 @@ function App() {
   // created in.
   const liveParamsRef = useRef(liveParams);
   liveParamsRef.current = liveParams;
+
+  // A game opened from My Games / a public page carries its row id; once we know
+  // the signed-in user owns that row, Save becomes an UPDATE of it. (savedGameId
+  // itself is deliberately stripped from share payloads.)
+  useEffect(() => {
+    if (authStatus !== 'authed' || !user?.id) return;
+    if (liveParams?.rowId && liveParams?.ownerId === user.id && !liveParams.savedGameId) {
+      setLiveParams(prev => (prev.rowId === liveParams.rowId && !prev.savedGameId
+        ? { ...prev, savedGameId: prev.rowId } : prev));
+    }
+  }, [authStatus, user?.id, liveParams?.rowId, liveParams?.ownerId, liveParams?.savedGameId]);
 
   const runSave = async () => {
     const current = liveParamsRef.current;
@@ -847,6 +895,7 @@ function App() {
   // It runs after a beat so the first frames are never competing with it, it is
   // cancellable, it is capped to one attempt per game, and every failure is
   // swallowed: a repair must never break play.
+  const hasLiveArt = !!liveParams.preloadedImages;
   useEffect(() => {
     const params = liveParamsRef.current;
     if (!params || !hasStarted) return;
@@ -871,6 +920,10 @@ function App() {
     repairAttemptedRef.current = gameKeyForRepair;
     const token = createCancelToken();
     repairTokenRef.current = token;
+    // True once the redraw actually ran to a verdict (done/failed). A repair that is
+    // merely cancelled by a dependency change (restored art arriving) did NOT use up
+    // the one attempt, so its guard is released in the cleanup below.
+    let ranToVerdict = false;
     const timer = setTimeout(async () => {
       if (token.cancelled) return;
       setRepairState('running');
@@ -883,7 +936,8 @@ function App() {
           instruction: '',
           slots: ['player_sheet'],
           cancelToken: token,
-          maxImageCalls: 4
+          maxImageCalls: 4,
+          reuseStaticBase: true
         });
         if (token.cancelled) return;
         const newMeta = res?.meta || {};
@@ -891,33 +945,40 @@ function App() {
         // The sheet result is stored under the `player` key. Without frames the
         // gates rejected it again, so there is nothing to swap in and the static
         // player (with its honest note) stays.
+        ranToVerdict = true;
         if (!newMeta.player?.frames || !newImages.player) {
           setRepairState('failed');
           console.warn('[PlayerRepair] the redraw did not produce an animated sheet; keeping the static player.');
           return;
         }
-        const mergedImages = { ...(params.preloadedImages || {}), player: newImages.player };
+        // Merge into the CURRENT params, not the snapshot from when the repair began:
+        // a slider tweak or restyle made during the 20-60s redraw must survive.
+        const latest = liveParamsRef.current;
+        if (!latest || latest.saveRunId !== params.saveRunId) return; // a different game booted meanwhile
+        const mergedImages = { ...(latest.preloadedImages || {}), player: newImages.player };
         const mergedParams = {
-          ...params,
+          ...latest,
           preloadedImages: mergedImages,
           assetMeta: {
-            ...(params.assetMeta || {}),
+            ...(latest.assetMeta || {}),
             slots: {
-              ...(params.assetMeta?.slots || {}),
+              ...(latest.assetMeta?.slots || {}),
               player: { ...newMeta.player, source: 'generated' }
             },
             // The repair's spend is part of THIS game's cost, or the report
             // under-counts a game that quietly cost twice.
-            cost: mergeRepairCost(params.assetMeta?.cost, res.cost),
-            run: { ...(params.assetMeta?.run || {}), repairedPlayerAnim: true }
+            cost: mergeRepairCost(latest.assetMeta?.cost, res.cost),
+            run: { ...(latest.assetMeta?.run || {}), repairedPlayerAnim: true }
           }
         };
         setRepairState('done');
-        setGameKey(k => k + 1);
+        window.__GAME_LIVE_CONFIG = mergedParams;
         setLiveParams(mergedParams);
-        if (mergedParams.gameId) {
-          // Persist under the same cache entry so a later hit/share-link shows
-          // the animated player. Fire-and-forget.
+        setGameKey(k => k + 1);
+        // Persist under the same cache entry so a later hit/share-link shows the
+        // animated player — but never for a game the viewer does not own (public
+        // plays carry autoSaveExempt): a visitor must not rewrite someone else's art.
+        if (mergedParams.gameId && !mergedParams.autoSaveExempt) {
           updateGameArt(mergedParams.gameId, {
             config: mergedParams,
             preloadedImages: mergedImages,
@@ -927,6 +988,7 @@ function App() {
         console.log(`[PlayerRepair] animated player installed in ${Math.round(performance.now() - t0)}ms`);
       } catch (err) {
         if (token.cancelled || err?.cancelled) return;
+        ranToVerdict = true;
         setRepairState('failed');
         console.warn('[PlayerRepair] failed, keeping the static player:', err?.message || err);
       }
@@ -935,15 +997,18 @@ function App() {
       clearTimeout(timer);
       token.cancel();
       repairTokenRef.current = null;
+      if (!ranToVerdict && repairAttemptedRef.current === gameKeyForRepair) repairAttemptedRef.current = null;
     };
-  }, [hasStarted, liveParams.gameId, liveParams.saveRunId]);
+  // dynamicAssetUrls / hasArt: a restored game (share link, F5, My Games) boots on
+  // placeholders and gets its art one remount later — the effect must re-evaluate then.
+  }, [hasStarted, liveParams.gameId, liveParams.saveRunId, liveParams.dynamicAssetUrls, hasLiveArt]);
 
   // A new game clears the visible repair state and cancels an in-flight redraw
   // belonging to the previous one. The one-shot guard does NOT need resetting —
   // it is keyed on saveRunId, so a new game simply does not match.
+  // (The in-flight token is cancelled by the repair effect's own cleanup. Cancelling
+  // it HERE too killed a repair that effect had just started in the same commit.)
   useEffect(() => {
-    repairTokenRef.current?.cancel();
-    repairTokenRef.current = null;
     setRepairState(null);
   }, [liveParams.saveRunId]);
 
@@ -1023,6 +1088,7 @@ function App() {
           return { applied: false, summary: 'Nothing to redraw for this game mode — try naming another element.' };
         }
         setIsMenuOpen(false);
+        setIsQuickEditOpen(false); // let the regen progress overlay be seen
         setRegenState({
           title: 'Updating Artwork',
           progress: 5,
@@ -1053,7 +1119,16 @@ function App() {
               mergedMeta[slot] = m;
               continue;
             }
-            mergedImages[slot] = newImages[slot];
+            const img = newImages[slot];
+            if (!img) {
+              // Reported as succeeded but produced no image — an internal
+              // invariant violation (should be unreachable: pipeline.js
+              // asserts this). Never register a texture key with no backing
+              // image, and never count it as redrawn.
+              mergedMeta[slot] = { ...m, dropped: true, reason: 'missing image after redraw (internal)', source: 'generated' };
+              continue;
+            }
+            mergedImages[slot] = img;
             mergedMeta[slot] = { ...m, source: 'generated' };
             redrawnSlots.push(slot);
           }
@@ -1104,6 +1179,7 @@ function App() {
     }
 
     setIsMenuOpen(false);
+    setIsQuickEditOpen(false); // let the regen progress overlay be seen
     setRegenState({ progress: 3, logs: [`[EDITOR] New world required for "${raw}" — regenerating...`] });
     metrics.beginRun('generate', { via: 'creator-panel', promptChars: raw.length });
 
@@ -1128,6 +1204,13 @@ function App() {
         }
       });
 
+      // The Creator Panel/Quick Edit must never swap a running game for a built-in
+      // world after a failed redraw — keep the game and say why.
+      if (gen.staticBoot) {
+        const why = (gen.config?.staticNotice || 'AI art could not be generated.').replace(/\s*Playing the built-in.*$/, '');
+        throw new Error(`${why} Your current game was kept.`);
+      }
+
       pushProgress('[ENGINE] World gate synchronized! Starting game...', 100);
 
       // Apply — force fresh Phaser instance
@@ -1141,7 +1224,7 @@ function App() {
       metrics.cancelRun(); // no boot follows a failed regeneration
       const message = err.cacheOnlyMiss
         ? 'Cache only is ON and nothing cached matches this prompt. Turn the toggle off on the generator screen (top right) to create new art.'
-        : err.message;
+        : err.needsFallbackChoice ? `${err.fallbackReason} Your current game was kept.` : err.message;
       window.dispatchEvent(new CustomEvent('playmint-error', { detail: { message } }));
       throw err;
     } finally {
@@ -1183,13 +1266,13 @@ function App() {
               onFullscreen={handleFullscreen}
               onExitFullscreen={handleExitFullscreen}
               onMenuOpen={() => setIsMenuOpen(true)}
-              onLogoClick={handleReopenPrompt}
+              onEditPrompt={() => setIsQuickEditOpen(true)}
+              onLogoClick={handleGoHome}
               onMyGames={handleGoMyGames}
               onSave={requestSave}
               saveState={saveState}
-              canSave={authStatus !== 'disabled'}
+              canSave={authStatus !== 'disabled' && isViewerOwner}
               playerAnimState={repairState === 'done' ? null : repairState}
-              onRemix={() => handleRemix(liveParams)}
             />
 
             {captureMode && (
@@ -1239,7 +1322,9 @@ function App() {
               onHomeClick={handleGoHome}
               onSave={requestSave}
               saveState={saveState}
-              canSave={authStatus !== 'disabled'}
+              canSave={authStatus !== 'disabled' && isViewerOwner}
+              isOwner={isViewerOwner}
+              onRemix={canRemix ? () => handleRemix(liveParams) : null}
             />
 
             {/* Premium Virtual Mobile Controls Overlay */}
@@ -1296,7 +1381,7 @@ function App() {
           gameType={gameOverData.gameType}
           onRestart={handleRestartGame}
           onTweakSettings={handleTweakSettings}
-          onRemix={() => handleRemix(liveParams)}
+          onRemix={canRemix ? () => handleRemix(liveParams) : null}
         />
       )}
       <GameSelectorModal
@@ -1361,6 +1446,36 @@ function App() {
       {/* Sign-in dialog + auth toast. MUST stay inside the fullscreen container
           (anything outside the fullscreen element is invisible in fullscreen). */}
       <AuthDialog />
+
+      {/* Quick edit (HUD magic-wand button): a one-field prompt box over the
+          running game that reuses handlePromptGenerate directly — identical
+          tweak/restyle/regenerate semantics as the Creator Panel's prompt box.
+          MUST stay inside the fullscreen container for the same reason as
+          AuthDialog above. */}
+      <QuickEditOverlay
+        isOpen={isQuickEditOpen}
+        onSubmit={handlePromptGenerate}
+        onClose={() => setIsQuickEditOpen(false)}
+      />
+
+      {hasStarted && liveParams?.staticNotice && dismissedNotice !== liveParams.saveRunId && (
+        <div
+          role="status"
+          data-pm-modal
+          onPointerDown={(e) => e.stopPropagation()}
+          style={{
+            position: 'fixed', top: 'max(64px, calc(env(safe-area-inset-top) + 56px))', left: '50%', transform: 'translateX(-50%)',
+            zIndex: 11500, width: 'min(92vw, 520px)', boxSizing: 'border-box',
+            background: 'rgba(10, 16, 24, 0.94)', border: '1px solid var(--pm-accent-orange)', borderRadius: '12px',
+            padding: '10px 14px', color: '#fff', fontSize: '13px', lineHeight: 1.4,
+            display: 'flex', gap: '10px', alignItems: 'flex-start'
+          }}
+        >
+          <span style={{ flex: 1 }}>{liveParams.staticNotice}</span>
+          <button type="button" aria-label="Dismiss" onClick={() => setDismissedNotice(liveParams.saveRunId)}
+            style={{ background: 'none', border: 'none', color: '#fff', fontSize: '18px', lineHeight: 1, cursor: 'pointer' }}>✕</button>
+        </div>
+      )}
 
       {activeError && (
         <div style={{

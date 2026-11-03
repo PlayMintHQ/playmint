@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { memo, useCallback, useState } from 'react';
 import { GAME_PRESETS } from '../gameConfig';
 import { IconShare, IconExport, IconImport, IconReset, IconHome } from './Icons';
 import { downloadCostReport } from '../game/assetPipeline/costReport';
@@ -7,7 +7,48 @@ import { getRecords as getTimingRecords } from '../game/metrics';
 import { encodeShareConfig } from '../game/shareLink';
 import { ensureUploaded } from '../game/assetCache';
 import { normalizeRunnerPacing } from '../game/promptUtils';
-import { shareLink } from '../utils/shareUtils';
+import { shareLink, copyLink } from '../utils/shareUtils';
+import { setGameRemix } from '../game/savedGames';
+
+// Typing a game name used to write liveParams on every keystroke, re-rendering
+// the whole app (and the Phaser shell) for each character. Keep the draft local
+// and commit once on blur/Enter; sync only when the value changes from outside
+// while the field is not focused.
+const GameNameInput = memo(({ value, onCommit }) => {
+  const [draft, setDraft] = useState(value || '');
+  // External changes arrive through `key` (the parent remounts this component when
+  // the committed name changes), so no sync-effect is needed.
+
+  const commit = () => {
+    const next = draft.trim();
+    if (next !== (value || '')) onCommit(next);
+  };
+
+  // A real <form>: the app's capture-phase key guard swallows keydown for inputs
+  // before React sees it, so Enter/Go would never reach an onKeyDown handler. The
+  // native submit event is not affected.
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        commit();
+        e.currentTarget.querySelector('input')?.blur();
+      }}
+    >
+      <input
+        type="text"
+        name="gameName"
+        className="pm-input"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        enterKeyHint="done"
+        placeholder="Enter Game Name"
+      />
+    </form>
+  );
+});
+GameNameInput.displayName = 'GameNameInput';
 
 const RunnerControls = ({ liveParams, onSliderChange }) => (
   <>
@@ -214,23 +255,25 @@ const ConfigActions = ({ liveParams, setLiveParams, setPresetKey, onHomeClick })
 /* Extracted share button with its own state */
 const ShareGameButton = ({ liveParams }) => {
   const [status, setStatus] = useState('idle');
+  const [copyStatus, setCopyStatus] = useState('idle');
+
+  const shareUrlFor = () => {
+    const rowId = liveParams?.savedGameId || liveParams?.rowId;
+    if (rowId) {
+      return `${window.location.origin}/g/${rowId}`;
+    }
+    return `${window.location.origin}/#config=${encodeShareConfig(liveParams)}`;
+  };
+
   const handleShare = async () => {
     try {
       if (liveParams?.gameId) {
         ensureUploaded(liveParams.gameId);
       }
-      let shareUrl;
-      if (liveParams?.savedGameId) {
-        shareUrl = `${window.location.origin}/g/${liveParams.savedGameId}`;
-      } else {
-        const configString = encodeShareConfig(liveParams);
-        shareUrl = `${window.location.origin}/#config=${configString}`;
-      }
-
       const res = await shareLink({
         title: liveParams?.gameName || 'PlayMint game',
         text: `Play "${liveParams?.gameName || 'this game'}" on PlayMint!`,
-        url: shareUrl
+        url: shareUrlFor()
       });
       if (res.ok) {
         setStatus(res.method === 'share' ? 'shared' : 'copied');
@@ -240,15 +283,41 @@ const ShareGameButton = ({ liveParams }) => {
       console.error(e);
     }
   };
+
+  const handleCopy = async () => {
+    try {
+      if (liveParams?.gameId) {
+        ensureUploaded(liveParams.gameId);
+      }
+      const res = await copyLink(shareUrlFor());
+      if (res.ok) {
+        setCopyStatus('copied');
+        setTimeout(() => setCopyStatus('idle'), 2000);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   return (
-    <button
-      className="pm-btn pm-btn-primary"
-      onClick={handleShare}
-      title="Share Game"
-      style={{ justifyContent: 'center', width: '100%', gap: '6px' }}
-    >
-      {status === 'copied' ? '✓ Copied' : status === 'shared' ? '✓ Shared' : <><IconShare /> Share Game</>}
-    </button>
+    <div style={{ display: 'grid', gap: '8px' }}>
+      <button
+        className="pm-btn pm-btn-primary"
+        onClick={handleShare}
+        title="Share Game"
+        style={{ justifyContent: 'center', width: '100%', gap: '6px' }}
+      >
+        {status === 'copied' ? '✓ Copied' : status === 'shared' ? '✓ Shared' : <><IconShare /> Share Game</>}
+      </button>
+      <button
+        className="pm-btn pm-btn-outline"
+        onClick={handleCopy}
+        title="Copy the game link"
+        style={{ justifyContent: 'center', width: '100%', gap: '6px' }}
+      >
+        {copyStatus === 'copied' ? '✓ Copied Link' : 'Copy Link'}
+      </button>
+    </div>
   );
 };
 
@@ -266,6 +335,8 @@ const CreatorPanel = ({
   onSave,
   saveState,
   canSave,
+  isOwner = true,
+  onRemix = null,
 }) => {
   const isCustom = presetKey === 'custom';
   // Read only while the drawer is open — a localStorage hit per closed-panel
@@ -275,6 +346,9 @@ const CreatorPanel = ({
   const [promptBusy, setPromptBusy] = useState(false);
   const [promptResult, setPromptResult] = useState(null);
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('GEMINI_API_KEY') || '');
+  const commitGameName = useCallback((name) => {
+    setLiveParams(prev => (prev.gameName === name ? prev : { ...prev, gameName: name }));
+  }, [setLiveParams]);
 
   const handlePromptSubmit = async () => {
     if (!promptText.trim() || !onPromptGenerate) return;
@@ -436,15 +510,43 @@ const CreatorPanel = ({
         {/* 1. Game Name */}
         <div>
           <label className="pm-label">Game Name</label>
-          <input
-            type="text"
-            name="gameName"
-            className="pm-input"
+          <GameNameInput
+            key={liveParams.gameName || ''}
             value={liveParams.gameName || ''}
-            onChange={(e) => setLiveParams(prev => ({ ...prev, gameName: e.target.value }))}
-            placeholder="Enter Game Name"
+            onCommit={commitGameName}
           />
         </div>
+
+        {canSave && isOwner && (
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={liveParams.allowRemix !== false}
+              onChange={(e) => {
+                const allow = e.target.checked;
+                setLiveParams(prev => ({ ...prev, allowRemix: allow }));
+                // A game that already has a library row saves the choice at once;
+                // an unsaved game carries it into its first Save.
+                const rowId = liveParams.savedGameId;
+                if (rowId) setGameRemix(rowId, allow);
+              }}
+              style={{ marginTop: '2px', accentColor: 'var(--pm-accent-teal)' }}
+            />
+            <span>
+              <span className="pm-label" style={{ display: 'block', marginBottom: '2px' }}>Allow others to remix this game</span>
+              <span style={{ fontSize: '12px', color: 'var(--pm-text-secondary)' }}>
+                Shows a Remix button on its public page and in Community.
+              </span>
+            </span>
+          </label>
+        )}
+
+        {onRemix && (
+          <button type="button" className="pm-btn pm-btn-outline" onClick={() => { onClose?.(); onRemix(); }}
+            style={{ justifyContent: 'center', width: '100%' }}>
+            Remix this game
+          </button>
+        )}
 
         {/* 2. Prompt Input */}
         <div>

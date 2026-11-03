@@ -207,7 +207,8 @@ export default class ShooterMode extends BaseMode {
     // Static/keyless path prefers the top-down placeholder figure over the
     // side-view theme sprite (which reads as lying down once rotated).
     const useTopdownPlaceholder = !scene.gameConfig.dynamicAssetUrls && scene.textures.exists('topdown_enemy');
-    const enemyTexture = scene.gameConfig.dynamicAssetUrls ? 'dyn_enemy'
+    const useDynEnemy = scene.gameConfig.dynamicAssetUrls && scene.textures.exists('dyn_enemy');
+    const enemyTexture = useDynEnemy ? 'dyn_enemy'
       : useTopdownPlaceholder ? 'topdown_enemy'
       : (scene.activeTheme?.enemyTexture || 'dude');
 

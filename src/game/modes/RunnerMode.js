@@ -18,6 +18,11 @@ import {
 // just makes "never spawn on the player" true unconditionally.
 const OBSTACLE_CLEARANCE_S = 0.25;
 
+// Runway delay before the FIRST obstacle is born in a new run.
+// Gives the player nearly 3 seconds of clear running space to see their character,
+// react to the environment, and position their fingers on the Jump button.
+const FIRST_OBSTACLE_DELAY_MS = 2800;
+
 export default class RunnerMode extends BaseMode {
   init() {
     const theme = this.scene.activeTheme || {};
@@ -37,6 +42,7 @@ export default class RunnerMode extends BaseMode {
     // One console note per run, not per clamp. `init()` runs again on every
     // scene.restart(), so a retry gets to report its own config.
     this.timingWarned = false;
+    this._spawnedAny = false;
   }
 
   create() {
@@ -46,25 +52,44 @@ export default class RunnerMode extends BaseMode {
 
     this.obstacles = this.scene.physics.add.group();
 
-    // Obstacles are paced by a TIMER whose interval is `config.obstacleDelay`
-    // (MILLISECONDS), the value the tuning table, the Creator Panel slider and
-    // the AI editor all speak. The two multipliers give the feel the config
-    // asked for: a slightly shorter interval as the run speeds up, which is the
-    // difficulty curve a runner needs. It is still one TimerEvent named
-    // `obstacleTimer`, re-armed after each spawn, so the pause path's by-name
-    // reach-in is unchanged.
-    this.armObstacleTimer();
+    // Paced by a timer. Obstacles are NOT spawned while the screen transition
+    // is running (fading from ScreenZero) to ensure the player isn't hit while
+    // the game is still obscured or fading in.
+    const isTransitioning = typeof window !== 'undefined' && window.__GAME_IS_TRANSITIONING;
+    this._collisionsEnabled = !isTransitioning;
+
+    if (isTransitioning) {
+      this._transitionListener = () => {
+        // Clear any stray obstacles that might have drifted during transition
+        if (this.obstacles && this.obstacles.children) {
+          try {
+            this.obstacles.getChildren().slice().forEach(obs => {
+              if (obs && obs.x < (this.scene.player?.x || 150) + 300) {
+                obs.destroy();
+              }
+            });
+          } catch { /* a destroyed child mid-iteration is harmless */ }
+        }
+        this._collisionsEnabled = true;
+        // Start obstacle pacing with a generous runway once game becomes visible
+        this.armObstacleTimer(FIRST_OBSTACLE_DELAY_MS);
+      };
+      window.addEventListener('transition-complete', this._transitionListener);
+    } else {
+      // Normal start (retry, direct URL, or preset)
+      this.armObstacleTimer(FIRST_OBSTACLE_DELAY_MS);
+    }
 
     this.scene.physics.add.collider(this.obstacles, this.scene.floor);
-    this._collisionsEnabled = !window.__GAME_IS_TRANSITIONING;
-    if (!this._collisionsEnabled) {
-      this._transitionListener = () => { this._collisionsEnabled = true; };
-      window.addEventListener('transition-complete', this._transitionListener);
-    }
+    // Grace lives in the PROCESS callback: returning false there skips both the
+    // callback and the separation. A grace check inside the collide callback still
+    // let Arcade shove the player and leave a drifting velocity behind.
     this.scene.physics.add.collider(this.scene.player, this.obstacles, (player, obstacle) => {
-      if (!this._collisionsEnabled) return;
       this.scene.hitObstacle(player, obstacle);
-    }, null, this);
+    }, () => {
+      if (!this._collisionsEnabled) return false;
+      return (this.scene.time.now - (this.scene._createTime || 0)) >= 1500;
+    }, this);
 
     // Coin pickups: spawned in an arc over obstacles (see spawnCoinArc), collected
     // on overlap for score. Same pattern as PlatformerMode's collectibles.
@@ -202,10 +227,13 @@ export default class RunnerMode extends BaseMode {
   }
 
   /** (Re)arms the single pending obstacle-spawn timer. */
-  armObstacleTimer() {
+  armObstacleTimer(customDelay = null) {
+    // Re-arming (a live slider tweak) must not un-pause a timer the pause path froze.
+    const wasPaused = !!this.obstacleTimer?.paused;
     if (this.obstacleTimer) this.obstacleTimer.remove();
     this.obstacleTimer = this.scene.time.addEvent({
-      delay: this.nextObstacleDelay(),
+      delay: customDelay ?? this.nextObstacleDelay(),
+      paused: wasPaused,
       callback: () => {
         this.spawnObstacle();
         // One-shot re-arm, never `loop: true`: the delay has to be recomputed
@@ -221,12 +249,10 @@ export default class RunnerMode extends BaseMode {
 
     const scale = Phaser.Math.FloatBetween(this.scene.gameConfig.obstacleScaleMin || 0.8, this.scene.gameConfig.obstacleScaleMax || 1.2);
     const spawnX = this.nextSpawnX();
-    
-    this._spawnCount = (this._spawnCount || 0) + 1;
-    const sceneUptime = this.scene.time.now - (this.scene._createTime || 0);
-    console.log(`[RUNNER] Obstacle #${this._spawnCount} spawned at x=${spawnX.toFixed(1)}, sceneUptime=${Math.round(sceneUptime)}ms, playerX=${this.scene.player?.x?.toFixed(1)}`);
+    this._spawnedAny = true;
 
-    const obstacleTexture = this.scene.gameConfig.dynamicAssetUrls ? 'dyn_obstacle' : (this.scene.activeTheme?.obstacleTexture || 'crate');
+    const useDynObstacle = this.scene.gameConfig.dynamicAssetUrls && this.scene.textures.exists('dyn_obstacle');
+    const obstacleTexture = useDynObstacle ? 'dyn_obstacle' : (this.scene.activeTheme?.obstacleTexture || 'crate');
 
     // Obtain frame dimensions for proper obstacle scaling normalization
     const textureObj = this.scene.textures.get(obstacleTexture);
@@ -293,7 +319,7 @@ export default class RunnerMode extends BaseMode {
       this.scene.playPlayerAnim('run');
       // Tie playback rate to actual speed. The run cycle is authored at one
       // fixed frame rate, so as speedIncrement ramps the feet visibly skate.
-      if (player.anims) {
+      if (player.anims && player.anims.isPlaying) {
         player.anims.timeScale = Phaser.Math.Clamp(this.runSpeed / (this.baseSpeed || 1), 0.6, 1.5);
       }
     }
@@ -401,7 +427,9 @@ export default class RunnerMode extends BaseMode {
     // any of them re-arms it rather than waiting out an interval computed for
     // the old numbers.
     const pacingInputs = ['obstacleDelay', 'runSpeed', 'jumpForce', 'gravity'];
-    if (pacingInputs.some((key) => oldConfig[key] !== newConfig[key])) {
+    // Before the first obstacle the opening runway is still counting down — a
+    // tweak must not replace it with a normal-length interval.
+    if (this._spawnedAny && pacingInputs.some((key) => oldConfig[key] !== newConfig[key])) {
       // The new config may be playable where the old one was not — let it
       // report its own clamps.
       this.timingWarned = false;
@@ -410,12 +438,13 @@ export default class RunnerMode extends BaseMode {
   }
 
   cleanup() {
-    if (this.obstacleTimer) {
-      this.obstacleTimer.remove();
     if (this._transitionListener) {
       window.removeEventListener('transition-complete', this._transitionListener);
       this._transitionListener = null;
     }
+    if (this.obstacleTimer) {
+      this.obstacleTimer.remove();
+      this.obstacleTimer = null;
     }
     if (this.resizeTimeout) {
       clearTimeout(this.resizeTimeout);
@@ -424,7 +453,7 @@ export default class RunnerMode extends BaseMode {
       this.scene.scale.off('resize', this.resizeListener, this);
     }
     if (this.obstacles && this.obstacles.scene) {
-      try { this.obstacles.clear(true, true); } catch (e) {}
+      try { this.obstacles.clear(true, true); } catch { /* scene already torn down */ }
     }
     if (this.coins && this.coins.scene) {
       try { this.coins.clear(true, true); } catch { /* scene already torn down */ }

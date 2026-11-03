@@ -4,7 +4,7 @@ import { THEME_ART_URLS } from '../game/themes';
 import AccountButton from '../auth/AccountButton';
 import { IconPlay, IconShare, IconRemix, IconGlobe } from './Icons';
 import { navigate } from '../router';
-import { shareLink } from '../utils/shareUtils';
+import { shareLink, copyLink } from '../utils/shareUtils';
 
 const MODE_LABELS = {
   runner: 'Runner',
@@ -26,6 +26,7 @@ export function PublicGamePage({ gameId, onPlay, onRemix }) {
   const [game, setGame] = useState(null);
   const [error, setError] = useState('');
   const [shareStatus, setShareStatus] = useState('idle');
+  const [copyStatus, setCopyStatus] = useState('idle');
   const [thumbFailed, setThumbFailed] = useState(false);
 
   useEffect(() => {
@@ -74,6 +75,14 @@ export function PublicGamePage({ gameId, onPlay, onRemix }) {
     if (res.ok) {
       setShareStatus(res.method === 'share' ? 'shared' : 'copied');
       setTimeout(() => setShareStatus('idle'), 2500);
+    }
+  };
+
+  const handleCopy = async () => {
+    const res = await copyLink(`${window.location.origin}/g/${game.id}`);
+    if (res.ok) {
+      setCopyStatus('copied');
+      setTimeout(() => setCopyStatus('idle'), 2500);
     }
   };
 
@@ -217,10 +226,20 @@ export function PublicGamePage({ gameId, onPlay, onRemix }) {
                 type="button"
                 className="pm-btn pm-btn-outline"
                 onClick={() => onRemix(game)}
-                style={{ flex: '1 1 160px', justifyContent: 'center', borderColor: 'var(--pm-accent-amber, #f59e0b)', color: 'var(--pm-accent-amber, #f59e0b)' }}
-                title="Remix this game with your own custom prompts or settings"
+                disabled={game.allow_remix !== true}
+                style={{
+                  flex: '1 1 160px',
+                  justifyContent: 'center',
+                  borderColor: 'var(--pm-accent-amber, #f59e0b)',
+                  color: 'var(--pm-accent-amber, #f59e0b)',
+                  opacity: game.allow_remix === true ? 1 : 0.45,
+                  cursor: game.allow_remix === true ? 'pointer' : 'not-allowed'
+                }}
+                title={game.allow_remix === true
+                  ? 'Remix this game with your own custom prompts or settings'
+                  : 'The creator disabled remixing for this game'}
               >
-                <IconRemix /> Remix Game
+                <IconRemix /> {game.allow_remix === true ? 'Remix Game' : 'Remix Disabled'}
               </button>
 
               <button
@@ -231,6 +250,16 @@ export function PublicGamePage({ gameId, onPlay, onRemix }) {
                 title="Share link"
               >
                 <IconShare /> {shareStatus === 'copied' ? 'Copied!' : shareStatus === 'shared' ? 'Shared!' : 'Share'}
+              </button>
+
+              <button
+                type="button"
+                className="pm-btn pm-btn-outline"
+                onClick={handleCopy}
+                style={{ flex: '0 0 auto', justifyContent: 'center' }}
+                title="Copy the game link"
+              >
+                {copyStatus === 'copied' ? '✓ Copied' : 'Copy Link'}
               </button>
             </div>
           </div>

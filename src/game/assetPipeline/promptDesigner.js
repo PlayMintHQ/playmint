@@ -201,6 +201,14 @@ export function generateAssetDirections(theme, secondaryTheme, promptText, gameT
     const custom = customDirectionsFromPrompt(promptText, gameType);
     const themeData = THEMES[theme];
     if (themeData) {
+      // Palette alone was not enough: a prompt like "inferno circuit" matched
+      // the lava palette but its own subject text ("circuit") still steered the
+      // background toward sci-fi. The matched world now contributes its scenery
+      // and terrain as supporting detail while the prompt's subject stays the
+      // head of the phrase.
+      custom.backgrounds = `${custom.backgrounds}, featuring ${themeData.backgrounds}`;
+      custom.levelElements = `${custom.levelElements}, ${themeData.levelElements}`;
+      custom.platforms = `${custom.platforms}, ${themeData.platforms}`;
       custom.colorPalette = themeData.colorPalette;
       custom.styleGuide = `retro game aesthetic, ${themeData.atmosphere} mood, clear pixel definition, vibrant colors`;
     }
@@ -286,7 +294,7 @@ const DESIGNER_RESPONSE_SCHEMA = {
   required: ['styleSummary', 'colorPalette', 'accentPalette', 'background_far', 'floor', 'platform', 'player', 'enemy', 'obstacle', 'collectible', 'projectile', 'entityNouns', 'tags']
 };
 
-function buildDesignerPrompt(userPrompt, gameType, entities = {}) {
+function buildDesignerPrompt(userPrompt, gameType, entities = {}, themeKey = null) {
   const modeDesc = gameType === 'platformer'
     ? 'a 2D side-scrolling action platformer'
     : gameType === 'shooter'
@@ -295,8 +303,15 @@ function buildDesignerPrompt(userPrompt, gameType, entities = {}) {
   const must = (entity, article = 'a') =>
     entity ? ` — the player explicitly asked for: ${entity}. It MUST be ${article} ${entity}` : '';
   const anyNamed = !!(entities.enemy || entities.hazard || entities.collectible);
+  const world = THEMES[themeKey];
+  const worldCue = world
+    ? `\nWORLD CUES: the request belongs to the "${themeKey}" world. Its scenery is ` +
+      `${world.backgrounds}; its ground is ${world.levelElements}. Keep the player's named ` +
+      `subjects, but the environment must clearly read as this world.\n`
+    : '';
   return (
-    `You are the art director for ${modeDesc} generated from this player request: "${userPrompt}".\n\n` +
+    `You are the art director for ${modeDesc} generated from this player request: "${userPrompt}".\n` +
+    worldCue + `\n` +
     `Design one cohesive visual identity and describe six game assets. Return JSON with:\n` +
     `- styleSummary: the shared art direction (max 12 words)\n` +
     `- colorPalette: the ENVIRONMENT palette (max 10 words)\n` +
@@ -478,7 +493,7 @@ export async function designAssetPrompts({ userPrompt, gameType, themeKey, asset
   const entities = extractEntities(userPrompt);
   try {
     const result = await generateJson({
-      prompt: buildDesignerPrompt(userPrompt, gameType, entities),
+      prompt: buildDesignerPrompt(userPrompt, gameType, entities, themeKey),
       responseSchema: DESIGNER_RESPONSE_SCHEMA,
       timeoutMs,
       label: 'design' // cost-report attribution

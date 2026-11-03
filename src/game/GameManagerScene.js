@@ -105,8 +105,8 @@ export default class GameManagerScene extends Phaser.Scene {
     this.load.image('city_bg_mid', 'assets/themes/city/bg_mid.png');
     this.load.image('city_bg_near', 'assets/themes/city/bg_near.png');
     // Space theme
-    this.load.image('space_ground', 'assets/scifi_tileset.png');
-    this.load.image('space_tile', 'assets/scifi_tileset.png');
+    this.load.image('space_ground', 'assets/themes/space/space_floor.png');
+    this.load.image('space_tile', 'assets/themes/space/space_tile.png');
     this.load.image('space_bg_stars', 'assets/themes/space/bg_stars.png');
     this.load.image('space_bg_nebula', 'assets/themes/space/bg_nebula.png');
     this.load.image('space_bg_planet', 'assets/themes/space/bg_planet.png');
@@ -164,6 +164,12 @@ export default class GameManagerScene extends Phaser.Scene {
   create() {
     if (this._creating) return;
     this._creating = true;
+    // The cleanup guard is per-create: it was never reset, so from the 2nd retry on
+    // cleanup was skipped and window listeners piled up (double restarts).
+    this._cleanedUp = false;
+    // AnimationManager is game-wide: a pause left on by a previous run (Game Over →
+    // panel → restart) would keep every theme animation frozen.
+    this.anims.resumeAll();
     this._createTime = this.time.now;
     console.log(`[BOOT#${this._bootId}] GameManagerScene.create() — START`);
 
@@ -241,7 +247,24 @@ export default class GameManagerScene extends Phaser.Scene {
       // below the player/enemies (default depth 0) and above background_far
       // (depth -5), same relative ordering as the side-scroll floor.
       const floorTexture = this.gameConfig.dynamicAssetUrls ? 'dyn_floor' : (this.secondaryTheme?.floorTexture || this.activeTheme.floorTexture || 'ground');
-      if (this.gameConfig.dynamicAssetUrls && this.textures.exists(floorTexture)) {
+      if (this.gameConfig.dynamicAssetUrls && this.textures.exists('dyn_bg_far')) {
+        // The generated top-down ground picture, cover-scaled over the whole arena.
+        // (It used to sit at depth -5 behind an opaque floor tile and was never
+        // visible, so every arena read as one repeated 128px tile.)
+        const src = this.textures.get('dyn_bg_far').getSourceImage();
+        const tw = src?.width || 2048;
+        const th = src?.height || 1024;
+        const cover = Math.max(arenaWidth / tw, arenaHeight / th);
+        const cropW = Math.min(tw, arenaWidth / cover);
+        const cropH = Math.min(th, arenaHeight / cover);
+        this.arenaFloor = this.add.image(0, 0, 'dyn_bg_far')
+          .setOrigin(0, 0)
+          .setCrop((tw - cropW) / 2, (th - cropH) / 2, cropW, cropH)
+          .setScale(cover)
+          .setDepth(-1);
+        // setCrop keeps the image's own origin: shift so the cropped region starts at (0,0).
+        this.arenaFloor.setPosition(-((tw - cropW) / 2) * cover, -((th - cropH) / 2) * cover);
+      } else if (this.gameConfig.dynamicAssetUrls && this.textures.exists(floorTexture)) {
         // Generated dyn_floor art is designed to tile at 1:1.
         this.arenaFloor = this.add.tileSprite(0, 0, arenaWidth, arenaHeight, floorTexture)
           .setOrigin(0, 0)
@@ -1059,19 +1082,8 @@ export default class GameManagerScene extends Phaser.Scene {
     }));
   }
 
-  hitObstacle(player, obstacle) {
+  hitObstacle() {
     if (this.isGameOver) return;
-    
-    const gameTime = this.time.now;
-    const sceneUptime = gameTime - (this._createTime || 0);
-    console.error(`[BOOT#${this._bootId}] hitObstacle TRIGGERED!`,
-      `player: x=${player?.x?.toFixed(1)} y=${player?.y?.toFixed(1)}`,
-      `playerBody: w=${player?.body?.width} h=${player?.body?.height}`,
-      `playerBounds: top=${player?.body?.top?.toFixed(1)} bottom=${player?.body?.bottom?.toFixed(1)} left=${player?.body?.left?.toFixed(1)} right=${player?.body?.right?.toFixed(1)}`,
-      `obstacle: x=${obstacle?.x?.toFixed(1)} y=${obstacle?.y?.toFixed(1)}`,
-      `obstacleBounds: top=${obstacle?.body?.top?.toFixed(1)} bottom=${obstacle?.body?.bottom?.toFixed(1)} left=${obstacle?.body?.left?.toFixed(1)} right=${obstacle?.body?.right?.toFixed(1)}`,
-      `sceneUptime=${Math.round(sceneUptime)}ms`
-    );
 
     this.isGameOver = true;
 

@@ -13,7 +13,7 @@
 // Exported for the saved-games library: a saved row's `config` IS this payload,
 // which is what lets "Play" on a My Games card re-enter through the same tested
 // share-link import path instead of a second boot route.
-export const stripForShare = (liveParams) => {
+export const stripForShare = (liveParams, { forRow = false } = {}) => {
   // autoSaveExempt is a per-SESSION import marker (getInitialState stamps it on
   // a config decoded from a shared link) — it must never be persisted into a
   // saved row's config, or a later replay of that row would arrive pre-exempt
@@ -35,8 +35,18 @@ export const stripForShare = (liveParams) => {
     autoSaveExempt: _exempt,
     saveRunId: _run,
     savedGameId: _saved,
+    staticNotice: _notice,
     ...config
   } = liveParams || {};
+  // Ownership facts ride in share URLs (so F5 keeps them) but must never be
+  // persisted into a saved row's config: a later remix would inherit the original
+  // owner's id and the remixer would look like a visitor to their own game.
+  if (forRow) {
+    delete config.ownerId;
+    delete config.rowId;
+    delete config.isPublicGame;
+    delete config.visibility;
+  }
   const slots = assetMeta?.slots;
   if (slots) {
     const lite = {};

@@ -367,9 +367,13 @@ export async function generateAssets({
   // a single player_sheet (static base + one sheet attempt ≈ 3-4 calls) and must
   // never escalate into the full rescue ladder. PM_MAX_GEMINI_CALLS still wins
   // when it is set explicitly — a deliberate budget is a budget.
-  maxImageCalls = null
+  maxImageCalls = null,
+  // Repair only: the game already has a good static player — build the sheet from it
+  // instead of redrawing the character. A normal restyle must redraw from scratch.
+  reuseStaticBase = false,
+  initialPreloadedImages = {}
 }) {
-  const preloadedImages = {};
+  const preloadedImages = { ...initialPreloadedImages };
   const meta = {};
   // Cost controls (both read AT RUN START, like the provider toggle):
   // - qualityMode restores the expensive rescue rungs (pro sheet, per-frame
@@ -563,8 +567,9 @@ export async function generateAssets({
     // in nine poses") instead of a from-scratch imagination, which is what keeps
     // one consistent character across cells — and (b) the instant fallback when
     // the sheet fails any gate, with no third generation call.
-    // If the static base itself dies, the whole slot rejects (player is required).
-    await runSlot(spec.fallbackSlot);
+    if (!preloadedImages[spec.fallbackSlot]) {
+      await runSlot(spec.fallbackSlot);
+    }
     const baseSrc = preloadedImages[spec.fallbackSlot]?.src || null;
 
     // Probe override / demo mode (pro model + 2K) > quality mode's 2K-only bump > spec default.
@@ -791,8 +796,11 @@ export async function generateAssets({
       //        or the call budget is gone — the static base, logged as a FAILURE.
       // Before this the cost defaults stopped at the static player by design and
       // papered over it with a tilt-bob; both are gone.
-      const tiers = [activeSpec.gen.model, activeSpec.gen.model];
-      if (gemini.isGeminiConfigured() && activeSpec.gen.model !== GEMINI_SHEET_MODEL) tiers.push(GEMINI_SHEET_MODEL);
+      const isRepair = reuseStaticBase && slot === 'player_sheet';
+      const tiers = isRepair && gemini.isGeminiConfigured()
+        ? [GEMINI_SHEET_MODEL, GEMINI_SHEET_MODEL]
+        : [activeSpec.gen.model, activeSpec.gen.model];
+      if (!isRepair && gemini.isGeminiConfigured() && activeSpec.gen.model !== GEMINI_SHEET_MODEL) tiers.push(GEMINI_SHEET_MODEL);
       const proRescue = !!(runState.qualityMode && gemini.isGeminiConfigured() &&
         activeSpec.gen.model && activeSpec.gen.model !== GEMINI_PRO_SHEET_MODEL);
       if (proRescue) tiers.push(GEMINI_PRO_SHEET_MODEL);
@@ -817,7 +825,20 @@ export async function generateAssets({
             `every feature completely unchanged, do not reinvent anything about it — as the ` +
             `following sprite strip. ${prompt}`
           : prompt;
-        const raw = await generateSlotImage(slot, sheetPrompt, seed + attempt * 13, report, maxAttemptsPerProvider, runState, onAttempt, useReference ? baseSrc : null, attemptSpec);
+        let raw;
+        try {
+          raw = await generateSlotImage(slot, sheetPrompt, seed + attempt * 13, report, maxAttemptsPerProvider, runState, onAttempt, useReference ? baseSrc : null, attemptSpec);
+        } catch (genErr) {
+          if (genErr?.cancelled) throw genErr;
+          // A later rung dying (quota, budget, network) must not throw away a
+          // working animated sheet already held as the standby candidate.
+          if (softCandidate) {
+            lastIssue = genErr?.message || 'generation error';
+            report(`[ASSETS] Escalation failed (${lastIssue}) — keeping the earlier animated version.`);
+            break;
+          }
+          throw genErr;
+        }
         noteSlotProgress(slot, 0.8);
         provider = raw.provider;
         servedModel = raw.model || servedModel;
@@ -1419,6 +1440,23 @@ function attachEntityTags(meta, design) {
   }
 }
 
+// Defensive invariant, not a fix for a reproduced bug: generateAssets() already
+// throws (the `fatal` flag) on any required-slot failure DURING generation, so
+// there is currently no reachable path where a required slot reaches this check
+// with `dropped: false` but no backing image — this guards against a FUTURE
+// regression in that control flow, in a codebase with no automated test suite.
+// `outKey` follows the same `spec.outputKey || slot` convention runSheetSlot
+// already uses (player_sheet stores its result under the 'player' key).
+function assertSlotCompleteness(slots, preloadedImages, meta) {
+  for (const slot of slots) {
+    const spec = SLOT_SPECS[slot];
+    const outKey = spec.outputKey || slot;
+    if (spec.optional !== true && (!preloadedImages[outKey] || meta[outKey]?.dropped)) {
+      throw new Error(`[Asset Pipeline Error] Internal invariant violated: slot "${outKey}" produced no image despite not being reported as dropped.`);
+    }
+  }
+}
+
 /**
  * Full generation for a game config: design prompts (LLM or local), then generate
  * all baseline assets. The ONE call every UI path uses.
@@ -1507,6 +1545,7 @@ export async function generateGameAssets({ config, userPrompt = '', onProgress =
     ...(design.propsGridStatus ? { propsGrid: design.propsGridStatus } : {}),
     ...(cost ? { cost } : {})
   };
+  assertSlotCompleteness(slots, preloadedImages, meta);
   return { preloadedImages, meta, promptSet: finalPrompts, design, assetMeta };
 }
 
@@ -1532,7 +1571,7 @@ function reportRunCost(onProgress) {
  * designer so the new art follows the request; the caller merges the returned
  * images/meta over the retained ones and remounts the game.
  */
-export async function regenerateAssetSlots({ config, instruction = '', slots, onProgress = () => {}, cancelToken = null, maxImageCalls = null }) {
+export async function regenerateAssetSlots({ config, instruction = '', slots, onProgress = () => {}, cancelToken = null, maxImageCalls = null, reuseStaticBase = false }) {
   if (!gemini.isGeminiConfigured()) {
     throw new Error('No Gemini API key configured — asset regeneration requires a key.');
   }
@@ -1542,10 +1581,14 @@ export async function regenerateAssetSlots({ config, instruction = '', slots, on
   // and silently ignore the request; a theme word in the instruction ("lava world")
   // selects the matching local theme table instead.
   const parsedTheme = instruction.trim() ? parsePromptKeywords(instruction).themeKey : null;
+  const redrawsWorld = slots.some((s) => ['background_far', 'background_mid', 'background_near', 'floor'].includes(s));
   const design = await designAssetPrompts({
     userPrompt: instruction,
     gameType: config.gameType,
-    themeKey: parsedTheme || config.themeKey,
+    // A restyle that redraws the WORLD must not inherit the old world's theme:
+    // "Japan world" over a space game would be pushed back toward space by the
+    // designer's world cues. Non-world slots (enemy, player…) keep the game's theme.
+    themeKey: parsedTheme || (instruction.trim() && redrawsWorld ? null : config.themeKey),
     assetDesignDirections: instruction.trim() ? null : config.assetDesignDirections
   });
   onProgress(`[DESIGN] Asset prompts composed via ${DESIGN_SOURCE_LABELS[design.source] || design.source}...`, 73);
@@ -1569,7 +1612,17 @@ export async function regenerateAssetSlots({ config, instruction = '', slots, on
   }
 
   const gridPlan = planPropsGrid(slots, design, namedBySlot, onProgress, config.gameType);
-  const { preloadedImages, meta } = await generateAssets({ finalPrompts, slots, onProgress, cancelToken, gridPlan, gameType: config.gameType, maxImageCalls });
+  const { preloadedImages, meta } = await generateAssets({
+    finalPrompts,
+    slots,
+    onProgress,
+    cancelToken,
+    gridPlan,
+    gameType: config.gameType,
+    maxImageCalls,
+    reuseStaticBase,
+    initialPreloadedImages: reuseStaticBase ? (config.preloadedImages || {}) : {}
+  });
 
   const updated = Object.values(meta).filter(m => !m.dropped).length;
   onProgress(
@@ -1581,5 +1634,6 @@ export async function regenerateAssetSlots({ config, instruction = '', slots, on
   if (design.taxonomy?.tags?.length) {
     onProgress(`[DESIGN] Tags: ${design.taxonomy.tags.join(', ')}`, null);
   }
+  assertSlotCompleteness(slots, preloadedImages, meta);
   return { preloadedImages, meta, design, cost };
 }

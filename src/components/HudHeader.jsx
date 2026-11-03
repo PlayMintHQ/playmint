@@ -1,5 +1,5 @@
 import React from 'react';
-import { IconFullscreen, IconFullscreenExit, IconMenu, IconSave, IconRemix } from './Icons';
+import { IconFullscreen, IconFullscreenExit, IconMenu, IconSave, IconRemix, IconEdit } from './Icons';
 import AccountButton from '../auth/AccountButton';
 
 const HudHeader = ({
@@ -17,6 +17,7 @@ const HudHeader = ({
   canSave,
   playerAnimState,
   onRemix,
+  onEditPrompt,
 }) => {
   return (
     <div className="hud-header" onPointerDown={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()}>
@@ -85,6 +86,19 @@ const HudHeader = ({
               {saveState === 'saved' && <span aria-hidden="true">✓</span>}
               {saveState === 'error' && <span aria-hidden="true">!</span>}
               {saveState === 'idle' && <IconSave />}
+            </button>
+          )}
+
+          {/* Quick edit: a prompt box over the running game, without the full
+              Creator Panel. */}
+          {onEditPrompt && (
+            <button
+              className="pm-btn pm-btn-outline hud-header__icon-btn"
+              onClick={onEditPrompt}
+              title="Quick edit this game with a prompt"
+              aria-label="Quick edit game"
+            >
+              <IconEdit />
             </button>
           )}
 

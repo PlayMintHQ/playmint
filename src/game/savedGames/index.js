@@ -118,7 +118,7 @@ const client = async () => {
   return getSupabase();
 };
 
-const COLUMNS = 'id,title,mode,prompt,config,art_id,thumbnail_path,visibility,published_at,allow_remix,remix_parent_id,created_at,updated_at';
+const COLUMNS = 'id,owner_id,title,mode,prompt,config,art_id,thumbnail_path,visibility,published_at,allow_remix,remix_parent_id,created_at,updated_at';
 
 /**
  * Save (or re-save) the running game for the signed-in user.
@@ -138,7 +138,7 @@ export const saveGame = async ({ liveParams, preloadedImages, frameBlob = null }
 
   const mode = normalizeMode(liveParams.gameType);
   const artId = liveParams.gameId || null;
-  const config = stripForShare(liveParams);
+  const config = stripForShare(liveParams, { forRow: true });
   const assetMeta = buildSaveMeta(liveParams.assetMeta);
   const values = {
     title: titleFor(liveParams),
@@ -147,9 +147,15 @@ export const saveGame = async ({ liveParams, preloadedImages, frameBlob = null }
     config,
     asset_meta: assetMeta,
     art_id: artId,
-    remix_parent_id: liveParams.remixParentId || null,
-    allow_remix: liveParams.allowRemix !== undefined ? Boolean(liveParams.allowRemix) : true,
+    // Remixable unless the creator turned it off (`=== true` made every unset
+    // game non-remixable; the checkbox now writes an explicit boolean).
+    allow_remix: liveParams.allowRemix !== false,
   };
+  // Lineage is written ONLY when a row is created. A row's parent never changes,
+  // and a game can never be its own parent.
+  const parentId = liveParams.remixParentId && liveParams.remixParentId !== liveParams.savedGameId
+    ? liveParams.remixParentId
+    : null;
 
   try {
     // The art upload is fire-and-forget inside the asset cache, so a user can
@@ -177,12 +183,20 @@ export const saveGame = async ({ liveParams, preloadedImages, frameBlob = null }
       else warnOnce('no card art was produced from the game\'s own images');
     }
 
+    // Art ids are SHARED across users on purpose (the cache reuses art), so every
+    // row lookup is scoped to the caller. Without the owner filter this could land
+    // on someone else's public row, "save" 0 rows under RLS and report success.
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+    const ownerId = authData?.user?.id;
+    if (authError || !ownerId) return fail('Sign in to save games.');
+
     let rowId = liveParams.savedGameId || null;
     if (!rowId && artId) {
       const existing = await supabase
         .from('games')
         .select('id')
         .eq('art_id', artId)
+        .eq('owner_id', ownerId)
         .limit(1)
         .maybeSingle();
       if (existing.error) return fail(existing.error);
@@ -210,13 +224,17 @@ export const saveGame = async ({ liveParams, preloadedImages, frameBlob = null }
         .select('id')
         .maybeSingle();
       if (upd.error) return fail(upd.error);
-      thumbnailPath = await backfillThumbnail(supabase, rowId, thumbnailPath, compose, warnOnce);
-      return { ok: true, id: upd.data?.id || rowId, thumbnail: thumbnailPath || undefined };
+      if (upd.data) {
+        thumbnailPath = await backfillThumbnail(supabase, rowId, thumbnailPath, compose, warnOnce);
+        return { ok: true, id: upd.data.id, thumbnail: thumbnailPath || undefined };
+      }
+      // 0 rows updated: that row is not in THIS user's library (or is gone). Fall
+      // through and create the user's own copy rather than reporting a phantom save.
     }
 
     const ins = await supabase
       .from('games')
-      .insert({ ...values, thumbnail_path: thumbnailPath })
+      .insert({ ...values, remix_parent_id: parentId, thumbnail_path: thumbnailPath })
       .select('id')
       .maybeSingle();
     if (ins.error) return fail(ins.error);
@@ -273,14 +291,28 @@ export const attachThumbnail = async (rowId, blob) => {
   }
 };
 
-/** The signed-in user's own rows, newest first. RLS scopes this to the owner. */
+/**
+ * The signed-in user's own rows, newest first.
+ *
+ * The owner filter is explicit, not left to RLS: the public-read migration
+ * (20261031000000_games_public_read.sql) added `games_select_public`, which is
+ * OR-combined with `games_select_own`. RLS therefore returns other people's
+ * PUBLIC games to a signed-in caller too, and this list would leak them into
+ * My Games without this predicate.
+ */
 export const listMyGames = async () => {
   const supabase = await client();
   if (!supabase) return { ok: false, games: [], configured: false, error: 'Accounts are not enabled on this deployment.' };
   try {
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+    const user = authData?.user;
+    if (authError || !user) {
+      return { ok: false, games: [], configured: true, error: 'Sign in to see your games.' };
+    }
     const { data, error } = await supabase
       .from('games')
       .select(COLUMNS)
+      .eq('owner_id', user.id)
       .order('updated_at', { ascending: false });
     if (error) {
       if (isSchemaMissing(error)) return { ok: false, games: [], configured: true, schemaMissing: true, error: error.message };
@@ -310,7 +342,7 @@ export const listPublicGames = async ({ limit = 60 } = {}) => {
   try {
     const { data, error } = await supabase
       .from('games')
-      .select(`${COLUMNS},owner_id`)
+      .select(COLUMNS)
       .eq('visibility', 'public')
       .order('updated_at', { ascending: false })
       .limit(limit);
@@ -381,6 +413,27 @@ export const setGameVisibility = async (id, isPublic) => {
     if (error) return fail(error);
     if (!count) return fail('That game is not in your library.');
     return { ok: true, visibility, published_at };
+  } catch (err) {
+    return fail(err);
+  }
+};
+
+/**
+ * Creator toggle: may other people remix this game? Owner-only via RLS (a
+ * non-owner's update matches 0 rows, reported as "not in your library").
+ */
+export const setGameRemix = async (id, allow) => {
+  const supabase = await client();
+  if (!supabase) return fail('Accounts are not enabled on this deployment.');
+  if (!id) return fail('Missing game id.');
+  try {
+    const { error, count } = await supabase
+      .from('games')
+      .update({ allow_remix: !!allow }, { count: 'exact' })
+      .eq('id', id);
+    if (error) return fail(error);
+    if (!count) return fail('That game is not in your library.');
+    return { ok: true, allow_remix: !!allow };
   } catch (err) {
     return fail(err);
   }

@@ -141,9 +141,15 @@ export const SLOT_SPECS = {
     canvas: { width: 2048, height: 1024 },
     gen: { aspectRatio: '16:9', model: GEMINI_SLOT_MODEL },
     post: { fit: 'cover', keying: null, trimBorder: false, crop: false },
-    scaffold: (subject, style) =>
-      `Paint a wide side-scrolling video game background: ${subject}. Distant landscape ` +
-      `scenery fills the entire frame — no characters, no text, no logo. ${style}`,
+    scaffold: (subject, style, opts = {}) => opts.gameType === 'shooter'
+      // The shooter arena renders this as the GROUND of a top-down arena: no
+      // horizon, no sky — a side-view landscape here would show as a wall of sky
+      // laid flat under the player.
+      ? `Paint the ground of a top-down video game arena seen from directly above: ${subject}. ` +
+        `The whole frame is ground surface in bird's-eye view — scattered terrain details, ` +
+        `markings and props lie flat on it. No horizon, no sky, no characters, no text, no logo. ${style}`
+      : `Paint a wide side-scrolling video game background: ${subject}. Distant landscape ` +
+        `scenery fills the entire frame — no characters, no text, no logo. ${style}`,
     fallbackSubject: (d) => d?.backgrounds
   },
   background_mid: {

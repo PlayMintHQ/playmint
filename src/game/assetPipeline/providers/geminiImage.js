@@ -336,7 +336,9 @@ export async function generateImage({
         if (serverRes.status === 402) {
           throw new ProviderError(errJson.error || 'Gemini billing credits depleted', 'quota');
         }
-        throw toProviderError(errJson.error ? new Error(errJson.error) : new Error(`Server error ${serverRes.status}`));
+        const serverErr = new Error(errJson.error || `Server error ${serverRes.status}`);
+        serverErr.status = serverRes.status;
+        throw toProviderError(serverErr);
       } else {
         serverGenerateAvailable = true;
         const resData = await serverRes.json();
@@ -498,7 +500,9 @@ export async function generateJson({ prompt, responseSchema, imageDataUrl = null
         if (serverRes.status === 402) {
           throw new ProviderError(errJson.error || 'Gemini billing credits depleted', 'quota');
         }
-        throw toProviderError(errJson.error ? new Error(errJson.error) : new Error(`Server error ${serverRes.status}`));
+        const serverErr = new Error(errJson.error || `Server error ${serverRes.status}`);
+        serverErr.status = serverRes.status;
+        throw toProviderError(serverErr);
       } else {
         serverGenerateAvailable = true;
         const resData = await serverRes.json();

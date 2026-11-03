@@ -174,13 +174,15 @@ export const getTheme = (key) => {
 // for any world with no themeKey (every prompt-generated game has themeKey null),
 // which is why saved cards read as a blank rectangle.
 //
-// URLs are relative and load.setPath-relative ('assets/…'), matching preload().
-// Keep in sync with the preload list in GameManagerScene.
+// Root-absolute on purpose: these are used by CSS/Image loads on the
+// /my-games and /g/:id routes, where a relative 'assets/…' resolves under the
+// route and 404s (the SPA rewrite answers with index.html). GameManagerScene's
+// Phaser loader still uses load.setPath('/') + relative keys separately.
 export const THEME_ART_URLS = {
-  default: { backdrop: 'assets/themes/forest/bg_far.png', ground: 'assets/ground.png' },
-  lava: { backdrop: 'assets/themes/lava/bg.png', ground: 'assets/themes/lava/lava_ground.png' },
-  ice: { backdrop: 'assets/themes/winter/bg-1.png', ground: 'assets/themes/winter/winter_ground_1.png' },
-  forest: { backdrop: 'assets/themes/forest/bg_far.png', ground: 'assets/themes/forest/ground_tile.png' },
-  city: { backdrop: 'assets/themes/city/bg_far.png', ground: 'assets/themes/city/city_tile.png' },
-  space: { backdrop: 'assets/themes/space/bg_nebula.png', ground: 'assets/scifi_tileset.png' }
+  default: { backdrop: '/assets/themes/forest/bg_far.png', ground: '/assets/ground.png' },
+  lava: { backdrop: '/assets/themes/lava/bg.png', ground: '/assets/themes/lava/lava_ground.png' },
+  ice: { backdrop: '/assets/themes/winter/bg-1.png', ground: '/assets/themes/winter/winter_ground_1.png' },
+  forest: { backdrop: '/assets/themes/forest/bg_far.png', ground: '/assets/themes/forest/ground_tile.png' },
+  city: { backdrop: '/assets/themes/city/bg_far.png', ground: '/assets/themes/city/city_tile.png' },
+  space: { backdrop: '/assets/themes/space/bg_nebula.png', ground: '/assets/themes/space/space_floor.png' }
 };

@@ -393,14 +393,28 @@ export class SpriteAlignmentManager {
     const actualWidth = bbox.right - bbox.left + 1;
     const actualHeight = bbox.bottom - bbox.top + 1;
 
+    // Generated characters are measured on frame 0 — often the widest stride pose,
+    // with limbs, weapons or capes. A body that wide cannot clear an obstacle in a
+    // jump (the airtime above the obstacle is fixed), so the hitbox is capped to a
+    // torso-width fraction of the height and centered on the visible mass.
+    let hitWidth = actualWidth;
+    let hitLeft = bbox.left;
+    if (sprite.alignmentData.type === 'character') {
+      const maxWidth = Math.max(10, Math.round(actualHeight * 0.6));
+      if (actualWidth > maxWidth) {
+        hitWidth = maxWidth;
+        hitLeft = bbox.left + Math.round((actualWidth - maxWidth) / 2);
+      }
+    }
+
     // Set collision box to match visible pixels
-    sprite.body.setSize(actualWidth, actualHeight);
-    sprite.body.setOffset(bbox.left, bbox.top);
+    sprite.body.setSize(hitWidth, actualHeight);
+    sprite.body.setOffset(hitLeft, bbox.top);
 
     // For ground-based sprites, ensure bottom of collision box aligns with feet
     if (sprite.alignmentData.type === 'character' ||
         sprite.alignmentData.type === 'enemy') {
-      sprite.body.setOffset(bbox.left, analysis.footY + 1 - actualHeight);
+      sprite.body.setOffset(hitLeft, analysis.footY + 1 - actualHeight);
     }
   }
 

@@ -11,6 +11,28 @@ const MODE_LABELS = {
   shooter: 'Shooter Arena'
 };
 
+// Meta values are HTML ATTRIBUTES. A title/description containing `"` (almost
+// every description does — it quotes the game title) would close the content
+// attribute early, so crawlers saw a truncated description or no card at all.
+const escapeHtml = (value) =>
+  String(value ?? '').replace(/[&<>"']/g, (ch) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  }[ch]));
+
+const headerValue = (value) => (Array.isArray(value) ? value[0] : value);
+
+const requestOrigin = (req) => {
+  const proto = headerValue(req.headers?.['x-forwarded-proto']) || 'https';
+  const host = headerValue(req.headers?.['x-forwarded-host'])
+    || headerValue(req.headers?.host)
+    || 'playmintai.vercel.app';
+  return `${proto}://${host}`;
+};
+
 const publicBaseUrl = () => {
   const explicit = (process.env.BLOB_STORE_ID || '').replace(/^store_/i, '');
   const fromToken = (process.env.BLOB_READ_WRITE_TOKEN || '').match(/^vercel_blob_rw_([A-Za-z0-9]+)_/)?.[1];
@@ -115,12 +137,13 @@ export default async function handler(req, res) {
   }
 
   // Construct meta content
+  const origin = requestOrigin(req);
   const title = String(game.title || 'PlayMint Game').slice(0, 80);
   const modeName = MODE_LABELS[game.mode] || 'Game';
   const creator = game.creator_name || 'Community Creator';
   const desc = `Play "${title}", a procedural 2D ${modeName} created by ${creator} on PlayMint.`;
 
-  let imageUrl = 'https://playmintai.vercel.app/assets/Logo_PlayMint_(transparent).png';
+  let imageUrl = `${origin}/assets/Logo_PlayMint_(transparent).png`;
   if (game.thumbnail_path) {
     if (game.thumbnail_path.startsWith('http')) {
       imageUrl = game.thumbnail_path;
@@ -132,24 +155,31 @@ export default async function handler(req, res) {
     }
   }
 
-  const pageUrl = `https://playmintai.vercel.app/g/${encodeURIComponent(gameId)}`;
+  const pageUrl = `${origin}/g/${encodeURIComponent(gameId)}`;
+
+  // Every value crosses into an HTML attribute or a text node, so it is escaped
+  // exactly once here. (`—` stays literal; the document is UTF-8.)
+  const safeTitle = escapeHtml(title);
+  const safeDesc = escapeHtml(desc);
+  const safeImage = escapeHtml(imageUrl);
+  const safePageUrl = escapeHtml(pageUrl);
 
   // Replace / inject social meta tags in HTML
   let customHtml = html
-    .replace(/<title>.*?<\/title>/i, `<title>${title} — Play on PlayMint</title>`)
-    .replace(/<meta\s+name=["']description["'].*?>/i, `<meta name="description" content="${desc}" />`)
-    .replace(/<meta\s+property=["']og:title["'].*?>/i, `<meta property="og:title" content="${title} — PlayMint" />`)
-    .replace(/<meta\s+property=["']og:description["'].*?>/i, `<meta property="og:description" content="${desc}" />`)
-    .replace(/<meta\s+property=["']og:image["'].*?>/i, `<meta property="og:image" content="${imageUrl}" />`)
-    .replace(/<meta\s+name=["']twitter:title["'].*?>/i, `<meta name="twitter:title" content="${title} — PlayMint" />`)
-    .replace(/<meta\s+name=["']twitter:description["'].*?>/i, `<meta name="twitter:description" content="${desc}" />`)
-    .replace(/<meta\s+name=["']twitter:image["'].*?>/i, `<meta name="twitter:image" content="${imageUrl}" />`);
+    .replace(/<title>.*?<\/title>/i, `<title>${safeTitle} — Play on PlayMint</title>`)
+    .replace(/<meta\s+name=["']description["'].*?>/i, `<meta name="description" content="${safeDesc}" />`)
+    .replace(/<meta\s+property=["']og:title["'].*?>/i, `<meta property="og:title" content="${safeTitle} — PlayMint" />`)
+    .replace(/<meta\s+property=["']og:description["'].*?>/i, `<meta property="og:description" content="${safeDesc}" />`)
+    .replace(/<meta\s+property=["']og:image["'].*?>/i, `<meta property="og:image" content="${safeImage}" />`)
+    .replace(/<meta\s+name=["']twitter:title["'].*?>/i, `<meta name="twitter:title" content="${safeTitle} — PlayMint" />`)
+    .replace(/<meta\s+name=["']twitter:description["'].*?>/i, `<meta name="twitter:description" content="${safeDesc}" />`)
+    .replace(/<meta\s+name=["']twitter:image["'].*?>/i, `<meta name="twitter:image" content="${safeImage}" />`);
 
   // Inject og:url if missing
   if (!customHtml.includes('og:url')) {
-    customHtml = customHtml.replace('</head>', `  <meta property="og:url" content="${pageUrl}" />\n  </head>`);
+    customHtml = customHtml.replace('</head>', `  <meta property="og:url" content="${safePageUrl}" />\n  </head>`);
   } else {
-    customHtml = customHtml.replace(/<meta\s+property=["']og:url["'].*?>/i, `<meta property="og:url" content="${pageUrl}" />`);
+    customHtml = customHtml.replace(/<meta\s+property=["']og:url["'].*?>/i, `<meta property="og:url" content="${safePageUrl}" />`);
   }
 
   res.setHeader('Content-Type', 'text/html; charset=utf-8');

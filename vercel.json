@@ -1,8 +1,14 @@
 {
   "rewrites": [
     { "source": "/g/:id", "destination": "/api/game-preview?id=:id" },
+    { "source": "/g/:id/", "destination": "/api/game-preview?id=:id" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],
+  "functions": {
+    "api/game-preview.js": {
+      "includeFiles": "dist/index.html"
+    }
+  },
   "crons": [
     { "path": "/api/keepalive", "schedule": "0 7 * * *" }
   ]

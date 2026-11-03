@@ -238,7 +238,8 @@ export default class PlatformerMode extends BaseMode {
     // level's gaps. See ACTION_PLATFORM_TILE_W in gameConfig.js.
     const TILE_W = ACTION_PLATFORM_TILE_W;
     const PLATFORM_H = ACTION_PLATFORM_TILE_H;
-    const themePlatformTexture = this.scene.gameConfig.dynamicAssetUrls ? 'dyn_platform' : (this.scene.activeTheme?.platformTexture || 'stone_tile');
+    const useDynPlatform = this.scene.gameConfig.dynamicAssetUrls && this.scene.textures.exists('dyn_platform');
+    const themePlatformTexture = useDynPlatform ? 'dyn_platform' : (this.scene.activeTheme?.platformTexture || 'stone_tile');
     // Generated coin art when the optional collectible slot delivered (projectile
     // pattern: existence-guarded — a dropped slot keeps the static coin).
     const useDynCollectible = this.scene.gameConfig.dynamicAssetUrls && this.scene.textures.exists('dyn_collectible');
@@ -560,7 +561,8 @@ export default class PlatformerMode extends BaseMode {
     let enemiesCreated = 0;
     const maxEnemies = this.enemyCount;
     const theme = this.scene.activeTheme;
-    const enemyTexture = this.scene.gameConfig.dynamicAssetUrls ? 'dyn_enemy' : (theme?.enemyTexture || 'dude');
+    const useDynEnemy = this.scene.gameConfig.dynamicAssetUrls && this.scene.textures.exists('dyn_enemy');
+    const enemyTexture = useDynEnemy ? 'dyn_enemy' : (theme?.enemyTexture || 'dude');
 
     const enemySpots = [];
     const fallbackSpots = [];

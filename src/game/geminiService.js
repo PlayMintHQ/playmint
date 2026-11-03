@@ -28,8 +28,12 @@ export async function generateGameConfig(promptText, onProgress = () => {}, opti
     const parsed = parsePromptKeywords(promptText);
     onProgress('[SYSTEM] Analyzing prompt keywords and modifiers...', 20);
 
-    // Determine game mode — an explicit selection overrides the prompt-derived one.
-    const resolvedMode = options.mode || parsed.mode;
+    // Determine game mode. A prompt that NAMES its mode wins over a sticky UI
+    // selection (the overlay initialises that selection from the running game);
+    // otherwise the explicit UI choice overrides the prompt's generic verbs.
+    const resolvedMode = (parsed.modeExplicit && parsed.mode)
+      ? parsed.mode
+      : (options.mode || parsed.mode);
     const gameType = resolvedMode === 'action_quest' ? 'platformer'
       : resolvedMode === 'shooter_arena' ? 'shooter'
       : 'runner';

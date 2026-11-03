@@ -7,6 +7,29 @@
  * @param {{ title?: string, text?: string, url: string }} params
  * @returns {Promise<{ ok: boolean, method: 'share' | 'clipboard', error?: string }>}
  */
+async function copyToClipboard(url) {
+  try {
+    if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(url);
+      return { ok: true, method: 'clipboard' };
+    }
+    // Fallback for older browsers / non-secure contexts
+    const textArea = document.createElement('textarea');
+    textArea.value = url;
+    textArea.style.position = 'fixed';
+    textArea.style.opacity = '0';
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    const successful = document.execCommand('copy');
+    document.body.removeChild(textArea);
+    if (successful) return { ok: true, method: 'clipboard' };
+    return { ok: false, method: 'clipboard', error: 'Copy command failed' };
+  } catch (err) {
+    return { ok: false, method: 'clipboard', error: err?.message || String(err) };
+  }
+}
+
 export async function shareLink({ title = 'PlayMint game', text = 'Play this game on PlayMint!', url }) {
   if (!url) return { ok: false, method: 'clipboard', error: 'No URL provided' };
 
@@ -27,25 +50,16 @@ export async function shareLink({ title = 'PlayMint game', text = 'Play this gam
     }
   }
 
-  // Fallback to clipboard
-  try {
-    if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
-      await navigator.clipboard.writeText(url);
-      return { ok: true, method: 'clipboard' };
-    }
-    // Fallback for older browsers
-    const textArea = document.createElement('textarea');
-    textArea.value = url;
-    textArea.style.position = 'fixed';
-    textArea.style.opacity = '0';
-    document.body.appendChild(textArea);
-    textArea.focus();
-    textArea.select();
-    const successful = document.execCommand('copy');
-    document.body.removeChild(textArea);
-    if (successful) return { ok: true, method: 'clipboard' };
-    return { ok: false, method: 'clipboard', error: 'Copy command failed' };
-  } catch (err) {
-    return { ok: false, method: 'clipboard', error: err?.message || String(err) };
-  }
+  return copyToClipboard(url);
+}
+
+/**
+ * Explicit clipboard action. Desktop browsers have no Web Share API, so a
+ * "Share" button whose only visible behaviour is a silent clipboard write
+ * reads as broken. Call sites pair this with shareLink: Share = native sheet
+ * where supported, Copy Link = always the URL.
+ */
+export async function copyLink(url) {
+  if (!url) return { ok: false, method: 'clipboard', error: 'No URL provided' };
+  return copyToClipboard(url);
 }

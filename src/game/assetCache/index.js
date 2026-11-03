@@ -291,7 +291,9 @@ async function tryMatchedReuse({ config, userPrompt, promptKey, onProgress, canc
   const matcherMode = verdict ? 'llm'
     : !isGeminiConfigured() ? 'local'
     : llmFailed ? 'llm-failed-local' : 'llm-no-match-local';
-  if (!verdict) verdict = localMatch({ userPrompt, candidates, view });
+  // The offline matcher only stands in when the LLM could not run. An honest LLM
+  // "nothing fits" must not be overridden by a theme-only guess.
+  if (!verdict && (!isGeminiConfigured() || llmFailed)) verdict = localMatch({ userPrompt, candidates, view });
   timeMark('matcher');
   timeAnnotate({ matcherMode });
   if (cancelToken?.cancelled) throw cancelledError();
@@ -320,8 +322,8 @@ async function tryMatchedReuse({ config, userPrompt, promptKey, onProgress, canc
   const redrawWeight = slots.reduce(
     (sum, s) => sum + (s === 'player' || s === 'player_sheet' ? PLAYER_REDRAW_WEIGHT : 1), 0
   );
-  if (worldClashes >= 2 || redrawWeight > MAX_REDRAW_WEIGHT) {
-    const matchRejected = worldClashes >= 2 ? 'world-clash' : 'redraw-too-expensive';
+  if (worldClashes >= 1 || redrawWeight > MAX_REDRAW_WEIGHT) {
+    const matchRejected = worldClashes >= 1 ? 'world-clash' : 'redraw-too-expensive';
     timeAnnotate({ matchRejected, rejectedReplaceSlots: slots.length });
     onProgress?.(`[CACHE] Best cached match rejected (${matchRejected}: ${slots.join(', ')}) — generating a fresh set.`, null);
     return null;
@@ -360,7 +362,8 @@ async function tryMatchedReuse({ config, userPrompt, promptKey, onProgress, canc
   // Cache-only/keyless skip this; the scene's theme-player fallback covers them.
   // (Deliberately AFTER the redraw-cost cap — completing a player never
   // disqualifies an otherwise-good match.)
-  if (!cacheOnly && !baseImages.player && !slots.includes('player') && !slots.includes('player_sheet') && isGeminiConfigured()) {
+  const isShooterRun = config?.gameType === 'shooter';
+  if (!cacheOnly && !isShooterRun && !baseImages.player && !slots.includes('player') && !slots.includes('player_sheet') && isGeminiConfigured()) {
     slots = [...slots, 'player_sheet'];
   }
 
@@ -400,7 +403,8 @@ async function tryMatchedReuse({ config, userPrompt, promptKey, onProgress, canc
   // the sheet's output lands under the 'player' key with frames meta, so the
   // merge below needs no special-casing).
   onProgress?.(`[CACHE] Matched cached game "${label}"${reason} — reusing base art, redrawing: ${slots.join(', ')}`, 78);
-  const regenSlots = [...new Set(slots.map((s) => (s === 'player' ? 'player_sheet' : s)))];
+  // A shooter's player is a single rotating top-down sprite — no run-cycle sheet.
+  const regenSlots = [...new Set(slots.map((s) => (s === 'player' && config?.gameType !== 'shooter' ? 'player_sheet' : s)))];
   let regen = null;
   try {
     regen = await regenerateAssetSlots({ config, instruction: userPrompt, slots: regenSlots, onProgress, cancelToken });
@@ -418,7 +422,16 @@ async function tryMatchedReuse({ config, userPrompt, promptKey, onProgress, canc
       mergedSlots[slot] = { ...m, source: 'generated' };
       continue;
     }
-    mergedImages[slot] = regen.preloadedImages[slot];
+    const img = regen.preloadedImages[slot];
+    if (!img) {
+      // Reported as succeeded but produced no image — an internal invariant
+      // violation (should be unreachable: pipeline.js asserts this). Never
+      // register a texture key with no backing image, and never count it as
+      // generated — cost/telemetry must stay honest.
+      mergedSlots[slot] = { ...m, dropped: true, reason: 'missing image after redraw (internal)', source: 'generated' };
+      continue;
+    }
+    mergedImages[slot] = img;
     mergedSlots[slot] = { ...m, source: 'generated' };
     generatedSlots.push(slot);
   }
@@ -459,40 +472,69 @@ async function tryMatchedReuse({ config, userPrompt, promptKey, onProgress, canc
 // Predefined themes whose curated static art boots the game. Exactly the five
 // keys parsePromptKeywords can produce, so every one of them has real art in
 // public/assets/themes.
-const THEME_KEYS = ['ice', 'lava', 'forest', 'city', 'space'];
+export const THEME_KEYS = ['ice', 'lava', 'forest', 'city', 'space'];
+export const THEME_LABELS = { ice: 'Ice', lava: 'Lava', forest: 'Forest', city: 'City', space: 'Space' };
+export const pickRandomTheme = () => THEME_KEYS[Math.floor(Math.random() * THEME_KEYS.length)];
 
-// The prompt's own theme when it has one, otherwise a random curated world. A
-// custom world ("a clockwork castle") has no theme match, and drawing its art
-// procedurally shipped a bare stick figure the client rejected — the built-in
-// sets are the only art that reads as a finished game.
-const pickFallbackTheme = (themeKey) => (
-  THEME_KEYS.includes(themeKey)
-    ? themeKey
-    : THEME_KEYS[Math.floor(Math.random() * THEME_KEYS.length)]
-);
+// A short, user-facing reason for a failed generation. The server's own wording
+// for the guest/daily limit is kept verbatim (it tells the user what to DO);
+// everything else is generic — raw provider errors are not for players.
+export const describeFailure = (err) => {
+  const msg = String(err?.message || err || '');
+  const limit = msg.match(/Guest generation limit reached\.(?: Sign in to create more games\.)?|Daily generation quota exceeded\.(?: Please return tomorrow\.)?/i);
+  if (limit) return limit[0];
+  if (err?.kind === 'quota' || /quota|rate limit|exhausted|credits/i.test(msg)) {
+    return 'The AI art service is at its usage limit right now.';
+  }
+  return 'AI art could not be generated right now.';
+};
 
-// Gemini is unavailable (no key / quota / fatal slot) or Cache only missed —
-// never dead-end, never dead art. Returns the same static-boot shape the old
-// themed branch did, so callers need no special case. Cancellations always
-// propagate (they are rethrown before this is reached).
-const buildFallbackBoot = ({ config, onProgress }) => {
-  const themeKey = pickFallbackTheme(config?.themeKey);
-  const matched = themeKey === config?.themeKey;
-  bumpStats('staticMiss');
-  timeAnnotate({ staticWorld: themeKey, staticWorldMatched: matched });
-  onProgress?.(
-    matched
-      ? `[CACHE] No AI art available — launching with the built-in "${themeKey}" world artwork (no image spend).`
-      : `[CACHE] No AI art available and this prompt has no built-in world — launching with a random built-in world ("${themeKey}", no image spend).`,
-    null
-  );
-  return {
-    config: { ...config, themeKey, dynamicAssetUrls: null, preloadedImages: null, assetMeta: null },
+// The built-in-world boot shape (config + static art routing). Used directly for
+// prompts that name a built-in world, and by the UI's "Play a built-in world"
+// choice for custom worlds.
+export const buildStaticBoot = (config, themeKey, notice = null) => ({
+  config: {
+    ...config,
+    themeKey,
+    dynamicAssetUrls: null,
     preloadedImages: null,
     assetMeta: null,
-    fromCache: false,
-    staticBoot: true
-  };
+    ...(notice ? { staticNotice: notice } : {})
+  },
+  preloadedImages: null,
+  assetMeta: null,
+  fromCache: false,
+  staticBoot: true
+});
+
+// Gemini is unavailable (no key / quota / fatal slot) or Cache only missed.
+//  - The prompt names a built-in world (lava, forest…): boot that world's curated
+//    art WITH a visible notice saying why.
+//  - A custom world ("Japan", "clockwork castle") has no built-in equivalent. Booting
+//    a RANDOM world under the player's title silently showed "Japan" as a space level,
+//    so this REJECTS with a choice error the UI turns into Retry / Play a built-in
+//    world / Back. Cancellations always propagate before this is reached.
+const buildFallbackBoot = ({ config, onProgress, reason = null, cacheOnlyMiss = false }) => {
+  const why = reason || describeFailure(null);
+  bumpStats('staticMiss');
+  if (THEME_KEYS.includes(config?.themeKey)) {
+    const themeKey = config.themeKey;
+    timeAnnotate({ staticWorld: themeKey, staticWorldMatched: true });
+    const notice = `${why} Playing the built-in ${THEME_LABELS[themeKey]} world instead.`;
+    onProgress?.(`[CACHE] ${notice} (no image spend)`, null);
+    return buildStaticBoot(config, themeKey, notice);
+  }
+  timeAnnotate({ staticWorld: null, staticWorldMatched: false, fallbackChoice: true });
+  const err = new Error(cacheOnlyMiss
+    ? 'Cache only is ON and nothing cached matches this prompt.'
+    : `${why} This prompt has no built-in world to fall back to.`);
+  err.needsFallbackChoice = true;
+  err.fallbackReason = cacheOnlyMiss
+    ? 'Cache only is ON and nothing cached matches this prompt.'
+    : why;
+  err.cacheOnlyMiss = cacheOnlyMiss;
+  err.fallbackConfig = config;
+  throw err;
 };
 
 // Fresh generation with the fallback: a Gemini failure (no key, exhausted
@@ -504,7 +546,7 @@ const generateWithFallback = async ({ config, userPrompt, onProgress, cancelToke
   } catch (err) {
     if (err?.cancelled) throw err;
     console.warn('[AssetCache] Fresh generation failed — using built-in theme art:', err?.message || err);
-    return buildFallbackBoot({ config, onProgress });
+    return buildFallbackBoot({ config, onProgress, reason: describeFailure(err) });
   }
 };
 
@@ -570,7 +612,7 @@ export async function generateOrRestoreAssets({ config, userPrompt = '', promptK
   // Tier 3 — cache-only miss: never dead-end. Built-in theme art, the prompt's
   // own world if it has one and a random one if it doesn't.
   if (cacheOnly) {
-    return buildFallbackBoot({ config, onProgress });
+    return buildFallbackBoot({ config, onProgress, reason: 'Cache only is ON and nothing cached matches this prompt.', cacheOnlyMiss: true });
   }
 
   return generateWithFallback({ config, userPrompt, promptKey, onProgress, cancelToken, t0, extraCost: box.matcherCost });

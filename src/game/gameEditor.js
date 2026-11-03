@@ -67,7 +67,12 @@ const ASSET_TARGET_SLOTS = {
 export function resolveAssetTargets(targets, config) {
   const isPlatformer = config?.gameType === 'platformer';
   const isShooter = config?.gameType === 'shooter';
-  const allSlots = GENERATED_SLOTS.map(s => (s === 'player' ? 'player_sheet' : s));
+  // Shooter: a single rotating top-down player, and no parallax/platform/obstacle
+  // art exists in that mode (see generateGameAssets' effectiveSkipSlots).
+  const SHOOTER_SKIPPED = ['background_mid', 'background_near', 'platform', 'obstacle'];
+  const allSlots = GENERATED_SLOTS
+    .filter(s => !(isShooter && SHOOTER_SKIPPED.includes(s)))
+    .map(s => (s === 'player' && !isShooter ? 'player_sheet' : s));
   if (isPlatformer || isShooter) allSlots.push('projectile');
   allSlots.push('collectible');
   const slots = new Set();
@@ -76,7 +81,9 @@ export function resolveAssetTargets(targets, config) {
       allSlots.forEach(s => slots.add(s));
       continue;
     }
-    for (const slot of ASSET_TARGET_SLOTS[target] || []) {
+    for (const rawSlot of ASSET_TARGET_SLOTS[target] || []) {
+      if (isShooter && SHOOTER_SKIPPED.includes(rawSlot)) continue;
+      const slot = rawSlot === 'player_sheet' && isShooter ? 'player' : rawSlot;
       if (slot === 'projectile' && !isPlatformer && !isShooter) continue; // runners never shoot
       slots.add(slot);
     }

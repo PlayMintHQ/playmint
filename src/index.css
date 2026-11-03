@@ -505,8 +505,8 @@ canvas {
      scales together — and so the footprint MobileControls measures for the
      camera gutter stays truthful when the sizes change. vmin (not vw/vh) keeps
      a button the same size in both orientations. */
-  --pm-btn: clamp(46px, 12vmin, 58px);
-  --pm-btn-jump: clamp(54px, 14vmin, 66px);
+  --pm-btn: clamp(56px, 12vmin, 62px);
+  --pm-btn-jump: clamp(60px, 14vmin, 70px);
   --pm-btn-gap: clamp(8px, 2.5vmin, 14px);
   /* env(x, fallback) only uses the fallback where env() is UNSUPPORTED, so the
      old `env(safe-area-inset-left, 20px)` resolved to 0 on every ordinary phone
@@ -523,9 +523,10 @@ canvas {
    tall viewport. Same breakpoint the HUD header already compacts at. */
 @media (max-height: 480px) {
   .pm-mobile-overlay {
-    --pm-btn: clamp(42px, 11vmin, 50px);
-    --pm-btn-jump: clamp(46px, 12vmin, 56px);
-    --pm-btn-gap: 8px;
+    /* Still ≥56px: landscape shortens the screen, never the touch target. */
+    --pm-btn: 56px;
+    --pm-btn-jump: 60px;
+    --pm-btn-gap: 6px;
     padding-bottom: max(8px, env(safe-area-inset-bottom));
   }
 }
@@ -606,6 +607,7 @@ canvas {
 .pm-touch-btn {
   -webkit-tap-highlight-color: transparent;
   user-select: none;
+  touch-action: manipulation;
   width: var(--pm-btn);
   height: var(--pm-btn);
   border-radius: 50%;

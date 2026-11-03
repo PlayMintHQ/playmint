@@ -3,9 +3,8 @@ import { GAME_PRESETS } from '../gameConfig';
 import { generateTitle, normalizeRunnerPacing } from '../game/promptUtils';
 import { generateGameConfig } from '../game/geminiService';
 import { isGeminiConfigured, createCancelToken } from '../game/assetPipeline';
-import { generateOrRestoreAssets, makePromptKey, makePresetKey } from '../game/assetCache';
+import { generateOrRestoreAssets, makePromptKey, makePresetKey, THEME_KEYS, THEME_LABELS, pickRandomTheme, describeFailure, buildStaticBoot } from '../game/assetCache';
 import * as metrics from '../game/metrics';
-import { THEMES } from '../game/themes';
 import AccountButton from '../auth/AccountButton';
 import { IconRemix } from './Icons';
 
@@ -226,6 +225,8 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
   const [isEditingKey, setIsEditingKey] = useState(false);
   const formRef = useRef(null);
   const [phaserLoaded, setPhaserLoaded] = useState(false);
+  // { reason, config, retry, boot, themeKey } while the user chooses what to do after a failed run.
+  const [fallbackChoice, setFallbackChoice] = useState(null);
   // Cancellation for the in-flight generation run. Every new run cancels the
   // previous one, and unmounting (✕ Close, successful boot, logo re-open cycle)
   // cancels whatever is still running — this is what makes the Generate button
@@ -352,15 +353,38 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
   // theme art instead (dynamicAssetUrls null routes every texture pick to the
   // static theme set). Prompt-generated configs carry the matched themeKey since
   // 2026-09-22 (geminiService stamps it), so a "jungle world" fallback boots the
-  // forest theme — only prompts matching NO predefined theme fall back to 'ice'
-  // (the generateRandom precedent, full multi-layer art).
+  // forest theme. Custom worlds have no curated set of their own: pick one of the
+  // five complete worlds at random, never default every unknown prompt to ice.
+  // Presets always carry a built-in themeKey, so this never has to guess a world.
   const toStaticThemeConfig = (config) => ({
     ...config,
-    themeKey: THEMES[config.themeKey] ? config.themeKey : 'ice',
+    themeKey: THEME_KEYS.includes(config.themeKey) ? config.themeKey : 'ice',
     dynamicAssetUrls: null,
     preloadedImages: null,
     assetMeta: null
   });
+
+  // A failed run. Built-in world prompt → boot that world WITH a notice saying why.
+  // Custom world → ask: Retry / Play a built-in world / Back. A random world under
+  // the player's own title ("Japan" shown as space) was the reported bug.
+  const failToStatic = (err, config, retry, boot) => {
+    const reason = err?.fallbackReason || describeFailure(err);
+    if (THEME_KEYS.includes(config?.themeKey)) {
+      const notice = `${reason} Playing the built-in ${THEME_LABELS[config.themeKey]} world instead.`;
+      setTerminalLogs(prev => [...prev, `[ASSETS] ${notice}`]);
+      boot(buildStaticBoot(config, config.themeKey, notice).config);
+      return;
+    }
+    setTerminalLogs(prev => [...prev, `[ASSETS] ${reason}`]);
+    setFallbackChoice({ reason, config, retry, boot, themeKey: pickRandomTheme() });
+  };
+  const resetToPrompt = () => {
+    setFallbackChoice(null);
+    setIsGenerating(false);
+    setTransitionPhase('idle');
+    setProgress(0);
+    setPhaserLoaded(false);
+  };
 
   // Shared asset-phase progress handler: pipeline liveness ticks carry a pct with
   // null text (skip the log), and the bar must never move backwards mid-compile
@@ -491,9 +515,7 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
       // Stay in the 'compiling' phase: the static boot fires phaser-load-complete,
       // which drives the normal 100% → fade sequence.
       console.error('[Compilation Error] Preset asset generation failed, using static theme:', err);
-      if (!err.cacheOnlyMiss) { // cache-only miss already explained itself via onProgress
-        setTerminalLogs(prev => [...prev, '[ASSETS] AI generation unavailable — launching with built-in theme artwork. Add a Gemini API key (top right) for AI assets.']);
-      }
+      setTerminalLogs(prev => [...prev, `[ASSETS] ${describeFailure(err)} Launching with the built-in artwork.`]);
       onStartTransition({
         ...toStaticThemeConfig(newConfig),
         remixParentId: currentConfig?.remixParentId || null,
@@ -563,8 +585,11 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
         metrics.mark('assets-failed');
         console.error('[Compilation Error] Overlay generation failed, using static theme:', err);
         if (overlayConfig) {
-          setTransitionPhase('done');
-          onGenerate('custom', toStaticThemeConfig(overlayConfig));
+          failToStatic(
+            err, overlayConfig,
+            () => processPrompt(text),
+            (cfg) => { setTransitionPhase('done'); onGenerate('custom', cfg); }
+          );
         } else {
           // Config generation itself failed (local, near-infallible) — plain reset.
           // Nothing boots after this, so the run would otherwise stay open and be
@@ -625,16 +650,17 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
       metrics.mark('assets-failed');
       console.error('[Compilation Error] Game generation or preloading failed:', err);
       if (generatedConfig) {
-        // Asset generation died — launch on built-in theme art instead of dead-ending.
-        // Stay in 'compiling': the static boot fires phaser-load-complete → 100% → fade.
-        if (!err.cacheOnlyMiss) { // cache-only miss already explained itself via onProgress
-          setTerminalLogs(prev => [...prev, '[ASSETS] AI generation unavailable — launching with built-in theme artwork. Add a Gemini API key (top right) for AI assets.']);
-        }
-        onStartTransition({
-          ...toStaticThemeConfig(generatedConfig),
-          remixParentId: currentConfig?.remixParentId || null,
-          remixParentTitle: currentConfig?.remixParentTitle || null
-        });
+        // Asset generation died. Stay in 'compiling': a static boot fires
+        // phaser-load-complete → 100% → fade; a custom world asks first.
+        failToStatic(
+          err, generatedConfig,
+          () => processPrompt(text),
+          (cfg) => onStartTransition({
+            ...cfg,
+            remixParentId: currentConfig?.remixParentId || null,
+            remixParentTitle: currentConfig?.remixParentTitle || null
+          })
+        );
       } else {
         // Config generation itself failed (local, near-infallible) — plain reset
         metrics.cancelRun();
@@ -1012,6 +1038,30 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
                 })}
               </div>
 
+              {fallbackChoice ? (
+                <div data-testid="fallback-choice" style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontFamily: 'var(--pm-font-body, sans-serif)' }}>
+                  <div style={{ color: 'var(--pm-accent-orange)', fontSize: '13px', lineHeight: 1.45 }}>
+                    {fallbackChoice.reason} No AI art was made for this world.
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                    <button type="button" className="pm-btn pm-btn-primary" onClick={() => { const fc = fallbackChoice; setFallbackChoice(null); fc.retry(); }}>
+                      Try again
+                    </button>
+                    <button type="button" className="pm-btn pm-btn-outline" onClick={() => {
+                      const fc = fallbackChoice;
+                      const label = THEME_LABELS[fc.themeKey];
+                      const notice = `${fc.reason} Playing a built-in ${label} world instead.`;
+                      setFallbackChoice(null);
+                      fc.boot(buildStaticBoot(fc.config, fc.themeKey, notice).config);
+                    }}>
+                      Play a built-in {THEME_LABELS[fallbackChoice.themeKey]} world
+                    </button>
+                    <button type="button" className="pm-btn pm-btn-muted" onClick={resetToPrompt}>
+                      Back
+                    </button>
+                  </div>
+                </div>
+              ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: 'var(--pm-text-secondary)' }}>
                   <span>Compiling World Matrix</span>
@@ -1028,6 +1078,7 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
                   }} />
                 </div>
               </div>
+              )}
             </div>
           ) : (
             /* ===== PROMPT DOCK CONTENT ===== */

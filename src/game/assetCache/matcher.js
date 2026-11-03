@@ -33,8 +33,16 @@ export const candidateTheme = (c) =>
 const STOP_WORDS = new Set([
   'the', 'and', 'with', 'for', 'from', 'into', 'that', 'this', 'have',
   'game', 'runner', 'platformer', 'quest', 'shooter', 'arena', 'play', 'make',
-  'mode', 'level', 'style', 'like', 'inspired', 'action', 'adventure'
+  'mode', 'level', 'style', 'like', 'inspired', 'action', 'adventure',
+  // Generic setting words: sharing "world" says nothing about WHICH world.
+  'world', 'land', 'lands', 'realm', 'theme', 'themed', 'map', 'zone', 'place',
+  'where', 'you', 'your', 'who', 'run', 'running', 'fight', 'dodge', 'jump'
 ]);
+
+// The matcher prompt grows ~230 chars per candidate; with the shared server
+// population (~40 sets) it overflowed any sane request size. Rank by cheap
+// token overlap + theme equality and send only the best few.
+export const MATCHER_MAX_CANDIDATES = 12;
 
 export function tokenizePrompt(text) {
   if (typeof text !== 'string') return [];
@@ -61,7 +69,15 @@ export function validateSemanticMatch({ userPrompt = '', candidate, replaceSlots
   // When either prompt or candidate is a custom/non-standard theme, require
   // semantic token overlap between the prompt and the candidate's metadata.
   if (!promptTheme || !candTheme) {
-    const promptTokens = tokenizePrompt(userPrompt);
+    // Entities the user NAMED in a slot that is being redrawn don't need to
+    // match the cached set (they are redrawn anyway) — exempt them.
+    const exempt = new Set();
+    const wanted = extractEntities(userPrompt);
+    const slotEntity = { enemy: wanted.enemy, obstacle: wanted.hazard, collectible: wanted.collectible };
+    for (const [slot, noun] of Object.entries(slotEntity)) {
+      if (noun && replaceSlots.includes(slot)) tokenizePrompt(noun).forEach((t) => exempt.add(t));
+    }
+    const promptTokens = tokenizePrompt(userPrompt).filter((t) => !exempt.has(t));
     const candidateTokens = new Set([
       ...tokenizePrompt(candidate.sourcePrompt || ''),
       ...(candidate.assetMeta?.tags || []).flatMap(tokenizePrompt),
@@ -69,7 +85,9 @@ export function validateSemanticMatch({ userPrompt = '', candidate, replaceSlots
       ...Object.values(entityMap(candidate)).flatMap(tokenizePrompt)
     ]);
     const matches = promptTokens.filter((t) => candidateTokens.has(t));
-    if (promptTokens.length > 0 && matches.length === 0) {
+    // At least half of what the prompt says must be present in the cached set.
+    // One shared generic word used to be enough to ship an unrelated world.
+    if (promptTokens.length > 0 && matches.length / promptTokens.length < 0.5) {
       return { valid: false, reason: 'custom-world-low-overlap' };
     }
   }
@@ -77,7 +95,8 @@ export function validateSemanticMatch({ userPrompt = '', candidate, replaceSlots
   // 3. World slot clash barrier:
   const WORLD_SLOTS = ['background_far', 'background_mid', 'background_near', 'floor'];
   const worldClashes = replaceSlots.filter((s) => WORLD_SLOTS.includes(s)).length;
-  if (worldClashes >= 2) {
+  // ANY redrawn backdrop/floor slot means the cached world is the wrong world.
+  if (worldClashes >= 1) {
     return { valid: false, reason: 'world-clash' };
   }
 
@@ -135,6 +154,20 @@ export async function matchCachedGame({ userPrompt, candidates, view = 'side' })
   candidates = candidates.filter((c) => sameView(c, view));
   if (!candidates.length) return null;
   const userTheme = parsePromptKeywords(userPrompt || '').themeKey;
+  const promptTokens = tokenizePrompt(userPrompt || '');
+  const score = (c) => {
+    const bag = new Set([
+      ...tokenizePrompt(c.sourcePrompt || ''),
+      ...(c.assetMeta?.tags || []).flatMap(tokenizePrompt),
+      ...tokenizePrompt(c.config?.gameName || '')
+    ]);
+    return promptTokens.filter((t) => bag.has(t)).length + (userTheme && candidateTheme(c) === userTheme ? 3 : 0);
+  };
+  candidates = candidates
+    .map((c, i) => ({ c, i, s: score(c) }))
+    .sort((a, b) => b.s - a.s || a.i - b.i)
+    .slice(0, MATCHER_MAX_CANDIDATES)
+    .map((x) => x.c);
   const payload = candidates.map((c) => ({
     id: c.id,
     sourcePrompt: c.sourcePrompt || '',

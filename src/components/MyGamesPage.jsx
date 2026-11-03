@@ -18,8 +18,8 @@ import ConfirmDialog from './ConfirmDialog';
 import { IconPlay, IconGlobe, IconLock, IconShare, IconRemix } from './Icons';
 import { navigate } from '../router';
 import { encodeShareConfig } from '../game/shareLink';
-import { listMyGames, listPublicGames, renameGame, deleteGame, setGameVisibility } from '../game/savedGames';
-import { shareLink } from '../utils/shareUtils';
+import { listMyGames, listPublicGames, renameGame, deleteGame, setGameVisibility, setGameRemix } from '../game/savedGames';
+import { shareLink, copyLink } from '../utils/shareUtils';
 import { THEME_ART_URLS } from '../game/themes';
 
 // games.mode holds the internal gameType; the UI has always called the
@@ -87,6 +87,10 @@ const playSavedGame = (game) => {
     // getGameById() will look the art up under.
     gameId: game?.art_id || game?.config?.gameId || null,
     gameName: game?.title || game?.config?.gameName || 'PlayMint game',
+    allowRemix: game?.allow_remix === true,
+    rowId: game?.id || null,
+    ownerId: game?.owner_id || null,
+    visibility: game?.visibility || null,
   };
   try {
     const payload = encodeShareConfig(config);
@@ -155,6 +159,20 @@ function GameCard({ game, onRename, onDelete, isCommunity = false }) {
 
   const [toggling, setToggling] = useState(false);
   const [shareStatus, setShareStatus] = useState('idle');
+  const [copyStatus, setCopyStatus] = useState('idle');
+  const gameUrl = `${window.location.origin}/g/${game.id}`;
+
+  const toggleRemix = async () => {
+    setToggling(true);
+    const next = game.allow_remix !== true;
+    const res = await setGameRemix(game.id, next);
+    setToggling(false);
+    if (res.ok) {
+      if (onRename) onRename(game.id, game.title, undefined, res.allow_remix);
+    } else {
+      setError(res.error);
+    }
+  };
 
   const toggleVisibility = async () => {
     setToggling(true);
@@ -169,15 +187,22 @@ function GameCard({ game, onRename, onDelete, isCommunity = false }) {
   };
 
   const handleShare = async () => {
-    const url = `${window.location.origin}/g/${game.id}`;
     const res = await shareLink({
       title: game.title,
       text: `Play "${game.title}" on PlayMint!`,
-      url
+      url: gameUrl
     });
     if (res.ok) {
       setShareStatus(res.method === 'share' ? 'shared' : 'copied');
       setTimeout(() => setShareStatus('idle'), 2500);
+    }
+  };
+
+  const handleCopy = async () => {
+    const res = await copyLink(gameUrl);
+    if (res.ok) {
+      setCopyStatus('copied');
+      setTimeout(() => setCopyStatus('idle'), 2500);
     }
   };
 
@@ -275,6 +300,17 @@ function GameCard({ game, onRename, onDelete, isCommunity = false }) {
                   )}
                 </button>
               )}
+              {!isCommunity && (
+                <button
+                  type="button"
+                  className="pm-library__visibility-toggle"
+                  onClick={toggleRemix}
+                  disabled={toggling || busy || editing}
+                  title={game.allow_remix === true ? 'Others can remix this game — click to turn off' : 'Remixing is off — click to allow others to remix'}
+                >
+                  <IconRemix /> <span>Remix: {game.allow_remix === true ? 'On' : 'Off'}</span>
+                </button>
+              )}
               {game.visibility === 'public' && (
                 <a
                   href={`/g/${game.id}`}
@@ -305,7 +341,7 @@ function GameCard({ game, onRename, onDelete, isCommunity = false }) {
           <button type="button" className="pm-btn pm-btn-primary pm-library__play" onClick={() => playSavedGame(game)}>
             <IconPlay /> Play
           </button>
-          {isCommunity && (
+          {isCommunity && game.allow_remix === true && (
             <button
               type="button"
               className="pm-btn pm-btn-outline"
@@ -322,9 +358,17 @@ function GameCard({ game, onRename, onDelete, isCommunity = false }) {
             type="button"
             className="pm-btn pm-btn-outline"
             onClick={handleShare}
-            title={game.visibility === 'public' ? 'Share / Copy public link' : 'Share link (note: game is currently private)'}
+            title={game.visibility === 'public' ? 'Share the public link' : 'Share link (note: game is currently private)'}
           >
             <IconShare /> {shareStatus === 'copied' ? 'Copied!' : shareStatus === 'shared' ? 'Shared!' : 'Share'}
+          </button>
+          <button
+            type="button"
+            className="pm-btn pm-btn-outline"
+            onClick={handleCopy}
+            title={game.visibility === 'public' ? 'Copy the public game link' : 'Copy link (note: game is currently private)'}
+          >
+            {copyStatus === 'copied' ? '✓ Copied' : 'Copy Link'}
           </button>
           {!isCommunity && (
             <>
@@ -402,8 +446,8 @@ export function MyGamesPage() {
     return () => window.removeEventListener('pm-games-changed', onChanged);
   }, [refreshKey, activeTab]);
 
-  const handleRenamed = (id, title, visibility) => {
-    setLoaded((prev) => (prev ? { ...prev, games: prev.games.map((g) => (g.id === id ? { ...g, title, ...(visibility ? { visibility } : {}) } : g)) } : prev));
+  const handleRenamed = (id, title, visibility, allowRemix) => {
+    setLoaded((prev) => (prev ? { ...prev, games: prev.games.map((g) => (g.id === id ? { ...g, title, ...(visibility ? { visibility } : {}), ...(allowRemix !== undefined ? { allow_remix: allowRemix } : {}) } : g)) } : prev));
   };
 
   const confirmDelete = async () => {
