@@ -46,13 +46,17 @@ const QuickEditOverlay = ({ isOpen, onClose, onSubmit }) => {
   // window-capture listeners — the same recipe as AuthDialog.
   const submitRef = useRef(submit);
   useEffect(() => { submitRef.current = submit; }, [submit]);
+  // While an edit is being interpreted/applied the box must not be dismissable:
+  // closing it would resume the game while the change is still in flight.
+  const busyRef = useRef(false);
+  useEffect(() => { busyRef.current = busy; }, [busy]);
   useEffect(() => {
     if (!isOpen) return undefined;
     const onKey = (e) => {
       if (e.key === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
-        onClose?.();
+        if (!busyRef.current) onClose?.();
         return;
       }
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && document.activeElement === inputRef.current) {
@@ -76,7 +80,7 @@ const QuickEditOverlay = ({ isOpen, onClose, onSubmit }) => {
       aria-label="Quick edit"
       onPointerDown={(e) => {
         e.stopPropagation();
-        if (e.target === e.currentTarget) onClose?.();
+        if (e.target === e.currentTarget && !busyRef.current) onClose?.();
       }}
       style={{
         position: 'fixed',
@@ -109,6 +113,7 @@ const QuickEditOverlay = ({ isOpen, onClose, onSubmit }) => {
           <button
             type="button"
             onClick={onClose}
+            disabled={busy}
             aria-label="Close quick edit"
             style={{ background: 'none', border: 'none', color: 'var(--pm-text-secondary)', fontSize: '22px', cursor: 'pointer', lineHeight: 1 }}
           >

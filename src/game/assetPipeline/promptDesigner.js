@@ -305,9 +305,16 @@ function buildDesignerPrompt(userPrompt, gameType, entities = {}, themeKey = nul
   const anyNamed = !!(entities.enemy || entities.hazard || entities.collectible);
   const world = THEMES[themeKey];
   const worldCue = world
-    ? `\nWORLD CUES: the request belongs to the "${themeKey}" world. Its scenery is ` +
-      `${world.backgrounds}; its ground is ${world.levelElements}. Keep the player's named ` +
-      `subjects, but the environment must clearly read as this world.\n`
+    // Cues fill gaps; they never override the request. "African city level"
+    // matches the built-in "city" family, whose cues are skyscrapers and neon —
+    // presented as binding they turned an African city into a futuristic neon
+    // skyline (2026-11-04). A named place, culture, era or style always wins.
+    ? `\nWORLD CUES: the request belongs to the broad "${themeKey}" world family. Typical ` +
+      `scenery is ${world.backgrounds}; typical ground is ${world.levelElements}. Use these ` +
+      `only where the request says nothing more specific: any place, culture, country, era ` +
+      `or style named in the request ALWAYS wins (an "African city" must look clearly ` +
+      `African, a "medieval town" medieval — never a generic modern or neon city). Keep the ` +
+      `player's named subjects.\n`
     : '';
   return (
     `You are the art director for ${modeDesc} generated from this player request: "${userPrompt}".\n` +
@@ -326,7 +333,9 @@ function buildDesignerPrompt(userPrompt, gameType, entities = {}, themeKey = nul
     `- platform: a floating platform block (max 15 words)\n` +
     `- player: the hero character (max 20 words)\n` +
     `- enemy: a patrolling enemy creature${must(entities.enemy)} (max 20 words)\n` +
-    `- obstacle: a stationary hazard object${must(entities.hazard)} (max 15 words)\n` +
+    (gameType === 'shooter'
+      ? `- obstacle: a solid COVER prop for the arena — a crate, barrier or wall block that clearly belongs to this world${must(entities.hazard)} (max 15 words)\n`
+      : `- obstacle: a stationary hazard object${must(entities.hazard)} (max 15 words)\n`) +
     `- collectible: the small score pickup the player collects, a coin by default${must(entities.collectible)} (max 12 words)\n` +
     `- projectile: the small ranged shot the hero fires, matching the accentPalette (max 10 words)\n` +
     `- entityNouns: for player/enemy/obstacle/collectible/projectile, the ONE lowercase ` +
@@ -543,6 +552,24 @@ function pickChromaColor(text) {
   return 'green';
 }
 
+// Characters (player, its sheet, enemy) never get the white fallback. On white,
+// every backdrop cleaner is a no-op (card removal, pocket cleaning and the chroma
+// stain gates all key off the screen colour), which is how a "Japan neon city"
+// sheet shipped an idle frame with a white slab behind the figure (2026-11-04).
+// The pick reads the SUBJECT only — the style text carries the accent palette
+// ("neon violet") and tripped the magenta list on almost every run — and a real
+// collision goes to the screen colour the subject mentions LESS.
+const countMatches = (re, text) => (text.match(new RegExp(re.source, 'gi')) || []).length;
+const CHARACTER_SLOTS = new Set(['player', 'player_sheet', 'enemy']);
+export function pickCharacterChroma(subjectText) {
+  const text = String(subjectText || '');
+  const g = countMatches(GREENISH, text);
+  const m = countMatches(MAGENTAISH, text);
+  if (!g) return 'green';
+  if (!m) return 'magenta';
+  return g >= m ? 'magenta' : 'green';
+}
+
 /**
  * Recover which chroma background a final prompt asked for — the pipeline derives
  * its keying/despill configuration from the prompt itself (single source of truth,
@@ -611,9 +638,11 @@ export function buildFinalPrompt(slotKey, subjects, styleGuide, { userNamed = fa
   const spec = SLOT_SPECS[slotKey];
   const subject = subjects[slotKey] ?? (spec.subjectKey ? subjects[spec.subjectKey] : undefined);
   const style = `${styleBase(styleGuide)}, ${slotStyleClauses(slotKey, styleGuide, { userNamed })}`;
-  const chroma = KEYED_SPRITE_SLOTS.has(slotKey)
-    ? pickChromaColor(`${subject || ''} ${style}`)
-    : null;
+  const chroma = CHARACTER_SLOTS.has(slotKey)
+    ? pickCharacterChroma(subject || '')
+    : KEYED_SPRITE_SLOTS.has(slotKey)
+      ? pickChromaColor(`${subject || ''} ${style}`)
+      : null;
   return spec.scaffold(subject, style, { chroma, gameType });
 }
 

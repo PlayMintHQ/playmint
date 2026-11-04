@@ -7,6 +7,7 @@ import { generateOrRestoreAssets, makePromptKey, makePresetKey, THEME_KEYS, THEM
 import * as metrics from '../game/metrics';
 import AccountButton from '../auth/AccountButton';
 import { IconRemix } from './Icons';
+import { remixOverParent, remixPromptFallback } from '../game/remix';
 
 const BANNED_WORDS = ['fuck', 'shit', 'bitch', 'cunt', 'ass', 'dick', 'pussy', 'cock', 'nigger', 'faggot'];
 
@@ -524,8 +525,68 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
     }
   };
 
+  // A remix in progress (the "Remixing: X" banner): the typed text is an edit
+  // of the parent game, applied over its art — see src/game/remix.js.
+  const remixBase = !isOverlay && currentConfig?.remixParentTitle ? currentConfig?.remixBase : null;
+
+  const runRemix = async (text) => {
+    metrics.beginRun('generate', { via: 'remix', promptChars: text.length });
+    setIsGenerating(true);
+    setTransitionPhase('compiling');
+    setTerminalLogs([`[REMIX] Remixing "${remixBase.title || 'game'}"${text ? ` — "${text.substring(0, 40)}"` : ''}`]);
+    setProgress(10);
+    setPhaserLoaded(false);
+    const token = beginRun();
+    let cacheOnlyOn = false;
+    try { cacheOnlyOn = localStorage.getItem('PM_FORCE_CACHE') === '1'; } catch { /* private mode */ }
+    try {
+      // Cache only / keyless: no redraw is possible — a typed change goes through
+      // the normal (no-spend) generation path below with the parent's world.
+      const remixed = (cacheOnlyOn || !isGeminiConfigured()) && text
+        ? null
+        : await remixOverParent({ remixBase, typedText: text, onProgress: assetProgressHandler, cancelToken: token });
+      if (token.cancelled) { metrics.cancelRun(); return; }
+      if (remixed && !remixed.regenerate) {
+        metrics.mark('assets-ready');
+        setTerminalLogs(prev => [...prev, `[REMIX] ${remixed.summary || 'Remix ready'}`, '[ENGINE] Booting game scene and registering WebGL textures...']);
+        onStartTransition({
+          ...remixed.config,
+          remixParentId: currentConfig?.remixParentId || null,
+          remixParentTitle: currentConfig?.remixParentTitle || null,
+          preloadedImages: remixed.preloadedImages,
+          assetMeta: remixed.assetMeta
+        });
+        return;
+      }
+      metrics.cancelRun();
+      const fallbackPrompt = remixed?.regenerate ? remixed.prompt : remixPromptFallback(remixBase, text);
+      setTerminalLogs(prev => [...prev, `[REMIX] Generating a new version of the game: "${fallbackPrompt.substring(0, 60)}"`]);
+      await generateFromPrompt(fallbackPrompt || text);
+    } catch (err) {
+      if (token.cancelled || err?.cancelled) { metrics.cancelRun(); return; }
+      console.error('[Remix] failed, generating from the description instead:', err);
+      metrics.cancelRun();
+      setTerminalLogs(prev => [...prev, `[REMIX] ${describeFailure(err)} Generating from the original description instead.`]);
+      await generateFromPrompt(remixPromptFallback(remixBase, text) || text);
+    }
+  };
+
   const processPrompt = async (input) => {
     const text = input.trim();
+    // A pasted link is not a game description.
+    if (text && !text.replace(/\b(?:https?:\/\/|www\.)\S+/gi, '').trim()) {
+      showToast('That looks like a link — describe the game you want instead.');
+      return;
+    }
+    if (remixBase && (remixBase.artId || remixBase.config)) {
+      // Never fall into the random Quick Start for an empty remix box: an empty
+      // remix is a copy of the parent.
+      const isUnsafeRemix = text && BANNED_WORDS.some(word => new RegExp(`\\b${word}\\b`, 'i').test(text));
+      if (!isUnsafeRemix) {
+        await runRemix(text);
+        return;
+      }
+    }
     if (!text) {
       generateRandom();
       return;
@@ -604,6 +665,12 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
       return;
     }
 
+    await generateFromPrompt(text);
+  };
+
+  // The first-run (non-overlay) prompt generation: config → assets → boot, with
+  // the built-in-world fallback. Also the remix's fallback path.
+  const generateFromPrompt = async (text) => {
     console.log('[ScreenZero] Starting processPrompt compilation with prompt:', text);
     metrics.beginRun('generate', { via: 'prompt', promptChars: text.length });
     setIsGenerating(true);
@@ -654,7 +721,7 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
         // phaser-load-complete → 100% → fade; a custom world asks first.
         failToStatic(
           err, generatedConfig,
-          () => processPrompt(text),
+          () => generateFromPrompt(text),
           (cfg) => onStartTransition({
             ...cfg,
             remixParentId: currentConfig?.remixParentId || null,
@@ -1095,7 +1162,7 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
                     type="text"
                     value={prompt}
                     onChange={(e) => setPrompt(e.target.value)}
-                    placeholder="e.g. 'city runner lava' or 'forest quest'"
+                    placeholder={remixBase ? "What should change? e.g. 'add dragon enemies'" : "e.g. 'city runner lava' or 'forest quest'"}
                     autoFocus
                   />
                   <button

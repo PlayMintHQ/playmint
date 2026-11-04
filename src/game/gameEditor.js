@@ -67,9 +67,10 @@ const ASSET_TARGET_SLOTS = {
 export function resolveAssetTargets(targets, config) {
   const isPlatformer = config?.gameType === 'platformer';
   const isShooter = config?.gameType === 'shooter';
-  // Shooter: a single rotating top-down player, and no parallax/platform/obstacle
-  // art exists in that mode (see generateGameAssets' effectiveSkipSlots).
-  const SHOOTER_SKIPPED = ['background_mid', 'background_near', 'platform', 'obstacle'];
+  // Shooter: a single rotating top-down player, and no parallax/platform art
+  // exists in that mode (see generateGameAssets' effectiveSkipSlots). The
+  // obstacle slot is the arena's cover prop.
+  const SHOOTER_SKIPPED = ['background_mid', 'background_near', 'platform'];
   const allSlots = GENERATED_SLOTS
     .filter(s => !(isShooter && SHOOTER_SKIPPED.includes(s)))
     .map(s => (s === 'player' && !isShooter ? 'player_sheet' : s));
@@ -174,47 +175,124 @@ function summarize(changes, config) {
   return parts.join(', ');
 }
 
+// What the current game LOOKS like, for the editor model. Without it the model
+// only saw numbers and could not tell "add dragons" (one element) from "make it a
+// different world" (everything) — it chose ['all'] and the ice world was redrawn
+// (client report 2026-11-04).
+function worldContext(config) {
+  const design = config?.assetMeta?.design;
+  const parts = [];
+  if (config?.gameName) parts.push(`title "${config.gameName}"`);
+  if (config?.sourcePrompt) parts.push(`created from the prompt "${String(config.sourcePrompt).slice(0, 300)}"`);
+  if (config?.themeKey) parts.push(`built-in theme "${config.themeKey}"`);
+  if (design?.styleGuide?.styleSummary) parts.push(`art style "${design.styleGuide.styleSummary}"`);
+  if (design?.subjects?.background_far) parts.push(`scenery "${String(design.subjects.background_far).slice(0, 160)}"`);
+  if (design?.subjects?.player) parts.push(`player "${String(design.subjects.player).slice(0, 120)}"`);
+  if (design?.subjects?.enemy) parts.push(`enemy "${String(design.subjects.enemy).slice(0, 120)}"`);
+  return parts.length ? parts.join('; ') : 'unknown (treat the current world as something to KEEP)';
+}
+
+// Instruction shapes that are ALWAYS a targeted change, never a new world.
+const ADDITIVE_RE = /^\s*(?:please\s+)?(?:add|give|put|include|insert|replace|swap|change|make\s+the|turn\s+the|redraw|recolou?r|new)\b/i;
+// Lighting / time-of-day / weather / mood: the WORLD's backdrop, not its cast.
+const ATMOSPHERE_RE = /\b(night|night-?time|midnight|day|day-?time|sunset|sunrise|dawn|dusk|evening|twilight|rain|rainy|storm|stormy|snowy|snowing|fog|foggy|misty|spooky|darker|brighter|dark|bright)\b/i;
+// The user explicitly names a DIFFERENT world/setting — the only case for 'all'.
+const NEW_WORLD_RE = /\b(?:world|level|setting|theme|universe|planet|city|town|land|kingdom|biome)\b|\b(?:turn|transform|convert|change)\s+(?:it|this|the\s+(?:game|world|level))\s+(?:in)?to\b|\bset\s+(?:it|this)\s+in\b/i;
+// Counts and amounts are settings, not art ("more enemies", "10 enemies"), and so
+// are physics/difficulty words ("make the player faster", "jump higher").
+const AMOUNT_RE = /\b(more|fewer|less|double|triple|half|\d+|faster|slower|quicker|speed|speedier|higher|lower|jump|jumps|gravity|harder|easier|difficult|difficulty|tougher|stronger|weaker)\b/i;
+
+/** Named art elements in the instruction → editor target names (no 'all'). */
+export function namedTargets(text) {
+  const targets = [];
+  if (/\b(foreground|props?|decorations?|decor)\b/.test(text)) targets.push('foreground');
+  if (/\b(background|backdrop|sky|scenery|skyline)\b/.test(text)) targets.push('background');
+  if (/\b(floor|ground|terrain)\b/.test(text)) targets.push('floor');
+  if (/\bplatforms?\b/.test(text)) targets.push('platforms');
+  if (/\b(player|hero|character|protagonist|ninja|knight|me)\b/.test(text)) targets.push('player');
+  if (/\b(enem(?:y|ies)|monsters?|boss|villains?|foes?|creatures?|dragons?|robots?|zombies?|skeletons?|ghosts?|aliens?)\b/.test(text)) targets.push('enemy');
+  if (/\b(obstacles?|hazards?|traps?|spikes?|cover|crates?|barriers?|walls?)\b/.test(text)) targets.push('obstacle');
+  if (/\b(projectiles?|bullets?|bolts?|shots?|arrows?|fireballs?)\b/.test(text)) targets.push('projectile');
+  if (/\b(coins?|collectibles?|pickups?|gems?|treasure|rewards?)\b/.test(text)) targets.push('collectibles');
+  return targets;
+}
+
+/**
+ * Scope guard (code enforces, the LLM proposes): an instruction that names
+ * specific elements, or only asks for a different time of day, can never become
+ * a whole-world redraw or a brand-new game. Returns a corrected result or null.
+ */
+export function enforceScope(result, instruction) {
+  const text = instruction.toLowerCase();
+  const named = namedTargets(text);
+  const newWorld = NEW_WORLD_RE.test(text);
+  const wantsAll = result.intent === 'regenerate' || (result.assetTargets || []).includes('all');
+  if (!wantsAll || newWorld) return null;
+  if (named.length && (ADDITIVE_RE.test(text) || !AMOUNT_RE.test(text))) {
+    return { intent: 'restyle', assetTargets: named, changes: result.changes || {}, summary: `Redrawing only the ${named.join(', ')} — the rest of the game is kept`, source: result.source };
+  }
+  if (ATMOSPHERE_RE.test(text)) {
+    return { intent: 'restyle', assetTargets: ['background', 'floor'], changes: result.changes || {}, summary: 'Redrawing the scenery for the new atmosphere — characters and props are kept', source: result.source };
+  }
+  return null;
+}
+
 async function geminiInterpret(config, instruction) {
   const fieldDocs = Object.entries(EDITABLE_FIELDS)
     .map(([k, r]) => `- ${k}: ${r.label}${r.bool ? ' (boolean)' : r.str ? '' : ` (range ${r.min}-${r.max})`}`)
     .join('\n');
 
   const prompt = [
-    'You are the live game-settings editor for a 2d browser game. The player typed an instruction.',
-    'Decide the intent: "tweak" (only the variables below change), "restyle" (some or all',
-    'artwork of the CURRENT game is redrawn), or "regenerate" (a completely different game).',
+    'You are the live editor for a 2d browser game. The player typed an instruction to change the CURRENT game.',
+    'Decide the intent: "tweak" (only the variables below change), "restyle" (artwork of SOME elements of the',
+    'CURRENT game is redrawn, everything else is kept exactly as it is), or "regenerate" (a completely different game).',
     '',
     `Current game type: ${config?.gameType || 'runner'} (runner fields only matter for runner, action* fields only for platformer, shooter* fields only for the shooter arena).`,
+    `Current world: ${worldContext(config)}.`,
     `Current values: ${JSON.stringify(currentValues(config))}`,
     '',
     'Editable variables:',
     fieldDocs,
     '',
-    'Rules:',
-    '- Relative requests ("faster", "double the enemies") are computed FROM the current values.',
+    'Rules — the default is the SMALLEST change that satisfies the instruction:',
+    '- Relative requests ("faster", "double the enemies", "more coins") are tweaks computed FROM the current values.',
     '- Renaming the game is a tweak (gameName).',
-    '- Art requests naming specific elements ("change the foreground", "make the enemy a robot") are "restyle" with assetTargets listing ONLY the affected elements.',
-    '- Re-theming the whole look ("turn this into a lava world", "make it spooky") is "restyle" with assetTargets ["all"]; if the theme suggests a new title, also set gameName in changes.',
-    '- Only a completely different game concept or new gameplay rules is "regenerate".',
+    '- Adding, replacing or changing a specific element ("add dragon enemies", "replace the enemies with robots", "give the hero a red cape", "make the coins gems") is "restyle" with assetTargets listing ONLY that element. The world, background, floor, player and every other element are KEPT.',
+    '- Lighting, time of day, weather or mood ("make it night", "at sunset", "make it rainy", "spookier") is "restyle" with assetTargets ["background", "floor"] only.',
+    '- Use assetTargets ["all"] ONLY when the player explicitly asks for a different world, setting or theme ("turn this into a lava world", "African city level", "set it in Japan"); if that suggests a new title, also set gameName in changes.',
+    '- "regenerate" is ONLY for an explicitly different game concept with new rules. Never for additions or art changes.',
     '- The game mode CANNOT be changed here. For mode-switch requests ("make this a runner", "turn it into a platformer", "turn it into a shooter arena") return "tweak" with NO changes and a summary explaining the mode can only be chosen when starting a new game.',
     '- For tweak, put ONLY the changed fields in `changes` with their new absolute values.',
     '',
     `Player instruction: "${instruction}"`
   ].join('\n');
 
-  const result = await generateJson({ prompt, responseSchema: EDITOR_RESPONSE_SCHEMA });
+  const result = await generateJson({ prompt, responseSchema: EDITOR_RESPONSE_SCHEMA, label: 'editor' });
   if (result.intent === 'regenerate') {
+    const scoped = enforceScope({ intent: 'regenerate', changes: {}, source: 'gemini' }, instruction);
+    if (scoped) return scoped;
     return { intent: 'regenerate', changes: {}, summary: result.summary || '', source: 'gemini' };
   }
   if (result.intent === 'restyle') {
-    const targets = (result.assetTargets || []).filter(t => t === 'all' || ASSET_TARGET_SLOTS[t]);
-    return {
+    let targets = (result.assetTargets || []).filter(t => t === 'all' || ASSET_TARGET_SLOTS[t]);
+    if (!targets.length) targets = namedTargets(instruction.toLowerCase());
+    if (!targets.length) {
+      // Never a silent whole-world redraw because the model returned no target.
+      return {
+        intent: 'tweak',
+        changes: {},
+        summary: 'Which part should change? Name it — for example the background, the player, the enemies, the floor or the coins.',
+        source: 'gemini'
+      };
+    }
+    const out = {
       intent: 'restyle',
-      assetTargets: targets.length ? targets : ['all'],
+      assetTargets: targets,
       changes: clampChanges(result.changes),
       summary: result.summary || 'Updating artwork',
       source: 'gemini'
     };
+    return enforceScope(out, instruction) || out;
   }
   const changes = clampChanges(result.changes);
   return {
@@ -247,6 +325,14 @@ function localInterpret(config, instruction) {
     }
   }
 
+  // Art first when the instruction NAMES a new kind of element ("add dragon
+  // enemies", "replace the coins with gems"): the keyword tuning table maps
+  // "enemies" to an enemy COUNT, which used to win and silently drop the art ask.
+  const named = namedTargets(text);
+  if (named.length && ADDITIVE_RE.test(text) && !AMOUNT_RE.test(text)) {
+    return { intent: 'restyle', assetTargets: named, changes: {}, summary: `Redrawing only the ${named.join(', ')} — the rest of the game is kept`, source: 'local' };
+  }
+
   const parsed = parsePromptKeywords(instruction);
   const changes = {};
   const m = parsed.modifiers;
@@ -277,23 +363,19 @@ function localInterpret(config, instruction) {
 
   // No variable change recognized — look for named art elements ("change the
   // foreground", "new enemy") so only those slots get redrawn.
-  const targets = [];
-  if (/\b(foreground|props?|decorations?|decor)\b/.test(text)) targets.push('foreground');
-  if (/\b(background|backdrop|sky|scenery)\b/.test(text)) targets.push('background');
-  if (/\b(floor|ground|terrain)\b/.test(text)) targets.push('floor');
-  if (/\bplatforms?\b/.test(text)) targets.push('platforms');
-  if (/\b(player|hero|character|protagonist)\b/.test(text)) targets.push('player');
-  if (/\b(enemy|enemies|monsters?|boss|villains?)\b/.test(text)) targets.push('enemy');
-  if (/\b(obstacles?|hazards?|traps?|spikes?)\b/.test(text)) targets.push('obstacle');
-  if (/\b(projectiles?|bullets?|bolt)\b/.test(text)) targets.push('projectile');
-  if (targets.length) {
-    return { intent: 'restyle', assetTargets: targets, changes: {}, summary: `Redrawing ${targets.join(', ')}`, source: 'local' };
+  if (named.length) {
+    return { intent: 'restyle', assetTargets: named, changes: {}, summary: `Redrawing ${named.join(', ')}`, source: 'local' };
   }
 
   // A theme word means the user wants a different look — re-skin the current game
   // rather than rebuilding it from scratch.
-  if (parsed.themeKey) {
+  if (parsed.themeKey || NEW_WORLD_RE.test(text)) {
     return { intent: 'restyle', assetTargets: ['all'], changes: {}, summary: 'Restyling all artwork', source: 'local' };
+  }
+
+  // Time of day / weather / mood: the scenery only.
+  if (ATMOSPHERE_RE.test(text)) {
+    return { intent: 'restyle', assetTargets: ['background', 'floor'], changes: {}, summary: 'Redrawing the scenery', source: 'local' };
   }
 
   // Nothing recognizable — treat as a brand-new game prompt.

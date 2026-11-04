@@ -9,7 +9,7 @@
  * (ScreenZero's toStaticThemeConfig; App surfaces it in the regen overlay).
  */
 import { SLOT_SPECS, BASELINE_SLOTS, GENERATED_SLOTS, GEMINI_SHEET_MODEL, GEMINI_PRO_SHEET_MODEL, PROPS_GRID_SPEC, BG_CLAUSE, GAPS_CLAUSE } from './slotSpecs';
-import { postProcessAsset, mirrorImage, drawToCanvas, alphaFraction, borderResidueFraction, topBandOpaqueFraction, brightResidueFraction, contentBoundsOf, processSheet, finalizeSheetFrames, loadImage, keyCellWithQuality, cleanKeyedEdges, alignFrames, maskIoU, composeFilmstrip, lockPalette, sliceRawGrid, removeEnclosedPockets, chromaResidueFraction, isBoxedSprite } from './postprocess';
+import { postProcessAsset, mirrorImage, rotateImageQuarter, drawToCanvas, alphaFraction, borderResidueFraction, topBandOpaqueFraction, brightResidueFraction, contentBoundsOf, processSheet, finalizeSheetFrames, loadImage, keyCellWithQuality, cleanKeyedEdges, alignFrames, maskIoU, composeFilmstrip, lockPalette, sliceRawGrid, removeEnclosedPockets, chromaResidueFraction, isBoxedSprite } from './postprocess';
 import { reviewSprite } from './qa';
 import * as gemini from './providers/geminiImage';
 import { designAssetPrompts, buildFinalPrompt, buildPropsGridPrompt, chromaFromPrompt } from './promptDesigner';
@@ -210,6 +210,90 @@ function frameHistogramDistances(cells, runCount) {
     for (let i = 0; i < 64; i++) dist += Math.abs(h[i] - median[i]);
     return dist;
   });
+}
+
+// The IDLE cell used to get a height check only, so it was the least-validated
+// frame in the sheet — and the only one shown while the player stands still
+// (client 2026-11-04: "when idle the character appears duplicated with a white
+// background"). It now has to pass the same identity/geometry bar as the run
+// frames it sits next to:
+//  - not boxed on a backdrop card,
+//  - no leftover backdrop in its outer band (near-white AND chroma),
+//  - ONE figure: its content width may not exceed the widest run frame by much
+//    (two figures side by side are ~2x wide) and its main blob must hold most of
+//    its pixels,
+//  - the same character: colour histogram close to the run frames' median.
+// Returns null when acceptable, else the reason (logged; idle falls back to frame 0).
+export function idleCellIssue(idleCell, runCells, chroma) {
+  if (!idleCell) return 'missing';
+  const ib = contentBoundsOf(idleCell);
+  if (!ib || (ib.maxY - ib.minY + 1) < idleCell.height * 0.3) return 'too small';
+  if (idleCell.pmBoxed || isBoxedSprite(idleCell)) return 'boxed on its backdrop';
+  if (chromaResidueFraction(idleCell, chroma) > 0.08) return 'backdrop colour left in the frame';
+  if (cornerOpaqueFraction(idleCell) > 0.25) return 'backdrop left around the figure';
+  const widths = runCells.map((c) => contentBoundsOf(c)).filter(Boolean).map((b) => b.maxX - b.minX + 1);
+  if (widths.length) {
+    const widest = Math.max(...widths);
+    if ((ib.maxX - ib.minX + 1) > widest * 1.3) return 'wider than any run frame (more than one figure?)';
+  }
+  if (mainBlobFraction(idleCell) < 0.82) return 'split into several figures';
+  const dists = frameHistogramDistances([...runCells, idleCell], runCells.length);
+  if (dists && dists[dists.length - 1] > 0.9) return 'looks like a different character';
+  return null;
+}
+
+// Opaque share of the four corner squares (15% of each side). A standing figure
+// never fills the corners of its cell; an unkeyed backdrop (white or not) does.
+function cornerOpaqueFraction(cell) {
+  const w = cell.width, h = cell.height;
+  const d = cell.getContext('2d').getImageData(0, 0, w, h).data;
+  const cw = Math.max(2, Math.round(w * 0.15)), ch = Math.max(2, Math.round(h * 0.15));
+  let n = 0, opaque = 0;
+  for (const [x0, y0] of [[0, 0], [w - cw, 0], [0, h - ch], [w - cw, h - ch]]) {
+    for (let y = y0; y < y0 + ch; y++) {
+      for (let x = x0; x < x0 + cw; x++) {
+        n++;
+        if (d[(y * w + x) * 4 + 3] >= 128) opaque++;
+      }
+    }
+  }
+  return n ? opaque / n : 0;
+}
+
+// Share of opaque pixels in the largest 8-connected component (downscaled grid,
+// so stray specks and thin gaps do not split a figure).
+function mainBlobFraction(cell) {
+  const W = 64, H = 64;
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  c.getContext('2d').drawImage(cell, 0, 0, W, H);
+  const d = c.getContext('2d').getImageData(0, 0, W, H).data;
+  const on = new Uint8Array(W * H);
+  let total = 0;
+  for (let p = 0; p < W * H; p++) if (d[p * 4 + 3] >= 64) { on[p] = 1; total++; }
+  if (!total) return 0;
+  const seen = new Uint8Array(W * H);
+  let best = 0;
+  const stack = [];
+  for (let p = 0; p < W * H; p++) {
+    if (!on[p] || seen[p]) continue;
+    let size = 0;
+    stack.push(p); seen[p] = 1;
+    while (stack.length) {
+      const q = stack.pop(); size++;
+      const x = q % W, y = (q / W) | 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = x + dx, ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+          const n = ny * W + nx;
+          if (on[n] && !seen[n]) { seen[n] = 1; stack.push(n); }
+        }
+      }
+    }
+    if (size > best) best = size;
+  }
+  return best / total;
 }
 
 // Per-frame quality verdict: instead of rejecting a whole sheet for one or two
@@ -523,6 +607,10 @@ export async function generateAssets({
     if (!spec.qa || !gemini.isGeminiConfigured()) return { img, outcome };
 
     const chroma = chromaFromPrompt(prompt);
+    // Shooter characters: overhead view + facing right (see qa.js TOPDOWN_SCHEMA).
+    if (runState.gameType === 'shooter' && spec.qa.facing) {
+      return applyTopdownQa(slot, spec, raw, img, prompt, chroma, outcome);
+    }
     // Layers get their own review kind: their failure mode is rectangular vignette
     // "props" (mini paintings) rather than a wrong facing.
     const kind = spec.qa.clean ? 'layer' : 'sprite';
@@ -555,6 +643,44 @@ export async function generateAssets({
     }
     outcome.qa = review;
     outcome.facingVerified = !!review && !!spec.qa.facing;
+    return { img, outcome };
+  };
+
+  // Top-down characters. A standing figure drawn instead of an overhead one is the
+  // "lying down" defect: one redraw is spent on it even in cost mode, because the
+  // sprite is unusable once the game rotates it. Facing is fixed for free by
+  // rotating the art to point right (the game's rotation 0).
+  const QUARTERS_TO_RIGHT = { up: 1, right: 0, down: 3, left: 2 };
+  const applyTopdownQa = async (slot, spec, raw, img, prompt, chroma, outcome) => {
+    let review = await reviewSprite(img.src, { kind: 'topdown', label: `qa:${slot}` });
+    if (review && !review.backgroundClean) {
+      report(`[ASSETS] QA: re-keying ${slot} background...`);
+      img = await postProcessAsset(raw.dataUrl, spec, { keyOverrides: { seedTol: 60, stepTol: 20 }, chroma });
+      review = (await reviewSprite(img.src, { kind: 'topdown', label: `qa:${slot}` })) || review;
+    }
+    if (review && review.overhead === false) {
+      report(`[ASSETS] QA: ${slot} was not drawn from overhead — redrawing once...`);
+      try {
+        const strictPrompt = `${prompt} IMPORTANT: seen from DIRECTLY ABOVE like a top-down shooter — only the top of the head, shoulders and arms are visible, no face, no legs or feet; the character points to the RIGHT edge of the image.`;
+        const retryRaw = await generateSlotImage(slot, strictPrompt, seed + 7, report, maxAttemptsPerProvider, runState);
+        const retryImg = await postProcessAsset(retryRaw.dataUrl, spec, { chroma: chromaFromPrompt(strictPrompt) });
+        const retryReview = await reviewSprite(retryImg.src, { kind: 'topdown', label: `qa:${slot}` });
+        if (!retryReview || retryReview.overhead !== false) {
+          img = retryImg;
+          review = retryReview || review;
+        }
+      } catch (err) {
+        console.warn(`[AssetPipeline] top-down redraw failed for "${slot}", keeping previous:`, err.message);
+      }
+    }
+    const turns = review ? QUARTERS_TO_RIGHT[review.facing] : undefined;
+    if (turns) {
+      report(`[ASSETS] QA: rotating ${slot} to face right (was facing ${review.facing})...`);
+      img = await rotateImageQuarter(img, turns);
+      outcome.rotated = review.facing;
+    }
+    outcome.qa = review;
+    outcome.facingVerified = !!review && review.facing !== 'unclear';
     return { img, outcome };
   };
 
@@ -1009,10 +1135,14 @@ export async function generateAssets({
             const jumpSrc = !hasDedicatedJump && metaNow.jumpFrameIndex != null ? runCells[metaNow.jumpFrameIndex] : null;
             const idxR = labels.indexOf('right');
             const idxL = labels.indexOf('left');
-            if (idxR >= 0 && idxL >= 0) {
-              const neutrals = labels
-                .map((v, i) => (v !== 'right' && v !== 'left' ? i : -1))
-                .filter((i) => i >= 0);
+            const neutrals = labels
+              .map((v, i) => (v !== 'right' && v !== 'left' ? i : -1))
+              .filter((i) => i >= 0);
+            // Never collapse a 3-4 frame cycle into the 2-frame [right, left] flip:
+            // that threw away good frames and read as "no convincing run
+            // animation" (2026-11-04, a 4-frame R,L,L,R cycle shipped as 2 frames).
+            // Without a passing pose the drawn order already alternates — keep it.
+            if (idxR >= 0 && idxL >= 0 && (neutrals.length || runNow < 3)) {
               const newRun = neutrals.length
                 ? [runCells[idxR], runCells[neutrals[0]], runCells[idxL], runCells[neutrals[1] ?? neutrals[0]]]
                 : [runCells[idxR], runCells[idxL]];
@@ -1038,6 +1168,15 @@ export async function generateAssets({
         // frame 0 for idle).
         let keptCells = verdict.keptCells;
         let shipMeta = verdict.framesMeta;
+        if (idleCell) {
+          const runForIdle = keptCells.slice(0, shipMeta.runFrameCount ?? keptCells.length);
+          const idleIssue = idleCellIssue(idleCell, runForIdle, chroma);
+          if (idleIssue) {
+            report(`[ASSETS] Idle pose rejected (${idleIssue}) — standing still uses the first run frame.`);
+            dbg.idleRejected = idleIssue;
+            idleCell = null;
+          }
+        }
         if (idleCell) {
           const runLen = shipMeta.runFrameCount ?? keptCells.length;
           const hasDedicatedJump = shipMeta.jumpFrameIndex != null && shipMeta.jumpFrameIndex >= runLen;
@@ -1338,6 +1477,13 @@ export async function generateAssets({
             (bounds.maxY - bounds.minY + 1) < canvas.height * 0.1) {
           throw new Error('grid cell had no usable content');
         }
+        // A pickup is a compact object: a cell whose content is a long strip or a
+        // sliver of a neighbour (a cell swap, a cut through the wrong gutter) goes
+        // to the individual call instead of shipping as a "coin".
+        if (slot === 'collectible') {
+          const aspect = (bounds.maxX - bounds.minX + 1) / (bounds.maxY - bounds.minY + 1);
+          if (aspect < 0.5 || aspect > 2) throw new Error(`collectible cell has an implausible shape (aspect ${aspect.toFixed(2)})`);
+        }
         let outcome = { qa: null, mirrored: false, facingVerified: false };
         if (spec.qa) {
           const reviewed = await applyQualityAssurance(slot, spec, { dataUrl: cellUrl }, img, plan.prompt);
@@ -1393,8 +1539,25 @@ export async function generateAssets({
 
 const DESIGN_SOURCE_LABELS = {
   gemini: 'Gemini art director',
-  local: 'local templates'
+  local: 'local templates',
+  stored: "the game's own stored art direction",
+  'gemini+stored': "Gemini art director, keeping the game's style"
 };
+
+// The art direction a game was generated with, stored on assetMeta so later
+// edits can KEEP it (2026-11-04: every restyle used to invent a brand-new style
+// guide from the edit sentence alone, so "add dragon enemies" repainted the ice
+// world). Small (a few hundred bytes); persists with the cache entry and the row.
+const compactDesign = (design) => (design ? {
+  source: design.source,
+  styleGuide: design.styleGuide,
+  subjects: design.subjects,
+  entities: design.entities || {}
+} : null);
+
+const WORLD_SLOT_SET = new Set(['background_far', 'background_mid', 'background_near', 'floor']);
+const CAST_SLOT_SET = new Set(['player', 'player_sheet', 'enemy']);
+const THEME_WORLD_WORDS = { ice: 'an icy frozen world', lava: 'a volcanic lava world', forest: 'a lush forest world', city: 'a city world', space: 'an outer-space world' };
 
 // Combined-props eligibility (DEFAULT ON since 2026-08-16; PM_GRID_PROPS='0' is
 // the kill switch — read at run start like the other cost knobs): ≥3 grid-able
@@ -1489,11 +1652,11 @@ export async function generateGameAssets({ config, userPrompt = '', onProgress =
       { userNamed: !!namedBySlot[slot], gameType: config.gameType });
   }
 
-  // Shooter Arena (v1 scope, see CLAUDE.md): a fixed top-down camera has no
-  // parallax to hide, and cover/obstacle props aren't generated yet — skip
-  // those slots regardless of what the caller passed.
+  // Shooter Arena: a fixed top-down camera has no parallax to hide and no
+  // platforms — skip those slots regardless of what the caller passed. The
+  // obstacle slot IS generated since 2026-11-04: it is the arena's cover prop.
   const effectiveSkipSlots = config.gameType === 'shooter'
-    ? [...new Set([...skipSlots, 'background_mid', 'background_near', 'platform', 'obstacle'])]
+    ? [...new Set([...skipSlots, 'background_mid', 'background_near', 'platform'])]
     : skipSlots;
 
   // The player is always attempted as an animated sprite sheet (stored under the
@@ -1536,6 +1699,7 @@ export async function generateGameAssets({ config, userPrompt = '', onProgress =
   }
   const assetMeta = {
     designSource: design.source,
+    design: compactDesign(design),
     // Perspective the art was drawn for. Shooter Arena stamps 'topdown'; every
     // other mode is side-view. The cache matcher refuses to reuse across views
     // (a profile sprite is unusable from above).
@@ -1566,6 +1730,64 @@ function reportRunCost(onProgress) {
 }
 
 /**
+ * Art direction for a partial redraw. Three kinds of edit, three scopes:
+ *  - REPAIR (empty instruction): the game's own stored design, verbatim — the
+ *    animated sheet must be the SAME character, so no new design is invented.
+ *  - WHOLE LOOK (world slots AND cast slots redrawn — "African city level"): the
+ *    instruction is the new art direction; the old world's theme must not pull it
+ *    back (a "Japan" restyle over a space game stayed spacey).
+ *  - TARGETED (only some elements — "add dragon enemies", "make it night"): the
+ *    designer sees the ORIGINAL prompt plus the change, and the stored style guide
+ *    is kept, so a new enemy is drawn in the existing world's palette and style and
+ *    a night sky is still the same world.
+ */
+async function designRedraw({ config, instruction, slots }) {
+  const prior = config.assetMeta?.design || null;
+  const text = String(instruction || '').trim();
+  if (!text && prior?.subjects && prior?.styleGuide) {
+    return { ...prior, source: 'stored', taxonomy: null };
+  }
+  const redrawsWorld = slots.some((s) => WORLD_SLOT_SET.has(s));
+  const redrawsCast = slots.some((s) => CAST_SLOT_SET.has(s));
+  const wholeLook = redrawsWorld && redrawsCast;
+  if (!text || wholeLook) {
+    const parsedTheme = text ? parsePromptKeywords(text).themeKey : null;
+    return designAssetPrompts({
+      userPrompt: text,
+      gameType: config.gameType,
+      themeKey: parsedTheme || (text ? null : config.themeKey),
+      // The instruction IS the art direction for a whole-look restyle. Reusing the
+      // original assetDesignDirections would make the keyless path regenerate the
+      // same subjects and silently ignore the request.
+      assetDesignDirections: text ? null : config.assetDesignDirections
+    });
+  }
+  const world = String(config.sourcePrompt || '').trim()
+    || prior?.subjects?.background_far
+    || THEME_WORLD_WORDS[config.themeKey]
+    || '';
+  const sameText = world && world.toLowerCase() === text.toLowerCase();
+  const userPrompt = !world || sameText
+    ? text
+    : `${world}. Requested change: ${text}. Keep everything else about this world exactly as it is.`;
+  const design = await designAssetPrompts({
+    userPrompt,
+    gameType: config.gameType,
+    themeKey: parsePromptKeywords(world || text).themeKey || config.themeKey || null,
+    assetDesignDirections: null
+  });
+  if (prior?.styleGuide && !sameText) {
+    // Keep the established look: same style summary and palettes. A pure scenery
+    // edit (night, rain) changes the environment palette but keeps the cast accent.
+    design.styleGuide = redrawsWorld
+      ? { ...design.styleGuide, accentPalette: prior.styleGuide.accentPalette || design.styleGuide.accentPalette }
+      : { ...prior.styleGuide };
+    design.source = `${design.source}+stored`;
+  }
+  return design;
+}
+
+/**
  * Cherry-pick regeneration: redo ONLY the requested slots for an already-running
  * game (Creator Panel "restyle" intent). The edit instruction steers the prompt
  * designer so the new art follows the request; the caller merges the returned
@@ -1576,21 +1798,7 @@ export async function regenerateAssetSlots({ config, instruction = '', slots, on
     throw new Error('No Gemini API key configured — asset regeneration requires a key.');
   }
   gemini.resetUsageTally();
-  // The instruction IS the art direction for a restyle. Reusing the original
-  // assetDesignDirections would make the keyless path regenerate the same subjects
-  // and silently ignore the request; a theme word in the instruction ("lava world")
-  // selects the matching local theme table instead.
-  const parsedTheme = instruction.trim() ? parsePromptKeywords(instruction).themeKey : null;
-  const redrawsWorld = slots.some((s) => ['background_far', 'background_mid', 'background_near', 'floor'].includes(s));
-  const design = await designAssetPrompts({
-    userPrompt: instruction,
-    gameType: config.gameType,
-    // A restyle that redraws the WORLD must not inherit the old world's theme:
-    // "Japan world" over a space game would be pushed back toward space by the
-    // designer's world cues. Non-world slots (enemy, player…) keep the game's theme.
-    themeKey: parsedTheme || (instruction.trim() && redrawsWorld ? null : config.themeKey),
-    assetDesignDirections: instruction.trim() ? null : config.assetDesignDirections
-  });
+  const design = await designRedraw({ config, instruction, slots });
   onProgress(`[DESIGN] Asset prompts composed via ${DESIGN_SOURCE_LABELS[design.source] || design.source}...`, 73);
 
   const namedBySlot = {

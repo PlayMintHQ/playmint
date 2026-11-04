@@ -34,6 +34,48 @@ function readManualAim(cfg) {
 // Player/enemy art is a single static top-down sprite rotated at render time,
 // never a directional sheet — GameManagerScene skips SpriteAlignmentManager's
 // ground-anchor/flip logic for this mode and leaves the sprite origin centered.
+// Cover layout (pure, no Phaser — unit-checkable): world-space block centres.
+export const COVER_BLOCK_PX = 88;
+export function layoutArenaCover({ width, height, rnd = Math.random }) {
+  const cx = width / 2, cy = height / 2;
+  const spawnRing = Math.min(width, height) / 2 - 40; // ShooterMode.spawnWave radius
+  const minR = 170;                                     // the player's start area
+  const maxR = spawnRing - 110;                          // enemies spawn on the ring
+  const MIN_GAP = 80;                                    // edge gap between pieces > player width
+  if (maxR <= minR) return [];
+  const blocks = [];
+  const pieces = 6 + Math.floor(rnd() * 4);
+  let placed = 0;
+  let guard = 0;
+  while (placed < pieces && guard++ < 600) {
+    const a = rnd() * Math.PI * 2;
+    const r = minR + rnd() * (maxR - minR);
+    const ax = cx + Math.cos(a) * r;
+    const ay = cy + Math.sin(a) * r;
+    // Every third piece is a short wall of 2-3 blocks.
+    const len = placed % 3 === 0 ? 2 + Math.floor(rnd() * 2) : 1;
+    const horizontal = rnd() < 0.5;
+    const group = [];
+    for (let k = 0; k < len; k++) {
+      const off = (k - (len - 1) / 2) * COVER_BLOCK_PX;
+      group.push({ x: Math.round(horizontal ? ax + off : ax), y: Math.round(horizontal ? ay : ay + off) });
+    }
+    const inBand = group.every((b) => {
+      const d = Math.hypot(b.x - cx, b.y - cy);
+      return d >= minR && d <= maxR &&
+        b.x >= COVER_BLOCK_PX && b.y >= COVER_BLOCK_PX &&
+        b.x <= width - COVER_BLOCK_PX && b.y <= height - COVER_BLOCK_PX;
+    });
+    if (!inBand) continue;
+    const clear = group.every((b) => blocks.every((o) =>
+      Math.max(Math.abs(b.x - o.x), Math.abs(b.y - o.y)) - COVER_BLOCK_PX >= MIN_GAP));
+    if (!clear) continue;
+    blocks.push(...group);
+    placed++;
+  }
+  return blocks;
+}
+
 export default class ShooterMode extends BaseMode {
   init() {
     const cfg = this.scene.gameConfig;
@@ -82,6 +124,8 @@ export default class ShooterMode extends BaseMode {
     this.enemies = null;
     this.projectiles = null;
     this.collectibles = null;
+    this.cover = null;
+    this.coverRects = [];
   }
 
   create() {
@@ -93,7 +137,9 @@ export default class ShooterMode extends BaseMode {
     player.body.setAllowGravity(false);
     player.setCollideWorldBounds(true);
     player.setPosition(this.worldWidth / 2, this.worldHeight / 2);
-    player.rotation = -Math.PI / 2; // face "up" by default, matches the art's authored facing
+    // Rotation 0 = facing RIGHT: the generated art is drawn (and QA-rotated) to
+    // point right, and so are the placeholder SVGs. Spawn facing up.
+    player.rotation = -Math.PI / 2;
 
     this.enemies = scene.physics.add.group();
     this.projectiles = scene.physics.add.group({
@@ -102,6 +148,20 @@ export default class ShooterMode extends BaseMode {
       runChildUpdate: true
     });
     this.collectibles = scene.physics.add.group();
+
+    // Arena cover (2026-11-04, client: "the map was almost empty apart from the
+    // characters"): solid themed props — the generated obstacle art, drawn from
+    // overhead for this world — that block movement and stop shots.
+    this.buildCover();
+    if (this.cover) {
+      scene.physics.add.collider(player, this.cover);
+      scene.physics.add.collider(this.enemies, this.cover);
+      scene.physics.add.overlap(this.projectiles, this.cover, (proj) => {
+        if (!proj.active) return;
+        scene.fx?.projectileImpact(proj.x, proj.y);
+        if (proj.deactivate) proj.deactivate();
+      });
+    }
 
     scene.physics.add.overlap(player, this.enemies, this.handlePlayerEnemyCollision, null, this);
 
@@ -185,6 +245,43 @@ export default class ShooterMode extends BaseMode {
     scene.scale.on('resize', this.resizeListener, this);
 
     this.spawnWave();
+  }
+
+  // Deterministic per game (seeded from the game's id/name): the same game
+  // always has the same arena. 6-9 anchors, a third of them short 2-3 block walls,
+  // kept clear of the player's centre spawn and of the enemy spawn ring, with
+  // spacing so there is always a way around every piece.
+  buildCover() {
+    const { scene } = this;
+    const cfg = scene.gameConfig || {};
+    const useDyn = cfg.dynamicAssetUrls && scene.textures.exists('dyn_obstacle');
+    const texture = useDyn ? 'dyn_obstacle' : (scene.textures.exists('crate') ? 'crate' : null);
+    if (!texture) return;
+    const rnd = new Phaser.Math.RandomDataGenerator([String(cfg.gameId || cfg.gameName || 'arena')]);
+    const placements = layoutArenaCover({
+      width: this.worldWidth,
+      height: this.worldHeight,
+      rnd: () => rnd.frac()
+    });
+    if (!placements.length) return;
+    this.cover = scene.physics.add.staticGroup();
+    const frame = scene.textures.get(texture)?.get(0);
+    const maxSide = frame ? Math.max(frame.width, frame.height) : 64;
+    for (const p of placements) {
+      const block = this.cover.create(p.x, p.y, texture);
+      block.setScale(COVER_BLOCK_PX / maxSide);
+      block.setDepth(1);
+      block.refreshBody();
+      this.coverRects.push(new Phaser.Geom.Rectangle(
+        block.x - block.displayWidth / 2, block.y - block.displayHeight / 2, block.displayWidth, block.displayHeight));
+    }
+  }
+
+  // Line of sight for the aim assist: a target behind cover is not a target.
+  hasLineOfSight(x1, y1, x2, y2) {
+    if (!this.coverRects.length) return true;
+    const line = new Phaser.Geom.Line(x1, y1, x2, y2);
+    return !this.coverRects.some((r) => Phaser.Geom.Intersects.LineToRectangle(line, r));
   }
 
   handleResize(gameSize) {
@@ -306,10 +403,19 @@ export default class ShooterMode extends BaseMode {
 
     // Enemy AI: chase the player, rotate to face travel direction (same
     // rotate-at-render-time treatment as the player — locked art decision).
+    // Cover steering: an enemy pressed against cover slides along it for a
+    // moment (a fixed side per enemy) instead of grinding into it — no
+    // pathfinding is needed with sparse, convex blocks.
     this.enemies.children.iterate((enemy) => {
       if (!enemy || !enemy.active) return;
-      const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, player.x, player.y);
-      enemy.body.setVelocity(Math.cos(angle) * this.enemySpeed, Math.sin(angle) * this.enemySpeed);
+      let angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, player.x, player.y);
+      const b = enemy.body;
+      if (this.cover && b && (!b.blocked.none || !b.touching.none) && !(enemy._slideUntil > time)) {
+        enemy._slideUntil = time + 450;
+        if (!enemy._slideSide) enemy._slideSide = Math.random() < 0.5 ? -1 : 1;
+      }
+      if (enemy._slideUntil > time) angle += enemy._slideSide * Math.PI * 0.45;
+      b.setVelocity(Math.cos(angle) * this.enemySpeed, Math.sin(angle) * this.enemySpeed);
       enemy.rotation = angle;
     });
 
@@ -378,6 +484,7 @@ export default class ShooterMode extends BaseMode {
         - (enemy.displayWidth || enemy.width || 0) / 2
         - Math.max(halfWidth, halfHeight);
       if (dist > this.fireRange) return;
+      if (!this.hasLineOfSight(player.x, player.y, enemy.x, enemy.y)) return;
       if (cone < Math.PI) {
         const toEnemy = Phaser.Math.Angle.Between(player.x, player.y, enemy.x, enemy.y);
         if (Math.abs(Phaser.Math.Angle.Wrap(toEnemy - player.rotation)) > cone) return;
@@ -526,6 +633,10 @@ export default class ShooterMode extends BaseMode {
     if (this.collectibles && this.collectibles.scene) {
       try { this.collectibles.clear(true, true); } catch { /* scene already torn down */ }
     }
+    if (this.cover && this.cover.scene) {
+      try { this.cover.clear(true, true); } catch { /* scene already torn down */ }
+    }
+    this.coverRects = [];
 
     if (this.gameInputListener) {
       window.removeEventListener('game-input', this.gameInputListener);

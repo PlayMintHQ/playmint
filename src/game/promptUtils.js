@@ -443,7 +443,9 @@ export function parsePromptKeywords(text) {
  * Generates custom title dynamically based on prompt theme and mode
  */
 export function generateTitle(text, mode, themeKey) {
-  const trimmed = text.trim();
+  // A pasted link is never a title (a game showed "HTTP://LOCALHOST:5173/" in
+  // its HUD after a URL ended up in the prompt box).
+  const trimmed = String(text || '').replace(/\b(?:https?:\/\/|www\.)\S+/gi, ' ').replace(/\s+/g, ' ').trim();
   const cap = (w) => w.charAt(0).toUpperCase() + w.slice(1);
   if (trimmed.length > 4 && trimmed.length < 36) {
     return trimmed.split(/\s+/).map(cap).join(' ');

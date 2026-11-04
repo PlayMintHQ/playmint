@@ -8,7 +8,7 @@ import { GAME_PRESETS } from './gameConfig';
 import { generateGameConfig } from './game/geminiService';
 import { regenerateAssetSlots, createCancelToken, isGeminiConfigured } from './game/assetPipeline';
 import { generateOrRestoreAssets, updateGameArt, makePromptKey, getGameById } from './game/assetCache';
-import { encodeShareConfig, decodeShareConfig, hydrateAssetMetaLite } from './game/shareLink';
+import { encodeShareConfig, decodeShareConfig, hydrateAssetMetaLite, stripForShare } from './game/shareLink';
 import { generateTitle } from './game/promptUtils';
 import { interpretEditPrompt, resolveAssetTargets } from './game/gameEditor';
 import GameOverOverlay from './components/GameOverOverlay';
@@ -23,6 +23,7 @@ import { MyGamesPage, RouteStubPage } from './components/MyGamesPage';
 import { PublicGamePage } from './components/PublicGamePage';
 import { saveGame, attachThumbnail } from './game/savedGames';
 import { captureGameFrameWhenReady } from './game/frameCapture';
+import { mergeRedrawnArt, mergeDesign } from './game/editMerge';
 
 // Capture mode (2026-08-20): a chrome-free view for recording demos and
 // marketing footage. Driven by the URL so a recording setup is reproducible and
@@ -58,6 +59,14 @@ const newRunId = () => {
 
 /** Stamp a fresh per-boot identity on a config that is becoming the live game. */
 const withRunId = (config) => ({ ...(config || {}), saveRunId: newRunId() });
+// A game the user GENERATED in this session (prompt, Quick Start, remix, an
+// in-game regenerate). Auto-save is limited to these: the default preset that
+// sits behind the home screen, a preset switch, an imported link and a public
+// play are never "created" by the viewer (client report 2026-11-04: a stray
+// "PlayMint Core" row appeared in a library whose owner had generated nothing).
+const withNewGame = (config) => ({ ...withRunId(config), createdInSession: true });
+// gameType → the preset key generateGameConfig takes as its mode hint.
+const MODE_FOR_TYPE = { runner: 'standard', platformer: 'action_quest', shooter: 'shooter_arena' };
 
 /**
  * Fold a boot-time player-animation repair's spend into the game's existing
@@ -201,6 +210,10 @@ function App() {
   // Save button is the update path from then on ("tweaks update the saved config
   // when the user chooses Save").
   const autoSavedRef = useRef(new Set());
+  // Boots whose row was written in THIS session. Only those receive the captured
+  // in-game frame: attaching a thumbnail to a row that is merely being replayed
+  // bumped its updated_at, so an old card in My Games showed today's date.
+  const savedRunsRef = useRef(new Set());
   // The captured in-game frame, keyed by the per-boot identity. This is the
   // My Games card art: an actual frame of the running game, not a reconstruction
   // from its assets and never a bare colour (game/frameCapture.js).
@@ -210,6 +223,9 @@ function App() {
   const repairAttemptedRef = useRef(false);
   const repairTokenRef = useRef(null);
   const [repairState, setRepairState] = useState(null);
+  // In-flight Quick Edit / Creator Panel redraw. Cancel drops its result, keeps
+  // the current game and resumes it.
+  const editTokenRef = useRef(null);
 
   // Timing telemetry (src/game/metrics.js). Two jobs, both of which have to be
   // set up before Phaser's first boot can land:
@@ -441,8 +457,13 @@ function App() {
     return () => clearTimeout(t);
   }, [liveParams?.staticNotice, liveParams?.saveRunId]);
 
-  const shouldPause = isMenuOpen || isSignInOpen || isQuickEditOpen;
+  // regenState: a Quick Edit / Creator Panel redraw closes its overlay so the
+  // progress screen is visible — the game must STAY paused until the edit is
+  // applied or cancelled (client report 2026-11-04: typed edits let the run end
+  // in Game Over behind the progress screen).
+  const shouldPause = isMenuOpen || isSignInOpen || isQuickEditOpen || !!regenState;
   useEffect(() => {
+    window.__PM_SHOULD_PAUSE = shouldPause;
     window.dispatchEvent(new CustomEvent('toggle-pause-game', { detail: { isPaused: shouldPause } }));
     if (!shouldPause) return undefined;
     // A gameKey remount (share-link art restore) boots a fresh scene with
@@ -570,7 +591,7 @@ function App() {
     setGameKey(k => k + 1);
     // Fresh run id: this is a NEW game, so it must be free to auto-save as its
     // own row even if the previous game was the same preset.
-    setLiveParams(withRunId(customConfig));
+    setLiveParams(withNewGame(customConfig));
     setHasStarted(true);
     setIsPromptOpen(false);
     setIsGameOver(false);
@@ -580,7 +601,7 @@ function App() {
   const handleOverlayGenerate = (key, customConfig) => {
     setPresetKey(key);
     setGameKey(k => k + 1);
-    setLiveParams(withRunId(customConfig));
+    setLiveParams(withNewGame(customConfig));
     setIsPromptOpen(false);
     setIsGameOver(false);
     setGameOverData(null);
@@ -623,7 +644,7 @@ function App() {
   const handleGoHome = () => {
     leaveRunningGame();
     // A clean Create screen: no leftover "Remixing: X" banner or parent link.
-    setLiveParams(prev => ({ ...prev, remixParentId: null, remixParentTitle: null, sourcePrompt: '' }));
+    setLiveParams(prev => ({ ...prev, remixParentId: null, remixParentTitle: null, remixBase: null, sourcePrompt: '' }));
     // Leaving the game: drop the share hash so a reload lands on ScreenZero.
     // Pinned to '/' (not the current pathname) now that the app has routes.
     navigate('/', { replace: true });
@@ -654,7 +675,10 @@ function App() {
       ownerId: publicGame.owner_id || null,
       visibility: publicGame.visibility || null,
       savedGameId: isOwner ? publicGame.id : null,
-      autoSaveExempt: !isOwner,
+      // Playing a saved game is never a new save: the owner already has the
+      // row (manual Save updates it via savedGameId), and a visitor must never
+      // get a copy in their own library.
+      autoSaveExempt: true,
       allowRemix: publicGame.allow_remix === true,
       assetMeta: publicGame.asset_meta || null,
     };
@@ -714,7 +738,26 @@ function App() {
       rowId: null,
       ownerId: null,
       allowRemix: true,
-      autoSaveExempt: false,
+      // The PARENT config stays in liveParams behind the remix screen. It must
+      // not auto-save (that wrote a copy of the parent into the remixer's library
+      // before anything was generated); the remix result is a new game and
+      // carries its own createdInSession flag.
+      autoSaveExempt: true,
+      createdInSession: false,
+      // What the remix edits: the parent's art set + its full config. ScreenZero
+      // applies the instruction OVER this art (targeted redraw) instead of
+      // generating a new world from the instruction alone.
+      remixBase: {
+        artId: isRow ? (source.art_id || source.config?.gameId || null) : (source.gameId || null),
+        // forRow: the parent's row id / owner / visibility must not ride into the
+        // remix — it is a new game owned by whoever makes it.
+        config: stripForShare({
+          ...(isRow ? { ...(source.config || {}), gameType: parentType } : source),
+          sourcePrompt: parentPrompt,
+          themeKey: parentTheme
+        }, { forRow: true }),
+        title: parentTitle
+      },
     }));
     navigate('/');
   };
@@ -754,6 +797,7 @@ function App() {
     // slow manual save for game A landing after game B booted would otherwise
     // stamp A's row onto B, and B's next save would UPDATE A's row.
     const id = result.id;
+    if (current?.saveRunId) savedRunsRef.current.add(current.saveRunId);
     setLiveParams(prev => (
       id && prev.saveRunId === current?.saveRunId ? { ...prev, savedGameId: id } : prev
     ));
@@ -798,16 +842,22 @@ function App() {
   // game the reader generates from inside the link is NOT exempt (the fresh
   // config has no flag).
   useEffect(() => {
-    if (authStatus !== 'authed') return;
+    if (authStatus !== 'authed' || !hasStarted) return;
     const current = liveParamsRef.current;
     if (!current || current.autoSaveExempt) return;
+    // Only games the user generated in this session (see withNewGame). The
+    // default "PlayMint Core" preset behind the home screen, preset switches and
+    // public plays have no flag and are never written into the library.
+    if (current.createdInSession !== true) return;
     // Dedup key is the ROW target when there is one, else the art id, else the
     // per-boot token. A static-art boot has neither id, and a name+prompt STRING
     // collided: two different static games from the same prompt (a re-roll with a
     // different title, or a second run) shared one key, so the second silently
     // never auto-saved. `saveRunId` is unique per config object, so it can only
     // ever suppress a genuine repeat of the SAME game.
-    const dedupKey = current.savedGameId || current.gameId || current.saveRunId;
+    // The per-boot token comes FIRST: keyed on savedGameId, the key changed the
+    // moment the INSERT landed and every auto-save ran a second time as an UPDATE.
+    const dedupKey = current.saveRunId || current.gameId;
     if (!dedupKey) return;
     if (autoSavedRef.current.has(dedupKey)) return;
     autoSavedRef.current.add(dedupKey);
@@ -835,6 +885,7 @@ function App() {
           setLiveParams(prev => (
             id && prev.saveRunId === params.saveRunId ? { ...prev, savedGameId: id } : prev
           ));
+          savedRunsRef.current.add(params.saveRunId);
           setSaveState('saved');
           setTimeout(() => setSaveState((s) => (s === 'saved' ? 'idle' : s)), 2000);
           window.dispatchEvent(new CustomEvent('pm-games-changed'));
@@ -867,7 +918,7 @@ function App() {
       cancelled = true;
       if (retryTimer) clearTimeout(retryTimer);
     };
-  }, [liveParams.gameId, liveParams.savedGameId, liveParams.autoSaveExempt, liveParams.saveRunId, authStatus]);
+  }, [liveParams.gameId, liveParams.savedGameId, liveParams.autoSaveExempt, liveParams.saveRunId, liveParams.createdInSession, authStatus, hasStarted]);
 
   // ── Player-animation repair (added 2026-09-29) ────────────────────────────
   // A game whose sprite sheet failed every rescue rung boots with a STATIC
@@ -903,7 +954,14 @@ function App() {
     // boolean: a boolean reset effect runs in the same commit as this one (and
     // would clear a guard this effect had just set), while a keyed check
     // self-invalidates the moment a genuinely new game boots.
-    const gameKeyForRepair = params.saveRunId;
+    // Keyed on the PLAYER IMAGE as well (2026-11-04): a Quick Edit that redraws
+    // the player can ship a new static sprite into the same game, and a key on
+    // saveRunId alone meant that game was never repaired again — "after the
+    // African city edit the player no longer ran".
+    const playerImg = params.preloadedImages?.player;
+    const gameKeyForRepair = params.saveRunId && playerImg
+      ? `${params.saveRunId}|${playerImg.src?.length || 0}|${playerImg.width}x${playerImg.height}|${playerImg.src?.slice(-48) || ''}`
+      : null;
     if (!gameKeyForRepair || repairAttemptedRef.current === gameKeyForRepair) return;
     // Only a game that HAS generated art and a static player to replace.
     if (!params.dynamicAssetUrls) return;
@@ -955,6 +1013,9 @@ function App() {
         // a slider tweak or restyle made during the 20-60s redraw must survive.
         const latest = liveParamsRef.current;
         if (!latest || latest.saveRunId !== params.saveRunId) return; // a different game booted meanwhile
+        // The player was replaced meanwhile (an edit redrew it): this sheet is of
+        // the OLD character and must not be painted over the new one.
+        if (latest.preloadedImages?.player !== playerImg) return;
         const mergedImages = { ...(latest.preloadedImages || {}), player: newImages.player };
         const mergedParams = {
           ...latest,
@@ -978,7 +1039,7 @@ function App() {
         // Persist under the same cache entry so a later hit/share-link shows the
         // animated player — but never for a game the viewer does not own (public
         // plays carry autoSaveExempt): a visitor must not rewrite someone else's art.
-        if (mergedParams.gameId && !mergedParams.autoSaveExempt) {
+        if (mergedParams.gameId && (!mergedParams.autoSaveExempt || mergedParams.savedGameId)) {
           updateGameArt(mergedParams.gameId, {
             config: mergedParams,
             preloadedImages: mergedImages,
@@ -1001,7 +1062,7 @@ function App() {
     };
   // dynamicAssetUrls / hasArt: a restored game (share link, F5, My Games) boots on
   // placeholders and gets its art one remount later — the effect must re-evaluate then.
-  }, [hasStarted, liveParams.gameId, liveParams.saveRunId, liveParams.dynamicAssetUrls, hasLiveArt]);
+  }, [hasStarted, liveParams.gameId, liveParams.saveRunId, liveParams.dynamicAssetUrls, hasLiveArt, liveParams.preloadedImages?.player]);
 
   // A new game clears the visible repair state and cancels an in-flight redraw
   // belonging to the previous one. The one-shot guard does NOT need resetting —
@@ -1036,7 +1097,7 @@ function App() {
       frameRef.current = { runId, blob };
       // A row saved before this point has no frame of its own.
       const params = liveParamsRef.current;
-      if (params?.saveRunId === runId && params?.savedGameId) {
+      if (params?.saveRunId === runId && params?.savedGameId && savedRunsRef.current.has(runId)) {
         attachThumbnail(params.savedGameId, blob).then((path) => {
           if (!cancelled && path) window.dispatchEvent(new CustomEvent('pm-games-changed'));
         });
@@ -1087,8 +1148,9 @@ function App() {
         if (!slots.length) {
           return { applied: false, summary: 'Nothing to redraw for this game mode — try naming another element.' };
         }
+        const token = beginEdit();
         setIsMenuOpen(false);
-        setIsQuickEditOpen(false); // let the regen progress overlay be seen
+        setIsQuickEditOpen(false); // let the regen progress overlay be seen (the game stays paused: regenState)
         setRegenState({
           title: 'Updating Artwork',
           progress: 5,
@@ -1097,48 +1159,36 @@ function App() {
         try {
           const restyleT0 = performance.now();
           metrics.beginRun('restyle', { tier: 'restyle', gameId: liveParams.gameId || null, slots });
-          const { preloadedImages: newImages, meta: newMeta, cost: restyleCost } = await regenerateAssetSlots({
+          const { preloadedImages: newImages, meta: newMeta, cost: restyleCost, design: restyleDesign } = await regenerateAssetSlots({
             config: liveParams,
             instruction: raw,
             slots,
+            cancelToken: token,
             onProgress: (logText, progressVal) => pushProgress(logText, progressVal)
           });
+          if (token.cancelled) {
+            metrics.cancelRun();
+            return { applied: false, summary: 'Edit cancelled — your game was kept.' };
+          }
           metrics.mark('assets-generated');
           metrics.annotate({ estUsd: restyleCost?.estUsd || 0 });
           pushProgress('[ENGINE] Artwork updated! Restarting world...', 100);
-          const keptOld = Object.entries(newMeta)
-            .filter(([slot, m]) => m.dropped && liveParams.preloadedImages[slot])
-            .map(([slot]) => slot);
-          const mergedImages = { ...liveParams.preloadedImages };
-          const mergedMeta = { ...(liveParams.assetMeta?.slots || {}) };
-          const redrawnSlots = [];
-          for (const [slot, m] of Object.entries(newMeta)) {
-            if (m.dropped) {
-              // New version failed the quality gates — keep the old art if we had it
-              if (mergedImages[slot]) continue;
-              mergedMeta[slot] = m;
-              continue;
-            }
-            const img = newImages[slot];
-            if (!img) {
-              // Reported as succeeded but produced no image — an internal
-              // invariant violation (should be unreachable: pipeline.js
-              // asserts this). Never register a texture key with no backing
-              // image, and never count it as redrawn.
-              mergedMeta[slot] = { ...m, dropped: true, reason: 'missing image after redraw (internal)', source: 'generated' };
-              continue;
-            }
-            mergedImages[slot] = img;
-            mergedMeta[slot] = { ...m, source: 'generated' };
-            redrawnSlots.push(slot);
-          }
+          // Merge onto the CURRENT config (slider tweaks made before the edit survive).
+          const base = liveParamsRef.current || liveParams;
+          const { mergedImages, mergedSlots, redrawnSlots, keptOld } = mergeRedrawnArt({
+            baseImages: base.preloadedImages,
+            baseSlots: base.assetMeta?.slots,
+            newImages,
+            newMeta
+          });
           const mergedParams = {
-            ...liveParams,
+            ...base,
             ...edit.changes,
             preloadedImages: mergedImages,
             assetMeta: {
-              ...(liveParams.assetMeta || {}),
-              slots: mergedMeta,
+              ...(base.assetMeta || {}),
+              slots: mergedSlots,
+              design: mergeDesign(base.assetMeta?.design, restyleDesign, redrawnSlots),
               // The report shows THIS restyle's spend, not the pre-restyle run's.
               cost: restyleCost || { estUsd: 0, imageCalls: 0, visionCalls: 0, calls: [] },
               run: {
@@ -1154,42 +1204,49 @@ function App() {
           setPresetKey('custom');
           setLiveParams(mergedParams);
           // Persist the restyled art under the game's existing cache entry so a
-          // later cache hit / share-link restore shows the restyled art.
+          // later cache hit / share-link restore shows the restyled art — only for
+          // a game this viewer owns (a visitor must not rewrite someone else's art).
           // Fire-and-forget: a cache failure must never affect the running game.
-          updateGameArt(liveParams.gameId, {
-            config: mergedParams,
-            preloadedImages: mergedImages,
-            assetMeta: mergedParams.assetMeta
-          });
+          if (!base.autoSaveExempt || base.savedGameId) {
+            updateGameArt(base.gameId, {
+              config: mergedParams,
+              preloadedImages: mergedImages,
+              assetMeta: mergedParams.assetMeta
+            });
+          }
           const summary = keptOld.length
             ? `${edit.summary} — kept the previous ${keptOld.join(', ')} (new version failed quality checks)`
             : edit.summary;
           return { applied: true, summary };
         } catch (err) {
-          console.error('[App.jsx] Restyle failed:', err);
           // No remount follows a failed restyle, so nothing would ever close this
           // run — drop it rather than let an unrelated later boot adopt it.
           metrics.cancelRun();
+          if (token.cancelled || err?.cancelled) return { applied: false, summary: 'Edit cancelled — your game was kept.' };
+          console.error('[App.jsx] Restyle failed:', err);
           return { applied: false, summary: err.message };
         } finally {
-          setRegenState(null);
+          endEdit(token);
         }
       }
       // intent === 'regenerate' (or restyle with no retained images) → full pipeline below
     }
 
+    const token = beginEdit();
     setIsMenuOpen(false);
-    setIsQuickEditOpen(false); // let the regen progress overlay be seen
+    setIsQuickEditOpen(false); // let the regen progress overlay be seen (the game stays paused: regenState)
     setRegenState({ progress: 3, logs: [`[EDITOR] New world required for "${raw}" — regenerating...`] });
     metrics.beginRun('generate', { via: 'creator-panel', promptChars: raw.length });
 
     try {
       console.log('[App.jsx] Calling generateGameConfig...');
+      // The running game's MODE is kept: the editor never switches modes, and a
+      // keyword like "enemies" must not turn a runner into a platformer.
       const result = await generateGameConfig(raw, (logText, progressVal) => {
         console.log(`[App.jsx Config Progress] ${progressVal}% - ${logText}`);
         // Config is the fast local phase — cap it so asset progress (73+) takes over
         pushProgress(logText, Math.min(progressVal ?? 0, 70));
-      });
+      }, { mode: hasStarted ? (MODE_FOR_TYPE[liveParams.gameType] || null) : null });
       const updatedConfig = result.config;
       metrics.mark('config');
       metrics.annotate({ gameType: updatedConfig.gameType });
@@ -1198,11 +1255,16 @@ function App() {
         config: updatedConfig,
         userPrompt: raw,
         promptKey: makePromptKey(raw, updatedConfig.gameType),
+        cancelToken: token,
         onProgress: (logText, progressVal) => {
           console.log(`[App.jsx Asset Progress] ${progressVal}% - ${logText}`);
           pushProgress(logText, progressVal);
         }
       });
+      if (token.cancelled) {
+        metrics.cancelRun();
+        return { applied: false, summary: 'Edit cancelled — your game was kept.' };
+      }
 
       // The Creator Panel/Quick Edit must never swap a running game for a built-in
       // world after a failed redraw — keep the game and say why.
@@ -1216,27 +1278,52 @@ function App() {
       // Apply — force fresh Phaser instance
       setGameKey(k => k + 1);
       setPresetKey('custom');
-      setLiveParams(withRunId({ ...gen.config, preloadedImages: gen.preloadedImages, assetMeta: gen.assetMeta }));
+      setLiveParams(withNewGame({ ...gen.config, preloadedImages: gen.preloadedImages, assetMeta: gen.assetMeta }));
       setIsGameOver(false);
       setGameOverData(null);
     } catch (err) {
-      console.error('[App.jsx] Prompt generation failed:', err);
       metrics.cancelRun(); // no boot follows a failed regeneration
+      if (token.cancelled || err?.cancelled) return { applied: false, summary: 'Edit cancelled — your game was kept.' };
+      console.error('[App.jsx] Prompt generation failed:', err);
       const message = err.cacheOnlyMiss
         ? 'Cache only is ON and nothing cached matches this prompt. Turn the toggle off on the generator screen (top right) to create new art.'
         : err.needsFallbackChoice ? `${err.fallbackReason} Your current game was kept.` : err.message;
       window.dispatchEvent(new CustomEvent('playmint-error', { detail: { message } }));
       throw err;
     } finally {
-      setRegenState(null);
+      endEdit(token);
     }
+  };
+
+  // One in-flight edit at a time. Starting one also stops a background player
+  // repair: its result would otherwise land on top of the edited game.
+  function beginEdit() {
+    editTokenRef.current?.cancel();
+    repairTokenRef.current?.cancel();
+    const token = createCancelToken();
+    editTokenRef.current = token;
+    return token;
+  }
+  function endEdit(token) {
+    if (editTokenRef.current !== token) return; // cancelled, or a newer edit owns the overlay
+    editTokenRef.current = null;
+    setRegenState(null);
+  }
+  // Cancel button on the progress overlay: the result is dropped when it lands
+  // (the pipeline also stops at its next checkpoint), and the game resumes NOW.
+  const cancelEdit = () => {
+    const token = editTokenRef.current;
+    if (!token) return;
+    token.cancel();
+    editTokenRef.current = null;
+    setRegenState(null);
   };
 
   return (
     <div ref={fullscreenContainerRef} style={{ position: 'relative', width: '100%', height: '100dvh', overflow: 'hidden' }}>
 
       {/* In-place world regeneration progress (Creator Panel prompt) */}
-      <RegenOverlay state={regenState} />
+      <RegenOverlay state={regenState} onCancel={cancelEdit} />
 
       {/* Game view rendered if started OR if transitioning */}
       {(hasStarted || isTransitioning) && (
@@ -1381,6 +1468,7 @@ function App() {
           gameType={gameOverData.gameType}
           onRestart={handleRestartGame}
           onTweakSettings={handleTweakSettings}
+          onMainMenu={handleGoHome}
           onRemix={canRemix ? () => handleRemix(liveParams) : null}
         />
       )}
@@ -1421,7 +1509,7 @@ function App() {
           onStartTransition={(config) => {
             setGameKey(k => k + 1);
             setIsTransitioning(true);
-            setLiveParams(withRunId(config));
+            setLiveParams(withNewGame(config));
           }}
           onCompleteTransition={() => {
             setHasStarted(true);

@@ -115,6 +115,18 @@ const rehydrateEntry = async (entry, cancelToken) => {
   return preloadedImages;
 };
 
+// Session/ownership facts are not part of the ART (see persistRun). Applied on
+// write AND on read: entries persisted before 2026-11-04 can still carry a row id
+// or an exemption flag, and a remix built from such an entry would UPDATE the
+// parent's library row.
+const SESSION_FIELDS = ['savedGameId', 'ownerId', 'rowId', 'autoSaveExempt', 'createdInSession',
+  'visibility', 'isPublicGame', 'saveRunId', 'remixBase', 'staticNotice', 'allowRemix'];
+const artOnlyConfig = (config) => {
+  const out = { ...(config || {}) };
+  for (const f of SESSION_FIELDS) delete out[f];
+  return out;
+};
+
 const newGameId = () =>
   (typeof crypto !== 'undefined' && crypto.randomUUID)
     ? crypto.randomUUID()
@@ -131,7 +143,12 @@ const persistRun = async ({ id, promptKey, sourcePrompt, createdAt, config, prel
       if (!img?.src) continue;
       images[slot] = await (await fetch(img.src)).blob();
     }
-    const { preloadedImages: _pi, assetMeta: _am, ...cleanConfig } = config || {};
+    // Session/ownership facts are not part of the ART: a cache entry is shared by
+    // every game (and user) that reuses it, so a row id, owner, exemption or
+    // "created in this session" flag persisted here would ride into someone
+    // else's boot on the next exact hit (2026-11-04 library-integrity pass).
+    const { preloadedImages: _pi, assetMeta: _am, ...rest } = config || {};
+    const cleanConfig = artOnlyConfig(rest);
     // `run` is run-scoped truth (tier/timing of ONE boot) — never persisted, or a
     // later restore would replay a stale outcome. `cost` IS persisted: it becomes
     // the entry's originalCost on restores.
@@ -366,6 +383,12 @@ async function tryMatchedReuse({ config, userPrompt, promptKey, onProgress, canc
   if (!cacheOnly && !isShooterRun && !baseImages.player && !slots.includes('player') && !slots.includes('player_sheet') && isGeminiConfigured()) {
     slots = [...slots, 'player_sheet'];
   }
+  // Shooter sets made before arena cover existed (2026-11-04) have no obstacle
+  // art: draw the cover prop once (one lite call) and persist the completed set.
+  // Without it the arena falls back to the generic crate texture.
+  if (!cacheOnly && isShooterRun && !baseImages.obstacle && !slots.includes('obstacle') && isGeminiConfigured()) {
+    slots = [...slots, 'obstacle'];
+  }
 
   if (!slots.length) {
     // Whole-set reuse: the NEW prompt's config drives mode/physics; only art +
@@ -586,7 +609,7 @@ export async function generateOrRestoreAssets({ config, userPrompt = '', promptK
         };
         bumpStats('exact');
         return {
-          config: { ...entry.config, gameId: entry.id, sourcePrompt: entry.sourcePrompt || '', dynamicAssetUrls: true },
+          config: { ...artOnlyConfig(entry.config), gameId: entry.id, sourcePrompt: entry.sourcePrompt || '', dynamicAssetUrls: true },
           preloadedImages,
           assetMeta,
           fromCache: true
@@ -650,6 +673,16 @@ export async function generateAndCache({ config, userPrompt = '', promptKey = nu
   return { config: stampedConfig, preloadedImages, assetMeta, fromCache: false };
 }
 
+// A NEW game derived from existing art (a remix applied over its parent's art):
+// fresh id, persisted under the derived prompt's key, never touching the parent's
+// entry. Returns the stamped config.
+export function saveDerivedGame({ config, preloadedImages, assetMeta, promptKey = null, sourcePrompt = '' }) {
+  const gameId = newGameId();
+  const stamped = { ...config, gameId, sourcePrompt, dynamicAssetUrls: true };
+  persistRun({ id: gameId, promptKey, sourcePrompt, config: stamped, preloadedImages, assetMeta });
+  return stamped;
+}
+
 // Re-persist a game's art under its existing id (restyle / partial regeneration).
 // Fire-and-forget from the caller's perspective; keeps promptKey/createdAt.
 export async function updateGameArt(gameId, { config, preloadedImages, assetMeta }) {
@@ -693,7 +726,7 @@ export async function getGameById(id) {
     else backend.touch(entry.id);
     bumpStats('restored');
     return {
-      config: { ...entry.config, gameId: entry.id, dynamicAssetUrls: true },
+      config: { ...artOnlyConfig(entry.config), gameId: entry.id, dynamicAssetUrls: true },
       preloadedImages,
       assetMeta: {
         ...restoredMeta(entry),

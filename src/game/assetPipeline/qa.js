@@ -59,6 +59,21 @@ const STRIP_SCHEMA = {
   required: ['facingRight', 'sameCharacter', 'legsAlternate']
 };
 
+// Top-down (Shooter Arena) characters: the game rotates the sprite toward its
+// travel/aim direction with rotation 0 = facing RIGHT, so the art must (a) really
+// be seen from overhead — a standing full-body figure rotated 90° reads as
+// "lying down" (client report 2026-11-04) — and (b) point right. Facing is
+// corrected client-side by rotation; a non-overhead drawing gets one redraw.
+const TOPDOWN_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    overhead: { type: 'BOOLEAN', description: 'Is the character seen from DIRECTLY ABOVE (top of the head and shoulders visible, no face, no standing legs/feet)? false for a standing front/side/3-quarter view figure.' },
+    facing: { type: 'STRING', enum: ['up', 'right', 'down', 'left', 'unclear'], description: 'Which edge of the image the character\'s front (head direction, weapon, nose) points toward.' },
+    backgroundClean: { type: 'BOOLEAN', description: 'Is the area around the subject fully transparent/empty?' }
+  },
+  required: ['overhead', 'facing', 'backgroundClean']
+};
+
 const SHEET_SCHEMA = {
   type: 'OBJECT',
   properties: {
@@ -111,6 +126,18 @@ function buildPrompt(kind, grid) {
       'pose repeats or the legs never swap.'
     );
   }
+  if (kind === 'topdown') {
+    return (
+      'This image should be a single character sprite for a TOP-DOWN arena shooter, seen from ' +
+      'directly overhead (bird\'s-eye view), on a transparent background. Answer strictly:\n' +
+      '- overhead: is it really seen from directly above (we see the top of the head and the ' +
+      'shoulders; no face and no standing legs or feet)? Answer false for a standing figure ' +
+      'drawn from the front, the side or at a three-quarter angle.\n' +
+      '- facing: toward which edge of the image does the character point (head direction, ' +
+      'weapon, front)? "up", "right", "down", "left" or "unclear".\n' +
+      '- backgroundClean: is everything outside the subject transparent/empty?'
+    );
+  }
   if (kind === 'layer') {
     return (
       'This image should be a decorative parallax strip for a side-scrolling game: only ' +
@@ -145,6 +172,7 @@ export async function reviewSprite(dataUrl, { kind = 'sprite', grid = null, labe
     const schema = kind === 'sheet' ? SHEET_SCHEMA
       : kind === 'strip' ? STRIP_SCHEMA
       : kind === 'layer' ? LAYER_SCHEMA
+      : kind === 'topdown' ? TOPDOWN_SCHEMA
       : SPRITE_SCHEMA;
     const result = await generateJson({
       prompt: buildPrompt(kind, grid),
@@ -157,6 +185,7 @@ export async function reviewSprite(dataUrl, { kind = 'sprite', grid = null, labe
       return result;
     }
     if (typeof result?.backgroundClean !== 'boolean') return null;
+    if (kind === 'topdown') return typeof result?.overhead === 'boolean' ? result : null;
     if (kind !== 'layer' && typeof result?.facingRight !== 'boolean') return null;
     return result;
   } catch (err) {

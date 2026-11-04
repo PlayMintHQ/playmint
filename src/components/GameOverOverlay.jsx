@@ -44,10 +44,11 @@ const ScoreTicker = ({ targetScore }) => {
   return <span>{count}</span>;
 };
 
-const GameOverOverlay = ({ isWin, score, themeKey, gameType, onRestart, onTweakSettings, onRemix }) => {
+const GameOverOverlay = ({ isWin, score, themeKey, gameType, onRestart, onTweakSettings, onRemix, onMainMenu }) => {
   const [isBtnHovered, setIsBtnHovered] = useState(false);
   const [isTweakHovered, setIsTweakHovered] = useState(false);
   const [isRemixHovered, setIsRemixHovered] = useState(false);
+  const [isMenuHovered, setIsMenuHovered] = useState(false);
   const [highScore, setHighScore] = useState(0);
   const [isNewRecord, setIsNewRecord] = useState(false);
 
@@ -75,6 +76,9 @@ const GameOverOverlay = ({ isWin, score, themeKey, gameType, onRestart, onTweakS
         const el = document.activeElement;
         const isTextInput = el && (el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && (el.type === 'text' || el.type === 'number')));
         if (isTextInput) return;
+        // A focused overlay button (Main Menu, Remix…) is activated by Space
+        // natively — restarting on top of it would ignore the user's choice.
+        if (el && el.tagName === 'BUTTON' && el.closest?.('.go-overlay')) return;
         
         e.preventDefault();
         onRestart();
@@ -428,6 +432,34 @@ const GameOverOverlay = ({ isWin, score, themeKey, gameType, onRestart, onTweakS
           >
             Tweak Settings
           </button>
+
+          {onMainMenu && (
+            <button
+              onClick={onMainMenu}
+              onMouseEnter={() => setIsMenuHovered(true)}
+              onMouseLeave={() => setIsMenuHovered(false)}
+              style={{
+                width: '100%',
+                height: '42px',
+                background: isMenuHovered ? 'rgba(255, 255, 255, 0.08)' : 'rgba(255, 255, 255, 0.03)',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                borderRadius: '12px',
+                color: isMenuHovered ? '#ffffff' : 'var(--pm-text-secondary)',
+                fontSize: '13px',
+                fontFamily: 'var(--font-primary)',
+                fontWeight: '600',
+                cursor: 'pointer',
+                transform: isMenuHovered ? 'translateY(-1px)' : 'translateY(0)',
+                transition: 'all 0.15s ease',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                outline: 'none'
+              }}
+            >
+              Return to Main Menu
+            </button>
+          )}
         </div>
 
         {/* Subtitle Space Restart Indicator (Original exact phrasing, strictly No Emojis) */}

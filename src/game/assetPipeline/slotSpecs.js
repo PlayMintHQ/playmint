@@ -265,7 +265,12 @@ export const SLOT_SPECS = {
     textureKey: 'dyn_collectible',
     canvas: { width: 128, height: 128 },
     gen: { aspectRatio: '1:1', model: GEMINI_SLOT_MODEL },
-    post: { fit: 'stretch', keying: 'flood', trimBorder: false, crop: true, outline: true },
+    // 2026-11-04 (client: "coins appeared visually incorrect after an edit"):
+    // contain-fit (a non-square grid cell no longer squashes the coin),
+    // pocketClean (the hole of a ring/charm coin kept a disc of green screen) and
+    // a background-clean vision check (re-key on failure) like the characters get.
+    post: { fit: 'contain', keying: 'flood', trimBorder: false, crop: true, outline: true, pocketClean: true },
+    qa: { clean: false },
     optional: true,
     scaffold: (subject, style, { chroma } = {}) =>
       `Draw a single small collectible pickup sprite for a 2d video game: ${subject}. ` +
@@ -293,11 +298,18 @@ export const SLOT_SPECS = {
     // "no ground, no motion lines" suppresses baked-in floor streaks under runners.
     scaffold: (subject, style, { chroma, gameType } = {}) =>
       gameType === 'shooter'
-        ? `Draw a 2d video game hero sprite, viewed from directly above (top-down ` +
-          `bird's-eye view): ${subject}. The character faces upward toward the top of ` +
-          `the frame, full body visible from above with a sharp clean outline, ` +
-          `centered in the frame. ${BG_CLAUSE(chroma)}. ${GAPS_CLAUSE}. No shadow, ` +
-          `no ground, no motion lines, no text. ${style}`
+        // Seen from DIRECTLY overhead and pointing RIGHT — the game rotates the
+        // sprite with rotation 0 = +x. The old "faces upward, full body visible"
+        // wording produced standing figures that looked like they were lying down
+        // once rotated (client report 2026-11-04); the top-down QA rotates any
+        // remaining up/down/left art to face right.
+        ? `Draw a 2d video game hero sprite for a top-down arena shooter, seen from ` +
+          `DIRECTLY ABOVE like a bird's-eye camera looking straight down: ${subject}. ` +
+          `We see only the top of the head, the shoulders and the arms holding the ` +
+          `weapon out in front; no face, no legs or feet. The character points to the ` +
+          `RIGHT edge of the image: head toward the right, weapon reaching to the right. ` +
+          `Sharp clean outline, centered in the frame. ${BG_CLAUSE(chroma)}. ${GAPS_CLAUSE}. ` +
+          `No shadow, no ground, no motion lines, no text. ${style}`
         : `Draw a 2d video game hero sprite: ${subject}. The character is caught mid-run ` +
           `in a dynamic stride, full body in crisp side profile facing right, a single ` +
           `character filling most of the frame with a sharp clean outline. ` +
@@ -312,10 +324,13 @@ export const SLOT_SPECS = {
     post: { fit: 'stretch', keying: 'flood', trimBorder: false, crop: true, outline: true, pocketClean: true },
     qa: { facing: true },
     scaffold: (subject, style, { chroma, gameType } = {}) => gameType === 'shooter'
-      ? `Draw a 2d video game enemy sprite, viewed from directly above (top-down ` +
-        `bird's-eye view): ${subject}, a single creature filling most of the frame ` +
-        `with a sharp clean outline, centered in the frame. ${BG_CLAUSE(chroma)}. ` +
-        `${GAPS_CLAUSE}. No shadow, no ground, no motion lines, no text. ${style}`
+      ? `Draw a 2d video game enemy sprite for a top-down arena shooter, seen from ` +
+        `DIRECTLY ABOVE like a bird's-eye camera looking straight down: ${subject}. We ` +
+        `see its back, head and limbs from above, never a standing front or side view. ` +
+        `It points to the RIGHT edge of the image (head/front toward the right). A ` +
+        `single creature filling most of the frame with a sharp clean outline, ` +
+        `centered in the frame. ${BG_CLAUSE(chroma)}. ${GAPS_CLAUSE}. No shadow, no ` +
+        `ground, no motion lines, no text. ${style}`
       : `Draw a 2d video game enemy sprite: ${subject}, prowling to the right, full ` +
       `body in side profile facing right, a single creature filling most of the frame ` +
       `with a sharp clean outline. ${BG_CLAUSE(chroma)}. ${GAPS_CLAUSE}. No shadow, ` +
@@ -397,10 +412,18 @@ export const SLOT_SPECS = {
     canvas: { width: 128, height: 128 },
     gen: { aspectRatio: '1:1', model: GEMINI_SLOT_MODEL },
     post: { fit: 'stretch', keying: 'flood', trimBorder: false, crop: true, outline: true },
-    scaffold: (subject, style, { chroma } = {}) =>
-      `Draw a single hazard object for a 2d video game: ${subject}. It has roughly ` +
-      `square proportions, shown from the side, centered in the frame. ` +
-      `${BG_CLAUSE(chroma)}. No shadow, no text. ${style}`,
+    scaffold: (subject, style, { chroma, gameType } = {}) => gameType === 'shooter'
+      // Arena COVER (added 2026-11-04): solid props the player hides behind and
+      // shots stop on. Overhead view, square footprint — the game places them as
+      // square blocks and short walls.
+      ? `Draw a single solid cover object for a top-down arena shooter, seen from ` +
+        `DIRECTLY ABOVE like a bird's-eye camera looking straight down: ${subject}. ` +
+        `A sturdy crate, barrier or wall block that belongs to this world, with a flat ` +
+        `top face and a square footprint filling most of the frame, centered. ` +
+        `${BG_CLAUSE(chroma)}. No shadow, no text. ${style}`
+      : `Draw a single hazard object for a 2d video game: ${subject}. It has roughly ` +
+        `square proportions, shown from the side, centered in the frame. ` +
+        `${BG_CLAUSE(chroma)}. No shadow, no text. ${style}`,
     cellEssence: (subject, style) =>
       `a single hazard object: ${subject}, roughly square proportions, side view, ` +
       `centered in its cell, no shadow, ${style}`,

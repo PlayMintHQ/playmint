@@ -58,7 +58,23 @@ export function drawToCanvas(img, { width, height, fit = 'stretch' }) {
   ctx.imageSmoothingQuality = 'high';
 
   const src = preshrink(img, width, height);
-  if (fit === 'cover') {
+  if (fit === 'contain') {
+    // Aspect-preserving fit, padded with the source's own corner colour so the
+    // border-seeded flood key still sees an unbroken backdrop. For small round
+    // props (the collectible): a non-square grid cell stretched to 128² turned a
+    // coin into an egg (2026-11-04).
+    const probe = document.createElement('canvas');
+    probe.width = 1; probe.height = 1;
+    const pctx = probe.getContext('2d');
+    pctx.drawImage(src, 0, 0, 1, 1, 0, 0, 1, 1);
+    const [r, g, b] = pctx.getImageData(0, 0, 1, 1).data;
+    ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+    ctx.fillRect(0, 0, width, height);
+    const scale = Math.min(width / src.width, height / src.height);
+    const drawW = src.width * scale;
+    const drawH = src.height * scale;
+    ctx.drawImage(src, (width - drawW) / 2, (height - drawH) / 2, drawW, drawH);
+  } else if (fit === 'cover') {
     const scale = Math.max(width / src.width, height / src.height);
     const drawW = src.width * scale;
     const drawH = src.height * scale;
@@ -811,6 +827,24 @@ export async function mirrorImage(img) {
   return loadImage(mirrorCanvas(canvas).toDataURL('image/png'), { crossOrigin: null });
 }
 
+// Rotate a sprite by quarter turns clockwise (1 = 90°). Used by the top-down
+// orientation QA: Shooter Arena rotates sprites at render time with rotation 0 =
+// facing +x, so art that came back facing up/down/left is turned to face right.
+export async function rotateImageQuarter(img, quarterTurns) {
+  const q = ((quarterTurns % 4) + 4) % 4;
+  if (!q) return img;
+  const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+  const out = document.createElement('canvas');
+  out.width = q % 2 ? h : w;
+  out.height = q % 2 ? w : h;
+  const ctx = out.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  ctx.translate(out.width / 2, out.height / 2);
+  ctx.rotate((q * Math.PI) / 2);
+  ctx.drawImage(img, -w / 2, -h / 2, w, h);
+  return loadImage(out.toDataURL('image/png'), { crossOrigin: null });
+}
+
 /**
  * Slice a sheet canvas into equal grid cells.
  */
@@ -1114,7 +1148,69 @@ function cloneCanvas(canvas) {
  * plays back as per-frame background flicker. Cells are uncropped, so the outer band
  * of the cell is exactly where leftover backdrop lives.
  */
+// SECOND BACKDROP pass (2026-11-04, reproduced live on "Japan neon city": the
+// model painted the top third of the sheet green and the rest WHITE — a "floor"
+// band). The flood key removes only the DOMINANT border colour, so every frame
+// shipped standing on a white slab and the idle frame showed a white rectangle
+// around the figure. On a chroma run white is never legitimate backdrop (the same
+// rule as removeBackdropCard), so a border-connected flood seeded from OPAQUE
+// near-white border pixels clears what the first pass left. It runs only when
+// such pixels form a real band along the border, flows only through near-white
+// opaque pixels (a dark outline stops it; white inside the figure survives), and
+// is reverted if it would remove most of what is left.
+export function removeSecondBackdrop(canvas, { minBorderShare = 0.08, maxRemovedShare = 0.92, minSurvivorShare = 0.03 } = {}) {
+  const w = canvas.width, h = canvas.height;
+  const ctx = canvas.getContext('2d');
+  const img = ctx.getImageData(0, 0, w, h);
+  const d = img.data;
+  const isPale = (i) => d[i * 4 + 3] > 0 && d[i * 4] >= 200 && d[i * 4 + 1] >= 200 && d[i * 4 + 2] >= 200 &&
+    Math.max(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]) - Math.min(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]) <= 40;
+  const border = [];
+  for (let x = 0; x < w; x++) { border.push(x, (h - 1) * w + x); }
+  for (let y = 1; y < h - 1; y++) { border.push(y * w, y * w + w - 1); }
+  const seeds = border.filter(isPale);
+  if (seeds.length < border.length * minBorderShare) return canvas;
+  let opaque = 0;
+  for (let i = 0; i < w * h; i++) if (d[i * 4 + 3] > 0) opaque++;
+  const removed = new Uint8Array(w * h);
+  const queue = new Int32Array(w * h);
+  let head = 0, tail = 0, count = 0;
+  for (const i of seeds) { if (!removed[i]) { removed[i] = 1; queue[tail++] = i; count++; } }
+  while (head < tail) {
+    const i = queue[head++];
+    const x = i % w, y = (i / w) | 0;
+    const nb = [];
+    if (x > 0) nb.push(i - 1);
+    if (x < w - 1) nb.push(i + 1);
+    if (y > 0) nb.push(i - w);
+    if (y < h - 1) nb.push(i + w);
+    for (const j of nb) {
+      if (removed[j] || !isPale(j)) continue;
+      removed[j] = 1; queue[tail++] = j; count++;
+    }
+  }
+  if (!opaque || count / opaque > maxRemovedShare || (opaque - count) < w * h * minSurvivorShare) return canvas;
+  for (let i = 0; i < w * h; i++) if (removed[i]) d[i * 4 + 3] = 0;
+  // Clear the 1px blend rim between the band and the transparent area.
+  for (let i = 0; i < w * h; i++) {
+    if (removed[i] || d[i * 4 + 3] === 0) continue;
+    const r = d[i * 4], g = d[i * 4 + 1], b = d[i * 4 + 2];
+    if (Math.min(r, g, b) < 170) continue;
+    const x = i % w, y = (i / w) | 0;
+    if ((x > 0 && removed[i - 1]) || (x < w - 1 && removed[i + 1]) || (y > 0 && removed[i - w]) || (y < h - 1 && removed[i + w])) {
+      d[i * 4 + 3] = 0;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return canvas;
+}
+
 export function keyCellWithQuality(cell, { chroma = null } = {}) {
+  const keyedCell = keyCellWithQualityInner(cell, { chroma });
+  return chroma ? removeSecondBackdrop(keyedCell) : keyedCell;
+}
+
+function keyCellWithQualityInner(cell, { chroma = null } = {}) {
   const pristine = cloneCanvas(cell);
   const keyed = removeBorderBackground(cell);
   const transparent = alphaFraction(keyed);
@@ -1289,11 +1385,17 @@ function pickSheetLayout(img, spec) {
   for (const layout of dynLayouts) {
     const canvas = drawToCanvas(img, { ...layout.canvas, fit: spec.post.fit });
     const { cutScore } = detectGridCuts(canvas, layout);
-    // Tiebreaker: favor layouts that match the original image aspect ratio
+    // The GUTTERS are the evidence (cutScore, 0..1); aspect is only a tiebreaker.
+    // The old `|aspect diff| × 10` term outweighed the gutters ten to one, so a
+    // square serve always sliced as 4×4 — 16 cells for a 10-frame sheet, cells
+    // straddling two figures, and the idle frame (cell 8) showing a doubled
+    // character (2026-11-04). Aspect is compared in log space (8:1 vs 10:1 is
+    // close; 1:1 vs 4:1 is far) and every cell beyond the requested count costs.
     const imageAspect = img.width / img.height;
     const layoutAspect = layout.cols / layout.rows;
-    const aspectPenalty = Math.abs(imageAspect - layoutAspect) * 10;
-    const finalScore = cutScore + aspectPenalty;
+    const aspectPenalty = Math.abs(Math.log(imageAspect / layoutAspect)) * 0.3;
+    const extraCells = spec.frames?.usedCells ? Math.max(0, layout.cols * layout.rows - spec.frames.usedCells) : 0;
+    const finalScore = cutScore + aspectPenalty + extraCells * 0.12;
     if (!best || finalScore < best.cutScore - 1e-6) best = { ...layout, cutScore: finalScore };
   }
   return best;
@@ -1743,6 +1845,8 @@ export async function postProcessAsset(rawSrc, spec, opts = {}) {
     canvas = drawToCanvas(img, { ...spec.canvas, fit: spec.post.fit });
   }
   canvas = applyKeying(canvas, spec.post.keying, opts.keyOverrides, spec.post, opts.whiteOverrides || null);
+  // Characters and pickups on a chroma screen: clear a second, white backdrop band.
+  if (opts.chroma && spec.post.keying === 'flood' && spec.post.pocketClean) canvas = removeSecondBackdrop(canvas);
   // Character slots on a chroma screen: strip a white card/panel the model put
   // behind the subject (the flood stops at its edge) — see removeBackdropCard.
   let boxed = false;

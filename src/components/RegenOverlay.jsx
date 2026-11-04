@@ -9,19 +9,28 @@ const LOG_COLORS = [
 ];
 
 /**
- * Full-screen progress overlay shown while the Creator Panel prompt regenerates a
- * world in place (the start screen has its own compiler terminal; this is the
- * in-game equivalent). Renders nothing when `state` is null.
+ * Full-screen progress overlay shown while the Creator Panel / Quick Edit prompt
+ * redraws or regenerates a world in place (the start screen has its own compiler
+ * terminal; this is the in-game equivalent). Renders nothing when `state` is null.
+ * The game stays PAUSED for as long as this is up (App's shouldPause includes
+ * regenState); Cancel keeps the current game and resumes it.
+ *
+ * z-index sits above GameOverOverlay (9999): a run that ended just before the edit
+ * started must never cover the progress screen.
  */
-const RegenOverlay = ({ state }) => {
+const RegenOverlay = ({ state, onCancel }) => {
   if (!state) return null;
 
   return (
-    <div style={{
-      position: 'fixed', inset: 0, zIndex: 3000,
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: 'rgba(4, 7, 12, 0.82)', backdropFilter: 'blur(6px)'
-    }}>
+    <div
+      data-pm-modal
+      style={{
+        position: 'fixed', inset: 0, zIndex: 10050,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: 'rgba(4, 7, 12, 0.82)', backdropFilter: 'blur(6px)'
+      }}
+      onPointerDown={(e) => e.stopPropagation()}
+    >
       <div className="pm-glass-panel" style={{
         width: 'min(560px, calc(100vw - 32px))',
         borderRadius: '14px', border: '1px solid var(--pm-border)',
@@ -34,7 +43,7 @@ const RegenOverlay = ({ state }) => {
             <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#28C840' }} />
           </div>
           <span style={{ color: 'var(--pm-text-tertiary)', fontSize: '10px', fontWeight: 'bold', letterSpacing: '1px' }}>
-            PLAYMINT COMPILER v2.0 — REBUILD
+            GAME PAUSED — UPDATING
           </span>
         </div>
 
@@ -66,6 +75,19 @@ const RegenOverlay = ({ state }) => {
             }} />
           </div>
         </div>
+
+        {onCancel && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <button
+              type="button"
+              className="pm-btn pm-btn-muted"
+              onClick={onCancel}
+              disabled={state.cancelling}
+            >
+              {state.cancelling ? 'Cancelling…' : 'Cancel — keep my game'}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

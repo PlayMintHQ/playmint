@@ -151,6 +151,20 @@ export default class GameManagerScene extends Phaser.Scene {
             frameHeight: frames.frameHeight
           });
           console.log(`[Phaser GameManagerScene] Registered preloaded SPRITESHEET: "${textureKey}" (${frames.cols}x${frames.rows} @ ${frames.frameWidth}x${frames.frameHeight})`);
+        } else if (key === 'collectible' && (img.naturalWidth || img.width) > 48) {
+          // The pickup renders ~28px from 128px art. Under the game's NEAREST
+          // filter that 4-5x minification drops whole outline rows and shimmers
+          // as the coin moves — pre-shrink it once with high-quality smoothing.
+          const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+          const k = 40 / Math.max(w, h);
+          const c = document.createElement('canvas');
+          c.width = Math.max(1, Math.round(w * k));
+          c.height = Math.max(1, Math.round(h * k));
+          const cctx = c.getContext('2d');
+          cctx.imageSmoothingEnabled = true;
+          cctx.imageSmoothingQuality = 'high';
+          cctx.drawImage(img, 0, 0, c.width, c.height);
+          this.textures.addCanvas(textureKey, c);
         } else {
           this.textures.addImage(textureKey, img);
           console.log(`[Phaser GameManagerScene] Successfully registered preloaded texture: "${textureKey}"`);
@@ -498,8 +512,11 @@ export default class GameManagerScene extends Phaser.Scene {
       // movement/fire direction — always a centered origin and a full-texture
       // hitbox, whether the art is generated or the static theme fallback.
       this.player.setOrigin(0.5, 0.5);
-      this.player.body.setSize(this.player.width, this.player.height);
-      this.player.body.setOffset(0, 0);
+      // A centred CIRCLE: Arcade bodies never rotate, so a box sized to the
+      // unrotated art stopped matching the sprite the moment it turned (and now
+      // the arena has cover to collide with). Unscaled frame px, like setSize.
+      const r = Math.max(6, Math.min(this.player.width, this.player.height) * 0.42);
+      this.player.body.setCircle(r, this.player.width / 2 - r, this.player.height / 2 - r);
     } else if (this.alignmentManager && this.useDynPlayer) {
       // Use SpriteAlignmentManager for better ground contact
       // Apply intelligent alignment for dynamic assets
@@ -660,6 +677,9 @@ export default class GameManagerScene extends Phaser.Scene {
         if (this.gameModeManager?.activeMode?.obstacleTimer) {
           this.gameModeManager.activeMode.obstacleTimer.paused = true;
         }
+        // Scene clock too: stray delayedCalls (tint resets, spawn delays) must
+        // not fire while a Quick Edit redraw holds the game.
+        this.time.paused = true;
         this.isGamePaused = true;
         // A key held while a panel/dialog opens never delivers its keyup to us
         // (App's capture guard swallows key events inside inputs and
@@ -676,6 +696,7 @@ export default class GameManagerScene extends Phaser.Scene {
             this.gameModeManager.activeMode.obstacleTimer.paused = false;
           }
         }
+        this.time.paused = false;
         this.isGamePaused = false;
       }
     };
@@ -1120,6 +1141,12 @@ export default class GameManagerScene extends Phaser.Scene {
   }
 
   update(time, delta) {
+    // App owns the pause truth (window.__PM_SHOULD_PAUSE). A scene that booted or
+    // restarted while App wanted it paused (a remount mid-edit, a restart with a
+    // panel open) adopts the pause on its first frame instead of running under it.
+    if (window.__PM_SHOULD_PAUSE && !this.isGamePaused && !this.isGameOver) {
+      this.togglePauseListener({ detail: { isPaused: true } });
+    }
     if (this.isGameOver || this.isGamePaused) return;
 
     // Update parallax backgrounds if enabled

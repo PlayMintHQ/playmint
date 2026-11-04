@@ -279,7 +279,7 @@ function GameCard({ game, onRename, onDelete, isCommunity = false }) {
               )}
               {game.remix_parent_id && (
                 <span className="pm-library__mode" style={{ color: 'var(--pm-accent-amber, #f59e0b)', borderColor: 'rgba(245, 158, 11, 0.4)' }} title="Remixed from an existing game">
-                  <IconRemix /> Remix
+                  <IconRemix /> Remixed
                 </span>
               )}
               {formatDate(game.updated_at || game.created_at) && (
@@ -341,7 +341,9 @@ function GameCard({ game, onRename, onDelete, isCommunity = false }) {
           <button type="button" className="pm-btn pm-btn-primary pm-library__play" onClick={() => playSavedGame(game)}>
             <IconPlay /> Play
           </button>
-          {isCommunity && game.allow_remix === true && (
+          {/* Community cards always show the creator's remix choice, so a
+              visitor knows BEFORE opening the page (client 2026-11-04). */}
+          {isCommunity && (game.allow_remix === true ? (
             <button
               type="button"
               className="pm-btn pm-btn-outline"
@@ -353,7 +355,18 @@ function GameCard({ game, onRename, onDelete, isCommunity = false }) {
             >
               <IconRemix /> Remix
             </button>
-          )}
+          ) : (
+            <button
+              type="button"
+              className="pm-btn pm-btn-outline"
+              disabled
+              aria-disabled="true"
+              style={{ opacity: 0.5, cursor: 'not-allowed' }}
+              title="The creator turned remixing off for this game"
+            >
+              <IconRemix /> Remix: Off
+            </button>
+          ))}
           <button
             type="button"
             className="pm-btn pm-btn-outline"
