@@ -54,7 +54,7 @@ const promptFor = (liveParams) =>
 // "original art cost" on every later restore.
 const buildSaveMeta = (assetMeta) => {
   if (!assetMeta) return null;
-  const { run: _run, cost, ...rest } = assetMeta;
+  const { run: _run, audit: _audit, cost, ...rest } = assetMeta;
   if (!cost) return rest;
   const { calls: _calls, ...totals } = cost;
   return { ...rest, cost: totals };
@@ -74,35 +74,6 @@ const warnOnce = (message, err) => {
   if (warnedOnce.has(key)) return;
   warnedOnce.add(key);
   console.warn(`[SavedGames] ${message}${err ? `: ${err.message || err}` : ''}`);
-};
-
-/**
- * Second chance at card art for a game that had no art_id to key an upload
- * under (a static-art boot) or whose first upload found nothing to paint.
- * composeThumbnail falls back to the built-in world's real backdrop art, so this
- * succeeds for essentially every game; the row id stands in for the art id.
- *
- * Runs AFTER the row exists and writes ONLY thumbnail_path, so it can never
- * fail the save and cannot clobber anything else. Returns the path it settled
- * on (the existing one when this pass adds nothing).
- */
-const backfillThumbnail = async (supabase, rowId, existingPath, compose, warn) => {
-  if (existingPath || !rowId) return existingPath;
-  try {
-    const blob = await compose();
-    if (!blob) return null;
-    const path = await server.putThumbnail(rowId, blob);
-    if (!path) {
-      warn('no card art was uploaded (no reachable image store — set BLOB_READ_WRITE_TOKEN)');
-      return null;
-    }
-    const upd = await supabase.from('games').update({ thumbnail_path: path }).eq('id', rowId);
-    if (upd.error) warn('card art uploaded but its path could not be saved', upd.error);
-    return path;
-  } catch (err) {
-    warn('card art skipped', err);
-    return null;
-  }
 };
 
 // A missing table (migration not applied yet) is a distinct state from a
@@ -176,12 +147,23 @@ export const saveGame = async ({ liveParams, preloadedImages, frameBlob = null }
       assetMeta: liveParams.assetMeta,
       themeKey: liveParams.themeKey
     }));
-    let thumbnailPath = null;
-    if (artId) {
-      const blob = await compose();
-      if (blob) thumbnailPath = await server.putThumbnail(artId, blob);
-      else warnOnce('no card art was produced from the game\'s own images');
-    }
+    // Card art is keyed by the ROW (2026-11-05), so it is uploaded once the row
+    // id is known: art ids are shared between games, and a card stored under the
+    // art id was overwritten by every other game using the same art set.
+    const uploadCard = async (rowId) => {
+      try {
+        const blob = await compose();
+        if (!blob) { warnOnce('no card art was produced from the game\'s own images'); return null; }
+        const path = await server.putThumbnail(rowId, blob);
+        if (!path) { warnOnce('no card art was uploaded (no reachable image store — set BLOB_READ_WRITE_TOKEN)'); return null; }
+        const upd = await supabase.from('games').update({ thumbnail_path: path }).eq('id', rowId);
+        if (upd.error) { warnOnce('card art uploaded but its path could not be saved', upd.error); return null; }
+        return path;
+      } catch (err) {
+        warnOnce('card art skipped', err);
+        return null;
+      }
+    };
 
     // Art ids are SHARED across users on purpose (the cache reuses art), so every
     // row lookup is scoped to the caller. Without the owner filter this could land
@@ -191,7 +173,11 @@ export const saveGame = async ({ liveParams, preloadedImages, frameBlob = null }
     if (authError || !ownerId) return fail('Sign in to save games.');
 
     let rowId = liveParams.savedGameId || null;
-    if (!rowId && artId) {
+    // A game generated in THIS session is a new game: it must never be matched to
+    // an older row by art id. Art ids are shared (two Quick Starts get the same
+    // preset art), and that lookup made the second game's auto-save overwrite the
+    // first game's row. The art-id lookup is only for re-saving a restored game.
+    if (!rowId && artId && !liveParams.createdInSession) {
       const existing = await supabase
         .from('games')
         .select('id')
@@ -219,14 +205,16 @@ export const saveGame = async ({ liveParams, preloadedImages, frameBlob = null }
       // is how a card that had a real frame went back to a colour swatch.
       const upd = await supabase
         .from('games')
-        .update(thumbnailPath ? { ...updateValues, thumbnail_path: thumbnailPath } : updateValues)
+        .update(updateValues)
         .eq('id', rowId)
-        .select('id')
+        .select('id,thumbnail_path,visibility')
         .maybeSingle();
       if (upd.error) return fail(upd.error);
       if (upd.data) {
-        thumbnailPath = await backfillThumbnail(supabase, rowId, thumbnailPath, compose, warnOnce);
-        return { ok: true, id: upd.data.id, thumbnail: thumbnailPath || undefined };
+        // A new card only when this save brings a real frame, or the row has none.
+        let thumbnail = upd.data.thumbnail_path || null;
+        if (frameBlob || !thumbnail) thumbnail = (await uploadCard(upd.data.id)) || thumbnail;
+        return { ok: true, id: upd.data.id, created: false, visibility: upd.data.visibility, thumbnail: thumbnail || undefined };
       }
       // 0 rows updated: that row is not in THIS user's library (or is gone). Fall
       // through and create the user's own copy rather than reporting a phantom save.
@@ -234,17 +222,13 @@ export const saveGame = async ({ liveParams, preloadedImages, frameBlob = null }
 
     const ins = await supabase
       .from('games')
-      .insert({ ...values, remix_parent_id: parentId, thumbnail_path: thumbnailPath })
-      .select('id')
+      .insert({ ...values, remix_parent_id: parentId })
+      .select('id,visibility')
       .maybeSingle();
     if (ins.error) return fail(ins.error);
     const newId = ins.data?.id;
-    // A static-art game has no art_id to key a card on, so the row id takes
-    // that role. The row has to exist first, hence this second write.
-    thumbnailPath = newId
-      ? await backfillThumbnail(supabase, newId, thumbnailPath, compose, warnOnce)
-      : null;
-    return { ok: true, id: newId, thumbnail: thumbnailPath || undefined };
+    const thumbnail = newId ? await uploadCard(newId) : null;
+    return { ok: true, id: newId, created: true, visibility: ins.data?.visibility || 'private', thumbnail: thumbnail || undefined };
   } catch (err) {
     return fail(err);
   }
@@ -270,14 +254,7 @@ export const attachThumbnail = async (rowId, blob) => {
     // saveGame uses artId (= liveParams.gameId) for `putThumbnail`, which builds
     // the blob path as `games/${id}/thumbnail.png`. If we pass rowId instead,
     // the frame lands at a different path and the card never finds it.
-    const { data: row } = await supabase
-      .from('games')
-      .select('art_id')
-      .eq('id', rowId)
-      .maybeSingle();
-    const uploadId = row?.art_id || rowId;
-
-    const path = await server.putThumbnail(uploadId, blob);
+    const path = await server.putThumbnail(rowId, blob);
     if (!path) {
       warnOnce('no card art was uploaded (no reachable image store — set BLOB_READ_WRITE_TOKEN)');
       return null;
@@ -287,6 +264,46 @@ export const attachThumbnail = async (rowId, blob) => {
     return path;
   } catch (err) {
     warnOnce('card art skipped', err);
+    return null;
+  }
+};
+
+/**
+ * The signed-in user's OWN row for an art id (F5 / a copied link of your own
+ * game: the URL carries no row id, so Share and Save would lose the row).
+ * Newest first; null when there is none.
+ */
+export const findMyRowByArtId = async (artId) => {
+  if (!artId) return null;
+  const supabase = await client();
+  if (!supabase) return null;
+  try {
+    const { data: authData } = await supabase.auth.getUser();
+    const ownerId = authData?.user?.id;
+    if (!ownerId) return null;
+    const { data } = await supabase
+      .from('games')
+      .select('id,owner_id,visibility,title')
+      .eq('art_id', artId)
+      .eq('owner_id', ownerId)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    return data || null;
+  } catch {
+    return null;
+  }
+};
+
+/** Current visibility of a row the caller can read, or null. */
+export const getRowVisibility = async (rowId) => {
+  if (!rowId) return null;
+  const supabase = await client();
+  if (!supabase) return null;
+  try {
+    const { data } = await supabase.from('games').select('visibility').eq('id', rowId).maybeSingle();
+    return data?.visibility || null;
+  } catch {
     return null;
   }
 };

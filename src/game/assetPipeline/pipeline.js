@@ -9,7 +9,7 @@
  * (ScreenZero's toStaticThemeConfig; App surfaces it in the regen overlay).
  */
 import { SLOT_SPECS, BASELINE_SLOTS, GENERATED_SLOTS, GEMINI_SHEET_MODEL, GEMINI_PRO_SHEET_MODEL, PROPS_GRID_SPEC, BG_CLAUSE, GAPS_CLAUSE } from './slotSpecs';
-import { postProcessAsset, mirrorImage, rotateImageQuarter, drawToCanvas, alphaFraction, borderResidueFraction, topBandOpaqueFraction, brightResidueFraction, contentBoundsOf, processSheet, finalizeSheetFrames, loadImage, keyCellWithQuality, cleanKeyedEdges, alignFrames, maskIoU, composeFilmstrip, lockPalette, sliceRawGrid, removeEnclosedPockets, chromaResidueFraction, isBoxedSprite } from './postprocess';
+import { postProcessAsset, mirrorImage, rotateImageQuarter, drawToCanvas, alphaFraction, borderResidueFraction, topBandOpaqueFraction, brightResidueFraction, contentBoundsOf, processSheet, finalizeSheetFrames, loadImage, keyCellWithQuality, cleanKeyedEdges, alignFrames, maskIoU, composeFilmstrip, lockPalette, sliceRawGrid, removeEnclosedPockets, chromaResidueFraction, isBoxedSprite, sliceSheetFrames, stripFromFrames, whiteBorderFraction } from './postprocess';
 import { reviewSprite } from './qa';
 import * as gemini from './providers/geminiImage';
 import { designAssetPrompts, buildFinalPrompt, buildPropsGridPrompt, chromaFromPrompt } from './promptDesigner';
@@ -33,6 +33,14 @@ export const createCancelToken = () => ({
 });
 
 const cancelledError = () => Object.assign(new Error('Generation cancelled'), { cancelled: true });
+
+// Revision of the art this build draws, stamped on every generated slot
+// (meta.rev) and on assetMeta.artRev. Bump it when a CHARACTER-quality fix lands:
+// the asset cache refuses to hand characters older than this to a NEW game and
+// redraws them instead (assetCache, tryReuse). 2026-11-05 lesson: every sprite
+// fix since Nov 3 reached only new art, while the client's re-tests replayed the
+// Nov 3 sprites from the cache (shooter `9136bee3` reused `7a0f5208`'s player).
+export const ART_REV = 20261105;
 
 // The $0 replay harness re-runs the sheet slicer + scorer on captured raws with
 // the CURRENT code — registration (instead of an import in sheetDebug) avoids a
@@ -240,6 +248,208 @@ export function idleCellIssue(idleCell, runCells, chroma) {
   const dists = frameHistogramDistances([...runCells, idleCell], runCells.length);
   if (dists && dists[dists.length - 1] > 0.9) return 'looks like a different character';
   return null;
+}
+
+// ---- Run-cycle smoothness (2026-11-05) -------------------------------------
+// The per-frame gates judge frames one by one; nothing judged the SHIPPED cycle as
+// an animation. A frame drawn at a different scale, or with the head at another
+// height, pops once per loop — the client's "very jerky/stuttered" run. Measured
+// on the final aligned strip (the same canvases the game slices). Calibrated on
+// the 39 stored production sheets: the client-approved "Safari City Dash" cycle
+// measures 3.1% / 3.1%; the stuttering Snowfall Chronicle / Glacier Run / Royal
+// Chess cycles measure 8-23% / 7-20%.
+export const CYCLE_LIMITS = { heightRange: 0.07, topRange: 0.06, stepRatio: 2.2 };
+// Stored sheets (restore audit): only CLEAR pops are acted on — there is no
+// re-roll there, and dropping frames for a mild size wobble costs phases.
+export const STORED_CYCLE_LIMITS = { heightRange: 0.12, topRange: 0.10, stepRatio: 2.6 };
+
+const medianOf = (arr) => {
+  const s = [...arr].sort((a, b) => a - b);
+  return s[Math.floor(s.length / 2)];
+};
+
+/**
+ * @param {HTMLCanvasElement[]} runFrames the run frames, in playback order
+ * @returns {null | {issue: string, worst: number, score: number}}
+ *   `worst` is the frame whose removal most likely fixes the cycle.
+ */
+export function runCycleIssue(runFrames, limits = CYCLE_LIMITS) {
+  if (!runFrames || runFrames.length < 3) return null; // the scorer owns tiny cycles
+  const boxes = runFrames.map((f) => contentBoundsOf(f, { alphaMin: 16 }));
+  const empty = boxes.findIndex((b) => !b);
+  if (empty >= 0) return { issue: 'has an empty run frame', worst: empty, score: 9 };
+  const fh = runFrames[0].height;
+  const hs = boxes.map((b) => b.maxY - b.minY + 1);
+  const tops = boxes.map((b) => b.minY);
+  const mh = medianOf(hs), mt = medianOf(tops);
+  const heightRange = (Math.max(...hs) - Math.min(...hs)) / mh;
+  const topRange = (Math.max(...tops) - Math.min(...tops)) / fh;
+  const dev = runFrames.map((_, i) => Math.abs(hs[i] - mh) / mh + Math.abs(tops[i] - mt) / fh);
+  const worstDev = dev.indexOf(Math.max(...dev));
+  const score = heightRange + topRange;
+  if (heightRange > limits.heightRange) {
+    return { issue: `frame sizes jump by ${Math.round(heightRange * 100)}%`, worst: worstDev, score };
+  }
+  if (topRange > limits.topRange) {
+    return { issue: `head height jumps by ${Math.round(topRange * 100)}% of the frame`, worst: worstDev, score };
+  }
+  // Motion uniformity, INCLUDING the loop point (last → first): one step that
+  // changes the silhouette far more than the others is a visible hitch.
+  const steps = runFrames.map((f, i) => 1 - maskIoU(f, runFrames[(i + 1) % runFrames.length]));
+  const ms = medianOf(steps);
+  const big = steps.indexOf(Math.max(...steps));
+  if (ms > 0.02 && steps[big] / ms > limits.stepRatio) {
+    const a = big, b = (big + 1) % runFrames.length;
+    return {
+      issue: `one step of the cycle jumps (${(steps[big] / ms).toFixed(1)}× the others)`,
+      worst: dev[a] >= dev[b] ? a : b,
+      score: score + steps[big] / ms / 10
+    };
+  }
+  return null;
+}
+
+// The run-cycle verdict of a finished sheet ({img, frames}).
+export function shippedCycleIssue(sheet) {
+  const f = sheet?.frames;
+  if (!sheet?.img || !f?.frameWidth) return null;
+  const frames = sliceSheetFrames(sheet.img, f);
+  return runCycleIssue(frames.slice(0, f.runFrameCount ?? frames.length));
+}
+
+/**
+ * Drop one run frame from a strip laid out [run..., idle?, jump?], rebuilding
+ * the frames meta (idle/jump indices shift down; a run frame that doubled as the
+ * jump pose is remapped or dropped).
+ */
+export function dropRunFrame(cells, meta, index) {
+  const runCount = meta.runFrameCount ?? cells.length;
+  if (index < 0 || index >= runCount) return { cells, meta };
+  const out = cells.filter((_, i) => i !== index);
+  const shift = (v) => (v == null ? v : (v > index ? v - 1 : v));
+  const next = { ...meta, cols: out.length, rows: 1, runFrameCount: runCount - 1 };
+  if (meta.idleFrameIndex != null) next.idleFrameIndex = shift(meta.idleFrameIndex);
+  if (meta.jumpFrameIndex != null) {
+    if (meta.jumpFrameIndex === index) delete next.jumpFrameIndex;
+    else next.jumpFrameIndex = shift(meta.jumpFrameIndex);
+  }
+  delete next.usedCells;
+  return { cells: out, meta: next };
+}
+
+/**
+ * Restore-time audit of a STORED player sheet ($0, deterministic). Stored art was
+ * made by whatever pipeline was live at the time, and every later fix reached new
+ * art only — so a saved/shared/cached game replayed Nov 3 defects verbatim (Japan
+ * Neon City: a 2-frame run and an idle frame holding two figures on a white box;
+ * Royal Chess Raid: two frames still on the green screen). This applies today's
+ * gates to what is about to be shown:
+ *   - stained (chroma), boxed, white-slab or empty RUN frames are culled while
+ *     enough frames remain,
+ *   - a bad idle frame is dropped (standing still shows frame 0),
+ *   - a cycle that still stutters loses its worst frames (at most 2).
+ * `needsRepair` says the sheet can't be made good for free (fewer than 4 run
+ * frames left, or the cycle still fails): App's owner-only background repair
+ * redraws it.
+ * @returns {Promise<{img, frames, changed: boolean, needsRepair: boolean, notes: string[]}>}
+ */
+export async function auditPlayerSheet(img, frames, { promptUsed = '' } = {}) {
+  const notes = [];
+  const result = { img, frames, changed: false, needsRepair: false, notes };
+  if (!img || !frames?.frameWidth || !frames?.frameHeight || !frames?.cols) {
+    result.needsRepair = true;
+    notes.push('no animation data');
+    return result;
+  }
+  const rows = frames.rows || 1;
+  const W = img.naturalWidth || img.width, H = img.naturalHeight || img.height;
+  if (W < frames.cols * frames.frameWidth || H < rows * frames.frameHeight) {
+    result.needsRepair = true;
+    notes.push('frame size does not match the image');
+    return result;
+  }
+  const cells = sliceSheetFrames(img, frames);
+  const runCount = Math.min(frames.runFrameCount ?? cells.length, cells.length);
+  const chroma = chromaFromPrompt(promptUsed);
+  // A stain is PER FRAME (a cell the key missed). A green or pink character is
+  // that colour in every frame — so a frame is stained only when it carries much
+  // more screen colour than the cleanest run frame. Old prompts may not name the
+  // screen colour; then both are measured.
+  const residue = (c) => (chroma
+    ? chromaResidueFraction(c, chroma)
+    : Math.max(chromaResidueFraction(c, 'green'), chromaResidueFraction(c, 'magenta')));
+  const runResidues = cells.slice(0, runCount).map(residue);
+  const cleanest = runResidues.length ? Math.min(...runResidues) : 0;
+  const stained = (c) => { const r = residue(c); return r > 0.08 && r > cleanest + 0.12; };
+  const frameIssue = (c) => {
+    if (!contentBoundsOf(c, { alphaMin: 16 })) return 'empty';
+    if (stained(c)) return 'backdrop colour';
+    if (isBoxedSprite(c)) return 'boxed';
+    if (whiteBorderFraction(c) > 0.25) return 'white slab';
+    return null;
+  };
+
+  // Strip layout we will rebuild: [run..., idle?, jump?] (dedicated cells only).
+  let meta = { cols: cells.length, rows: 1, frameWidth: frames.frameWidth, frameHeight: frames.frameHeight, runFrameCount: runCount };
+  const tail = [];
+  if (frames.idleFrameIndex != null && frames.idleFrameIndex >= runCount && cells[frames.idleFrameIndex]) {
+    tail.push(['idle', cells[frames.idleFrameIndex]]);
+  }
+  if (frames.jumpFrameIndex != null && frames.jumpFrameIndex >= runCount && cells[frames.jumpFrameIndex]) {
+    tail.push(['jump', cells[frames.jumpFrameIndex]]);
+  }
+  let strip = cells.slice(0, runCount);
+  const runJump = frames.jumpFrameIndex != null && frames.jumpFrameIndex < runCount ? frames.jumpFrameIndex : null;
+  const rebuildMeta = () => {
+    const m = { cols: strip.length + tail.length, rows: 1, frameWidth: frames.frameWidth, frameHeight: frames.frameHeight, runFrameCount: strip.length };
+    tail.forEach(([kind], k) => { m[kind === 'idle' ? 'idleFrameIndex' : 'jumpFrameIndex'] = strip.length + k; });
+    return m;
+  };
+  meta = { ...rebuildMeta(), ...(runJump != null ? { jumpFrameIndex: runJump } : {}) };
+  let structural = false;
+  const minKeep = 4;
+
+  // 1. Bad run frames.
+  for (let i = strip.length - 1; i >= 0; i--) {
+    const why = frameIssue(strip[i]);
+    if (!why) continue;
+    if (strip.length - 1 < minKeep) { result.needsRepair = true; notes.push(`run frame ${i + 1}: ${why} (too few frames to drop it)`); continue; }
+    ({ cells: strip, meta } = dropRunFrame(strip, { ...meta, cols: strip.length }, i));
+    structural = true;
+    notes.push(`dropped run frame ${i + 1} (${why})`);
+  }
+
+  // 2. Idle frame: today's idle gate.
+  const idleAt = tail.findIndex(([k]) => k === 'idle');
+  if (idleAt >= 0) {
+    const issue = idleCellIssue(tail[idleAt][1], strip, chroma) || (whiteBorderFraction(tail[idleAt][1]) > 0.25 ? 'stands on a white slab' : null);
+    if (issue) {
+      tail.splice(idleAt, 1);
+      structural = true;
+      notes.push(`idle frame dropped (${issue})`);
+    }
+  }
+
+  // 3. Cycle smoothness (at most two frames removed for it).
+  let cycle = runCycleIssue(strip, STORED_CYCLE_LIMITS);
+  for (let k = 0; cycle && k < 2 && strip.length - 1 >= minKeep; k++) {
+    ({ cells: strip, meta } = dropRunFrame(strip, { ...meta, cols: strip.length }, cycle.worst));
+    structural = true;
+    notes.push(`dropped run frame for smoothness (${cycle.issue})`);
+    cycle = runCycleIssue(strip, STORED_CYCLE_LIMITS);
+  }
+  if (cycle) { result.needsRepair = true; notes.push(`run cycle ${cycle.issue}`); }
+  if (strip.length < minKeep) { result.needsRepair = true; notes.push(`only ${strip.length} run frame(s)`); }
+
+  if (structural) {
+    const runJumpNow = meta.jumpFrameIndex != null && meta.jumpFrameIndex < strip.length ? meta.jumpFrameIndex : null;
+    const all = [...strip, ...tail.map(([, c]) => c)];
+    const built = await stripFromFrames(all);
+    result.img = built.img;
+    result.frames = { ...rebuildMeta(), ...(runJumpNow != null ? { jumpFrameIndex: runJumpNow } : {}) };
+    result.changed = true;
+  }
+  return result;
 }
 
 // Opaque share of the four corner squares (15% of each side). A standing figure
@@ -658,30 +868,55 @@ export async function generateAssets({
       img = await postProcessAsset(raw.dataUrl, spec, { keyOverrides: { seedTol: 60, stepTol: 20 }, chroma });
       review = (await reviewSprite(img.src, { kind: 'topdown', label: `qa:${slot}` })) || review;
     }
-    if (review && review.overhead === false) {
-      report(`[ASSETS] QA: ${slot} was not drawn from overhead — redrawing once...`);
+    // Orientation first (free), then the shape checks on the right-facing art.
+    const orient = async (image, rev) => {
+      const turns = rev ? QUARTERS_TO_RIGHT[rev.facing] : undefined;
+      return turns ? rotateImageQuarter(image, turns) : image;
+    };
+    // "Lying down" (client 2026-11-05, still seen after the overhead QA): judged by
+    // the vision verdicts only. A silhouette-ratio rule was tried and dropped the
+    // same day — a correct overhead hero with both guns held forward measured
+    // 1.67:1 and was "redrawn" for nothing.
+    const shapeProblem = (image, rev) => {
+      if (rev && rev.overhead === false) return 'was not drawn from overhead';
+      if (rev && rev.lyingDown === true) return 'looks like a figure lying on the ground';
+      return null;
+    };
+    let oriented = await orient(img, review);
+    let problem = shapeProblem(oriented, review);
+    if (problem) {
+      report(`[ASSETS] QA: ${slot} ${problem} — redrawing once...`);
       try {
-        const strictPrompt = `${prompt} IMPORTANT: seen from DIRECTLY ABOVE like a top-down shooter — only the top of the head, shoulders and arms are visible, no face, no legs or feet; the character points to the RIGHT edge of the image.`;
+        const strictPrompt = `${prompt} IMPORTANT: seen from DIRECTLY ABOVE like a classic top-down shooter — ` +
+          `a compact, roughly round silhouette: the top of the head and the broad shoulders fill the sprite, ` +
+          `arms and weapon reach forward; no face, no legs or feet, the body is NOT stretched out lengthwise ` +
+          `and never looks like a person lying on the ground; it points to the RIGHT edge of the image.`;
         const retryRaw = await generateSlotImage(slot, strictPrompt, seed + 7, report, maxAttemptsPerProvider, runState);
         const retryImg = await postProcessAsset(retryRaw.dataUrl, spec, { chroma: chromaFromPrompt(strictPrompt) });
         const retryReview = await reviewSprite(retryImg.src, { kind: 'topdown', label: `qa:${slot}` });
-        if (!retryReview || retryReview.overhead !== false) {
+        const retryOriented = await orient(retryImg, retryReview);
+        const retryProblem = shapeProblem(retryOriented, retryReview);
+        if (!retryProblem || (problem === 'was not drawn from overhead' && retryProblem !== problem)) {
           img = retryImg;
           review = retryReview || review;
+          oriented = retryOriented;
+          problem = retryProblem;
         }
       } catch (err) {
         console.warn(`[AssetPipeline] top-down redraw failed for "${slot}", keeping previous:`, err.message);
       }
     }
-    const turns = review ? QUARTERS_TO_RIGHT[review.facing] : undefined;
-    if (turns) {
-      report(`[ASSETS] QA: rotating ${slot} to face right (was facing ${review.facing})...`);
-      img = await rotateImageQuarter(img, turns);
+    if (problem) {
+      outcome.topdownIssue = problem;
+      report(`[ASSETS] ⚠ ${slot} still ${problem} after the redraw — shipped best effort.`);
+    }
+    if (review && QUARTERS_TO_RIGHT[review.facing]) {
+      report(`[ASSETS] QA: rotated ${slot} to face right (was facing ${review.facing}).`);
       outcome.rotated = review.facing;
     }
     outcome.qa = review;
     outcome.facingVerified = !!review && review.facing !== 'unclear';
-    return { img, outcome };
+    return { img: oriented, outcome };
   };
 
   // Sprite-sheet slots walk the normal Gemini ladder and fall back to their static
@@ -896,7 +1131,15 @@ export async function generateAssets({
         });
         if (pfReview && pfReview.sameCharacter === false) return null;
         const pfMirrored = !!(pfReview && pfReview.facingRight === false);
-        const finalSheet = await finalizeSheetFrames(keptCells, activeSpec, { mirror: pfMirrored, framesMeta: verdict.framesMeta });
+        let pfMeta = verdict.framesMeta;
+        let finalSheet = await finalizeSheetFrames(keptCells, activeSpec, { mirror: pfMirrored, framesMeta: pfMeta });
+        // Same run-cycle gate as the sheet rungs: drop the worst frame (≤2, ≥4 kept).
+        let pfCycle = finalSheet ? shippedCycleIssue(finalSheet) : null;
+        for (let k = 0; finalSheet && pfCycle && k < 2 && (pfMeta.runFrameCount ?? keptCells.length) - 1 >= 4; k++) {
+          ({ cells: keptCells, meta: pfMeta } = dropRunFrame(keptCells, pfMeta, pfCycle.worst));
+          finalSheet = await finalizeSheetFrames(keptCells, activeSpec, { mirror: pfMirrored, framesMeta: pfMeta });
+          pfCycle = finalSheet ? shippedCycleIssue(finalSheet) : null;
+        }
         return finalSheet && { sheet: finalSheet, review: pfReview, mirrored: pfMirrored, calls };
       };
 
@@ -1198,23 +1441,34 @@ export async function generateAssets({
         if (baseCanvas) keptCells = lockPalette(keptCells, baseCanvas);
         mirrored = !!(review && review.facingRight === false);
         sheet = await finalizeSheetFrames(keptCells, activeSpec, { mirror: mirrored, framesMeta: shipMeta });
+        // Run-cycle gate on the strip that will actually ship (2026-11-05): a
+        // frame at another scale or head height pops once per loop. Drop the worst
+        // frame (at most twice, never below 4 run frames) and re-check.
+        let cycle = sheet ? shippedCycleIssue(sheet) : null;
+        for (let k = 0; sheet && cycle && k < 2; k++) {
+          if ((shipMeta.runFrameCount ?? keptCells.length) - 1 < 4) break;
+          report(`[ASSETS] Run cycle ${cycle.issue} — dropping frame ${cycle.worst + 1}...`);
+          ({ cells: keptCells, meta: shipMeta } = dropRunFrame(keptCells, shipMeta, cycle.worst));
+          verdict = { ...verdict, dropped: (verdict.dropped || 0) + 1 };
+          sheet = await finalizeSheetFrames(keptCells, activeSpec, { mirror: mirrored, framesMeta: shipMeta });
+          cycle = sheet ? shippedCycleIssue(sheet) : null;
+        }
+        if (cycle) dbg.cycleIssue = cycle.issue;
         if (!sheet) {
           lastIssue = 'had no visible content';
           dbg.scorerIssue = lastIssue;
-        } else if (softIssue && attempt < maxSheetAttempts) {
-          // Keep the WORKING sheet as the standby candidate and spend one
-          // escalation on a better roll — never discard a usable animation.
-          softCandidate = { sheet, review, mirrored, model: raw.model || attemptSpec.gen.model, dbg };
-          lastIssue = `${softIssue} (vision QA)`;
+        } else if (softIssue || cycle) {
+          // Keep the WORKING sheet as a standby candidate (the best one by score
+          // wins) and let the next rung try for a better roll — never discard a
+          // usable animation, never ship a stutter while a cleaner roll is possible.
+          const cand = { sheet, review, mirrored, model: raw.model || attemptSpec.gen.model, dbg, score: cycle ? 1 + cycle.score : 0.3 };
+          if (!softCandidate || cand.score < softCandidate.score) softCandidate = cand;
+          lastIssue = cycle ? `run cycle ${cycle.issue}` : `${softIssue} (vision QA)`;
           dbg.scorerIssue = lastIssue;
           dbg.outcome = 'soft-rejected (kept as standby)';
           dbg.framesMeta = sheet.frames;
           sheet = null; // loop continues to the stronger rung; candidate stands by
         } else {
-          if (softIssue) {
-            report(`[ASSETS] ${softIssue} on the final attempt — shipping best effort.`);
-            dbg.outcome = 'shipped-best-effort';
-          }
           dbg.outcome = dbg.outcome || 'shipped';
           dbg.framesMeta = sheet.frames;
           if (verdict.dropped) {
@@ -1226,19 +1480,40 @@ export async function generateAssets({
       // Escalation didn't produce a better sheet — ship the standby candidate
       // rather than falling back to the static player (an animated sheet with
       // frozen arms beats a tilting statue, and it is already paid for).
+      // A standby that only failed the run-cycle gate (score ≥ 1) is a stutter:
+      // the per-frame rung gets one go at a smoother cycle before it ships.
+      const canPerFrame = () => baseSrc && gemini.isGeminiConfigured() &&
+        !runState.skipGemini && runState.imageCalls < runState.maxImageCalls;
+      if (!sheet && softCandidate && softCandidate.score >= 1 && canPerFrame()) {
+        report('[ASSETS] Every sheet roll stuttered — drawing the poses one by one for a smoother cycle...');
+        const escalated = await generatePerFrameSheet();
+        const escalatedCycle = escalated ? shippedCycleIssue(escalated.sheet) : null;
+        const escalatedScore = escalated ? (escalatedCycle ? 1 + escalatedCycle.score : 0) : Infinity;
+        if (escalated && escalatedScore < softCandidate.score) {
+          sheet = escalated.sheet;
+          review = escalated.review;
+          mirrored = escalated.mirrored;
+          provider = 'gemini';
+          attempts += escalated.calls;
+          perFrame = true;
+        } else if (escalated) {
+          attempts += escalated.calls;
+        }
+      }
       if (!sheet && softCandidate) {
         sheet = softCandidate.sheet;
         review = softCandidate.review;
         mirrored = softCandidate.mirrored;
         servedModel = softCandidate.model || servedModel;
-        softCandidate.dbg.outcome = 'shipped (standby after escalation failed)';
-        report('[ASSETS] Escalation did not improve the sheet — shipping the earlier animated version.');
+        softCandidate.dbg.outcome = 'shipped (best standby)';
+        report(softCandidate.score >= 1
+          ? `[ASSETS] No smoother roll found — shipping the best animated version (${softCandidate.dbg.cycleIssue || 'run cycle'}).`
+          : '[ASSETS] Escalation did not improve the sheet — shipping the earlier animated version.');
       }
 
       // Per-frame escalation — the last animation rung, for EVERY run since
       // 2026-08-23 (was quality mode only): Gemini alive + call budget left.
-      if (!sheet && baseSrc && gemini.isGeminiConfigured() &&
-          !runState.skipGemini && runState.imageCalls < runState.maxImageCalls) {
+      if (!sheet && canPerFrame()) {
         const escalated = await generatePerFrameSheet();
         if (escalated) {
           sheet = escalated.sheet;
@@ -1596,6 +1871,13 @@ function planPropsGrid(slots, design, namedBySlot, onProgress, gameType) {
 // LLM-tagged when the designer ran, user-named/local otherwise). Cache and search
 // metadata only — never read by gameplay code. The sheet's output lands under the
 // 'player' key, so taxonomy slot names line up with meta keys as-is.
+// Every slot this build drew carries the revision it was drawn by (see ART_REV).
+function stampRev(meta) {
+  for (const m of Object.values(meta)) {
+    if (m && !m.dropped) m.rev = ART_REV;
+  }
+}
+
 function attachEntityTags(meta, design) {
   const ents = design.taxonomy?.entities || {};
   for (const [slot, noun] of Object.entries(ents)) {
@@ -1694,10 +1976,12 @@ export async function generateGameAssets({ config, userPrompt = '', onProgress =
   // assetMeta rides on the game config so provider usage stays inspectable after
   // generation (DevTools: window.__GAME_LIVE_CONFIG.assetMeta)
   attachEntityTags(meta, design);
+  stampRev(meta);
   if (design.taxonomy?.tags?.length) {
     onProgress(`[DESIGN] Tags: ${design.taxonomy.tags.join(', ')}`, null);
   }
   const assetMeta = {
+    artRev: ART_REV,
     designSource: design.source,
     design: compactDesign(design),
     // Perspective the art was drawn for. Shooter Arena stamps 'topdown'; every
@@ -1839,6 +2123,7 @@ export async function regenerateAssetSlots({ config, instruction = '', slots, on
   );
   const cost = reportRunCost(onProgress);
   attachEntityTags(meta, design);
+  stampRev(meta);
   if (design.taxonomy?.tags?.length) {
     onProgress(`[DESIGN] Tags: ${design.taxonomy.tags.join(', ')}`, null);
   }

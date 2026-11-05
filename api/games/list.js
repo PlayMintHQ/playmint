@@ -29,6 +29,9 @@ const toCard = (id, meta) => ({
     gameType: meta.config?.gameType ?? null,
     themeKey: meta.config?.themeKey ?? null
   },
+  // Forks (an edit of another set) are never matcher candidates.
+  derivedFrom: meta.assetMeta?.derivedFrom || null,
+  artRev: meta.assetMeta?.artRev || 0,
   assetMeta: {
     view: meta.assetMeta?.view || 'side',
     tags: meta.assetMeta?.tags || [],

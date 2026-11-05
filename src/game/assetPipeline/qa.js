@@ -69,9 +69,10 @@ const TOPDOWN_SCHEMA = {
   properties: {
     overhead: { type: 'BOOLEAN', description: 'Is the character seen from DIRECTLY ABOVE (top of the head and shoulders visible, no face, no standing legs/feet)? false for a standing front/side/3-quarter view figure.' },
     facing: { type: 'STRING', enum: ['up', 'right', 'down', 'left', 'unclear'], description: 'Which edge of the image the character\'s front (head direction, weapon, nose) points toward.' },
-    backgroundClean: { type: 'BOOLEAN', description: 'Is the area around the subject fully transparent/empty?' }
+    backgroundClean: { type: 'BOOLEAN', description: 'Is the area around the subject fully transparent/empty?' },
+    lyingDown: { type: 'BOOLEAN', description: 'Does it look like a full-length figure LYING on the ground (whole body stretched out, legs visible) instead of a standing figure seen from above?' }
   },
-  required: ['overhead', 'facing', 'backgroundClean']
+  required: ['overhead', 'facing', 'backgroundClean', 'lyingDown']
 };
 
 const SHEET_SCHEMA = {
@@ -135,7 +136,9 @@ function buildPrompt(kind, grid) {
       'drawn from the front, the side or at a three-quarter angle.\n' +
       '- facing: toward which edge of the image does the character point (head direction, ' +
       'weapon, front)? "up", "right", "down", "left" or "unclear".\n' +
-      '- backgroundClean: is everything outside the subject transparent/empty?'
+      '- backgroundClean: is everything outside the subject transparent/empty?\n' +
+      '- lyingDown: does it look like a whole person LYING flat on the ground (full body stretched ' +
+      'out, legs and feet visible) rather than a standing figure seen from above?'
     );
   }
   if (kind === 'layer') {

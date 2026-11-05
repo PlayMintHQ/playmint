@@ -57,7 +57,11 @@ export default async function handler(req, res) {
           allowedContentTypes: ['image/png', 'application/json'],
           maximumSizeInBytes: 4 * 1024 * 1024,
           addRandomSuffix: false, // deterministic paths are the read-path contract
-          allowOverwrite: true, // restyles re-upload the same slot paths
+          // Art sets are IMMUTABLE (2026-11-05): an edit is a new game id
+          // (assetCache.forkGameArt) and card art gets a unique file per capture.
+          // Overwriting a shared art folder is how one user's Quick Edit replaced
+          // another game's world ("Purple Alien Dash" → "African City Dash").
+          allowOverwrite: false,
           // Short CDN/browser cache: repeat opens per device are served from the
           // local IndexedDB write-back, not HTTP cache — freshness after a
           // restyle matters more than long-lived edge caching.

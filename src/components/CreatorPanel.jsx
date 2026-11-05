@@ -4,10 +4,10 @@ import { IconShare, IconExport, IconImport, IconReset, IconHome } from './Icons'
 import { downloadCostReport } from '../game/assetPipeline/costReport';
 import { downloadMetricsReport } from '../game/metricsReport';
 import { getRecords as getTimingRecords } from '../game/metrics';
-import { encodeShareConfig } from '../game/shareLink';
 import { ensureUploaded } from '../game/assetCache';
 import { normalizeRunnerPacing } from '../game/promptUtils';
-import { shareLink, copyLink } from '../utils/shareUtils';
+import { shareLink, copyLink, gameShareUrl } from '../utils/shareUtils';
+import ConfirmDialog from './ConfirmDialog';
 import { setGameRemix } from '../game/savedGames';
 
 // Typing a game name used to write liveParams on every keystroke, re-rendering
@@ -252,58 +252,94 @@ const ConfigActions = ({ liveParams, setLiveParams, setPresetKey, onHomeClick })
   );
 };
 
-/* Extracted share button with its own state */
-const ShareGameButton = ({ liveParams }) => {
+/* Share / Copy Link (2026-11-05).
+ * A rich preview (thumbnail, title, mode, creator) exists only for a SAVED game
+ * that others may open: /g/<rowId> of a public game. Every new game is private by
+ * default, so sharing it right after generating produced the generic PlayMint
+ * card — and WhatsApp kept that card for the link even after the game was made
+ * public. So:
+ *  - a public saved game is shared at once, at a versioned URL (gameShareUrl);
+ *  - a private one first asks to make it public (the confirm click is the
+ *    gesture the share sheet needs, and publishing runs alongside it);
+ *  - a game that is still being saved waits for its row;
+ *  - a guest gets the plain #config= link (no row → no preview card). */
+const ShareGameButton = ({ liveParams, prepareShare, publishForShare }) => {
   const [status, setStatus] = useState('idle');
   const [copyStatus, setCopyStatus] = useState('idle');
+  const [dialog, setDialog] = useState(null); // { action, phase, target, error }
 
-  const shareUrlFor = () => {
-    const rowId = liveParams?.savedGameId || liveParams?.rowId;
-    if (rowId) {
-      return `${window.location.origin}/g/${rowId}`;
-    }
-    return `${window.location.origin}/#config=${encodeShareConfig(liveParams)}`;
+  const flash = (action, method) => {
+    if (action === 'copy') { setCopyStatus('copied'); setTimeout(() => setCopyStatus('idle'), 2000); }
+    else { setStatus(method === 'share' ? 'shared' : 'copied'); setTimeout(() => setStatus('idle'), 2000); }
   };
-
-  const handleShare = async () => {
-    try {
-      if (liveParams?.gameId) {
-        ensureUploaded(liveParams.gameId);
-      }
-      const res = await shareLink({
+  const deliver = async (action, url) => {
+    if (liveParams?.gameId) ensureUploaded(liveParams.gameId);
+    const res = action === 'copy'
+      ? await copyLink(url)
+      : await shareLink({
         title: liveParams?.gameName || 'PlayMint game',
         text: `Play "${liveParams?.gameName || 'this game'}" on PlayMint!`,
-        url: shareUrlFor()
+        url
       });
-      if (res.ok) {
-        setStatus(res.method === 'share' ? 'shared' : 'copied');
-        setTimeout(() => setStatus('idle'), 2000);
-      }
-    } catch (e) {
-      console.error(e);
-    }
+    if (res.ok) flash(action, res.method);
+    return res;
   };
 
-  const handleCopy = async () => {
-    try {
-      if (liveParams?.gameId) {
-        ensureUploaded(liveParams.gameId);
-      }
-      const res = await copyLink(shareUrlFor());
-      if (res.ok) {
-        setCopyStatus('copied');
-        setTimeout(() => setCopyStatus('idle'), 2000);
-      }
-    } catch (e) {
-      console.error(e);
+  const start = async (action) => {
+    const rowId = liveParams?.savedGameId || liveParams?.rowId;
+    const vis = liveParams?.visibility;
+    // Fast path keeps the click's user gesture for the native share sheet.
+    if (rowId && (vis === 'public' || vis === 'unlisted')) {
+      deliver(action, gameShareUrl(rowId, { visibility: vis, title: liveParams?.gameName, artId: liveParams?.gameId }));
+      return;
     }
+    setDialog({ action, phase: 'preparing' });
+    const target = await prepareShare();
+    if (target.kind === 'link') { setDialog({ action, phase: 'guest', target }); return; }
+    if (target.visibility === 'private') {
+      setDialog({ action, phase: target.owner ? 'private' : 'blocked', target });
+      return;
+    }
+    setDialog({ action, phase: 'ready', target });
   };
+
+  const confirm = async () => {
+    const d = dialog;
+    if (!d?.target) return;
+    if (d.phase === 'private') {
+      const url = gameShareUrl(d.target.rowId, { visibility: 'public', title: liveParams?.gameName, artId: liveParams?.gameId });
+      // Publish alongside the share sheet: the sheet needs THIS click's gesture,
+      // and the update lands long before anyone opens the chat preview.
+      const published = publishForShare(d.target.rowId);
+      const shared = deliver(d.action, url);
+      const res = await published;
+      if (!res?.ok) { setDialog({ ...d, error: res?.error || 'Could not make the game public.' }); return; }
+      await shared;
+      setDialog(null);
+      return;
+    }
+    if (d.phase === 'blocked') { setDialog(null); return; }
+    const url = d.target.kind === 'link'
+      ? d.target.url
+      : gameShareUrl(d.target.rowId, { visibility: d.target.visibility, title: liveParams?.gameName, artId: liveParams?.gameId });
+    setDialog(null);
+    deliver(d.action, url);
+  };
+
+  const label = dialog?.action === 'copy' ? 'Copy link' : 'Share';
+  const copy = {
+    preparing: { title: 'Preparing your link…', message: 'Saving the game so the link shows its preview card.' },
+    private: { title: 'Make this game public?', message: `"${liveParams?.gameName || 'This game'}" is private: anyone you send the link to could not open it, and chat apps would show a generic PlayMint card. Make it public so the link works and shows the game's own preview? It will also appear in Community Games.` },
+    blocked: { title: 'This game is private', message: 'Only its creator can open it, so it cannot be shared.' },
+    guest: { title: 'Share without a preview card', message: 'Sign in to save this game and share a link with its own preview card. You can still share the plain game link now.' },
+    ready: { title: 'Your link is ready', message: 'The link opens this game and shows its preview card.' }
+  }[dialog?.phase] || { title: '', message: '' };
 
   return (
     <div style={{ display: 'grid', gap: '8px' }}>
       <button
         className="pm-btn pm-btn-primary"
-        onClick={handleShare}
+        onClick={() => start('share')}
         title="Share Game"
         style={{ justifyContent: 'center', width: '100%', gap: '6px' }}
       >
@@ -311,12 +347,24 @@ const ShareGameButton = ({ liveParams }) => {
       </button>
       <button
         className="pm-btn pm-btn-outline"
-        onClick={handleCopy}
+        onClick={() => start('copy')}
         title="Copy the game link"
         style={{ justifyContent: 'center', width: '100%', gap: '6px' }}
       >
         {copyStatus === 'copied' ? '✓ Copied Link' : 'Copy Link'}
       </button>
+      <ConfirmDialog
+        open={!!dialog}
+        title={copy.title}
+        message={copy.message}
+        error={dialog?.error || ''}
+        danger={false}
+        busy={dialog?.phase === 'preparing'}
+        confirmLabel={dialog?.phase === 'private' ? `Make public & ${label.toLowerCase()}` : dialog?.phase === 'blocked' ? 'OK' : label}
+        cancelLabel="Cancel"
+        onCancel={() => setDialog(null)}
+        onConfirm={confirm}
+      />
     </div>
   );
 };
@@ -337,6 +385,8 @@ const CreatorPanel = ({
   canSave,
   isOwner = true,
   onRemix = null,
+  prepareShare,
+  publishForShare,
 }) => {
   const isCustom = presetKey === 'custom';
   // Read only while the drawer is open — a localStorage hit per closed-panel
@@ -582,7 +632,7 @@ const CreatorPanel = ({
         </div>
 
         {/* 3. Share Game button (primary CTA at top) */}
-        <ShareGameButton liveParams={liveParams} />
+        <ShareGameButton liveParams={liveParams} prepareShare={prepareShare} publishForShare={publishForShare} />
 
         {/* 4. Browse All Game Types — opens main selector */}
         <div>

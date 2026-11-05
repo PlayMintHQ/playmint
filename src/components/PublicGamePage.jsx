@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from 'react';
-import { getPublicGame } from '../game/savedGames';
+import React, { useEffect, useRef, useState } from 'react';
+import { getPublicGame, setGameVisibility } from '../game/savedGames';
+import ConfirmDialog from './ConfirmDialog';
 import { THEME_ART_URLS } from '../game/themes';
 import AccountButton from '../auth/AccountButton';
 import { IconPlay, IconShare, IconRemix, IconGlobe } from './Icons';
 import { navigate } from '../router';
-import { shareLink, copyLink } from '../utils/shareUtils';
+import { shareLink, copyLink, gameShareUrl } from '../utils/shareUtils';
 
 const MODE_LABELS = {
   runner: 'Runner',
@@ -21,13 +22,18 @@ const formatDate = (iso) => {
   return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 };
 
-export function PublicGamePage({ gameId, onPlay, onRemix }) {
+// `autoplay`: opened from a My Games / Community card (/g/<id>?play=1) — boot the
+// exact row as soon as it has loaded (2026-11-05: Play loads the game's own record).
+export function PublicGamePage({ gameId, onPlay, onRemix, autoplay = false }) {
   const [loading, setLoading] = useState(true);
   const [game, setGame] = useState(null);
   const [error, setError] = useState('');
   const [shareStatus, setShareStatus] = useState('idle');
   const [copyStatus, setCopyStatus] = useState('idle');
   const [thumbFailed, setThumbFailed] = useState(false);
+  const [sharePrompt, setSharePrompt] = useState(null);
+  const [shareError, setShareError] = useState('');
+  const autoplayed = useRef(false);
 
   useEffect(() => {
     let active = true;
@@ -45,6 +51,11 @@ export function PublicGamePage({ gameId, onPlay, onRemix }) {
       setLoading(false);
       if (res.ok && res.game) {
         setGame(res.game);
+        if (autoplay && !autoplayed.current) {
+          autoplayed.current = true;
+          onPlay(res.game);
+          return;
+        }
         // Set document title and meta tags dynamically for client navigation
         document.title = `${res.game.title} — Play on PlayMint`;
         const metaDesc = document.querySelector('meta[name="description"]');
@@ -63,28 +74,36 @@ export function PublicGamePage({ gameId, onPlay, onRemix }) {
     return () => {
       active = false;
     };
+    // onPlay/autoplay are stable for one page instance (the page is keyed by id).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameId]);
 
-  const handleShare = async () => {
-    const url = window.location.href;
-    const res = await shareLink({
-      title: game?.title || 'PlayMint game',
-      text: `Play "${game?.title || 'this game'}" on PlayMint!`,
-      url
-    });
-    if (res.ok) {
-      setShareStatus(res.method === 'share' ? 'shared' : 'copied');
-      setTimeout(() => setShareStatus('idle'), 2500);
-    }
+  const urlFor = (visibility) => gameShareUrl(game.id, { visibility, title: game.title, artId: game.art_id, thumb: game.thumbnail_path });
+  const deliver = async (action, url) => {
+    const res = action === 'copy'
+      ? await copyLink(url)
+      : await shareLink({ title: game?.title || 'PlayMint game', text: `Play "${game?.title || 'this game'}" on PlayMint!`, url });
+    if (!res.ok) return;
+    if (action === 'copy') { setCopyStatus('copied'); setTimeout(() => setCopyStatus('idle'), 2500); }
+    else { setShareStatus(res.method === 'share' ? 'shared' : 'copied'); setTimeout(() => setShareStatus('idle'), 2500); }
   };
-
-  const handleCopy = async () => {
-    const res = await copyLink(`${window.location.origin}/g/${game.id}`);
-    if (res.ok) {
-      setCopyStatus('copied');
-      setTimeout(() => setCopyStatus('idle'), 2500);
-    }
+  // Only the owner can see a private game's page; sharing it asks to publish.
+  const startShare = (action) => {
+    if (game?.visibility === 'private') { setShareError(''); setSharePrompt(action); return; }
+    deliver(action, urlFor(game.visibility));
   };
+  const publishAndShare = async () => {
+    const action = sharePrompt;
+    const published = setGameVisibility(game.id, true);
+    const shared = deliver(action, urlFor('public'));
+    const res = await published;
+    if (!res.ok) { setShareError(res.error || 'Could not make the game public.'); return; }
+    setGame((g) => (g ? { ...g, visibility: 'public' } : g));
+    setSharePrompt(null);
+    await shared;
+  };
+  const handleShare = () => startShare('share');
+  const handleCopy = () => startShare('copy');
 
   const themeKey = game?.config?.themeKey || 'default';
   const showImage = !!game?.thumbnail_url && !thumbFailed;
@@ -99,6 +118,16 @@ export function PublicGamePage({ gameId, onPlay, onRemix }) {
       </header>
 
       <main className="pm-route__main">
+        <ConfirmDialog
+          open={!!sharePrompt}
+          title="Make this game public?"
+          message={`"${game?.title || 'This game'}" is private: anyone you send the link to could not open it, and chat apps would show a generic PlayMint card. Make it public so the link works and shows its own preview? It will also appear in Community Games.`}
+          error={shareError}
+          danger={false}
+          confirmLabel={sharePrompt === 'copy' ? 'Make public & copy link' : 'Make public & share'}
+          onCancel={() => setSharePrompt(null)}
+          onConfirm={publishAndShare}
+        />
         {loading && (
           <div className="pm-card pm-route__card" style={{ textAlign: 'center', padding: '3rem 2rem' }}>
             <p className="pm-route__text" style={{ fontSize: '1.1rem' }}>Loading game world…</p>

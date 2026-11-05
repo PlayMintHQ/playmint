@@ -155,7 +155,12 @@ export default async function handler(req, res) {
     }
   }
 
-  const pageUrl = `${origin}/g/${encodeURIComponent(gameId)}`;
+  // Keep the share version (?v=, see shareUtils.gameShareUrl) in og:url: chat
+  // apps key their preview cache on it, and a canonical URL without it would send
+  // them back to the card they cached while the game was still private.
+  const version = String(headerValue(req.query?.v) || '').replace(/[^a-z0-9]/gi, '').slice(0, 16);
+  const pageUrl = `${origin}/g/${encodeURIComponent(gameId)}${version ? `?v=${version}` : ''}`;
+  const hasGameImage = !imageUrl.endsWith('Logo_PlayMint_(transparent).png');
 
   // Every value crosses into an HTML attribute or a text node, so it is escaped
   // exactly once here. (`—` stays literal; the document is UTF-8.)
@@ -174,6 +179,17 @@ export default async function handler(req, res) {
     .replace(/<meta\s+name=["']twitter:title["'].*?>/i, `<meta name="twitter:title" content="${safeTitle} — PlayMint" />`)
     .replace(/<meta\s+name=["']twitter:description["'].*?>/i, `<meta name="twitter:description" content="${safeDesc}" />`)
     .replace(/<meta\s+name=["']twitter:image["'].*?>/i, `<meta name="twitter:image" content="${safeImage}" />`);
+
+  // Image hints: WhatsApp/Telegram render the large card faster (and more often)
+  // when the size is declared. The card art is a 320×180 PNG frame of the game.
+  const imageHints = hasGameImage
+    ? `  <meta property="og:image:secure_url" content="${safeImage}" />\n` +
+      `  <meta property="og:image:type" content="image/png" />\n` +
+      `  <meta property="og:image:width" content="320" />\n` +
+      `  <meta property="og:image:height" content="180" />\n` +
+      `  <meta property="og:image:alt" content="${safeTitle}" />\n`
+    : '';
+  if (imageHints) customHtml = customHtml.replace('</head>', `${imageHints}  </head>`);
 
   // Inject og:url if missing
   if (!customHtml.includes('og:url')) {

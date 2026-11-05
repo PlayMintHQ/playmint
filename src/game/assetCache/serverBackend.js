@@ -103,9 +103,12 @@ export const putGame = async (entry) => {
     const slots = Object.keys(entry.images || {});
     if (!slots.length) return null;
     const opts = { access: 'public', handleUploadUrl: UPLOAD_ENDPOINT };
-    await Promise.all(slots.map((slot) =>
-      upload(`games/${entry.id}/${slot}.png`, entry.images[slot], { ...opts, contentType: 'image/png' })
-    ));
+    // Paths are write-once (the endpoint refuses overwrites). A retry of a
+    // half-finished upload re-sends identical bytes, so "already exists" IS
+    // success here.
+    const put = (path, body, contentType) => upload(path, body, { ...opts, contentType })
+      .catch((err) => { if (!/already exists/i.test(err?.message || '')) throw err; });
+    await Promise.all(slots.map((slot) => put(`games/${entry.id}/${slot}.png`, entry.images[slot], 'image/png')));
     // meta.json goes LAST: its presence is the "entry complete" marker the read
     // path and hasGame() key on, so a half-finished upload never looks whole.
     const meta = {
@@ -117,9 +120,8 @@ export const putGame = async (entry) => {
       assetMeta: entry.assetMeta || null,
       slots
     };
-    await upload(`games/${entry.id}/meta.json`,
-      new Blob([JSON.stringify(meta)], { type: 'application/json' }),
-      { ...opts, contentType: 'application/json' });
+    await put(`games/${entry.id}/meta.json`,
+      new Blob([JSON.stringify(meta)], { type: 'application/json' }), 'application/json');
     return entry.id;
   } catch (err) {
     warnOnce(err);
@@ -132,16 +134,21 @@ export const putGame = async (entry) => {
 // `games/<id>/thumbnail.png` ([a-z][a-z0-9_]{0,31}\.png), so no server change was
 // needed. It is deliberately NOT listed in meta.json's `slots`, so the game
 // restore path (getGame) never downloads it as art.
-export const putThumbnail = async (gameId, blob) => {
-  if (!gameId || !blob) return null;
+// Keyed by the saved ROW id with a unique name per capture (2026-11-05): the old
+// `games/<art_id>/thumbnail.png` was shared by every game using that art set, so
+// one game's save replaced another game's card and social-preview image, and a
+// fixed name sat behind a 5-minute CDN cache after every change.
+export const putThumbnail = async (rowId, blob) => {
+  if (!rowId || !blob) return null;
   if (!(await resolveBase())) return null; // no store reachable — the card falls back to a painted gradient
   try {
-    await upload(`games/${gameId}/thumbnail.png`, blob, {
+    const path = `games/${rowId}/thumb_${Date.now().toString(36)}.png`;
+    await upload(path, blob, {
       access: 'public',
       handleUploadUrl: UPLOAD_ENDPOINT,
       contentType: 'image/png'
     });
-    return `games/${gameId}/thumbnail.png`;
+    return path;
   } catch (err) {
     warnOnce(err);
     return null;

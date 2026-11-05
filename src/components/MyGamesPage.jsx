@@ -5,21 +5,18 @@
 // confirmation. All data access lives in src/game/savedGames/index.js; this
 // component is presentation + intent only.
 //
-// PLAY re-enters through the EXISTING share-link import path rather than a
-// second boot route: a row's `config` IS the share payload (stripForShare), so
-// Play re-encodes it into `#config=` and lets App's getInitialState() boot it.
-// config.gameId → pendingRestoreId → getGameById() → the same AI art a shared
-// link restores. That path is cross-device and cache-aware already, which is
-// exactly the contract's "Play boots the saved game with its AI art".
+// PLAY opens the game's own record: /g/<rowId>?play=1 (2026-11-05, client: "a
+// Community game should load from its exact public game ID / public game
+// record"). The public page fetches that row by id and boots it — one path for
+// My Games, Community and shared links, always the row that was clicked.
 import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../auth/authContext';
 import AccountButton from '../auth/AccountButton';
 import ConfirmDialog from './ConfirmDialog';
 import { IconPlay, IconGlobe, IconLock, IconShare, IconRemix } from './Icons';
 import { navigate } from '../router';
-import { encodeShareConfig } from '../game/shareLink';
 import { listMyGames, listPublicGames, renameGame, deleteGame, setGameVisibility, setGameRemix } from '../game/savedGames';
-import { shareLink, copyLink } from '../utils/shareUtils';
+import { shareLink, copyLink, gameShareUrl } from '../utils/shareUtils';
 import { THEME_ART_URLS } from '../game/themes';
 
 // games.mode holds the internal gameType; the UI has always called the
@@ -70,37 +67,16 @@ function RouteShell({ title, children }) {
 }
 
 /**
- * Play a saved game.
- *
- * A CROSS-DOCUMENT navigation is required, not optional: getInitialState() is a
- * useState initializer, so it only ever runs on a fresh document, and the hash
- * is the app's import channel. `location.replace` (not assign) keeps the library
- * out of the back stack — Back from a game should not return to a stale grid.
- * This is the same "reload, reuse the tested import path" decision App's popstate
- * handler makes.
+ * Play a saved game: a fresh document on the game's own record. Cross-document on
+ * purpose (no state from the library or a previous game survives), `replace` so
+ * Back from the game does not return to a stale grid.
  */
 const playSavedGame = (game) => {
-  const config = {
-    ...(game?.config || {}),
-    // art_id and config.gameId are the same id (savedGames/index.js), but trust
-    // the COLUMN: it is what the row was matched on, and it is what
-    // getGameById() will look the art up under.
-    gameId: game?.art_id || game?.config?.gameId || null,
-    gameName: game?.title || game?.config?.gameName || 'PlayMint game',
-    allowRemix: game?.allow_remix === true,
-    rowId: game?.id || null,
-    ownerId: game?.owner_id || null,
-    visibility: game?.visibility || null,
-  };
-  try {
-    const payload = encodeShareConfig(config);
-    window.location.replace('/' + window.location.search + '#config=' + payload);
-  } catch (err) {
-    console.error('[MyGames] could not open saved game:', err);
-  }
+  if (!game?.id) return;
+  window.location.replace(`/g/${encodeURIComponent(game.id)}?play=1`);
 };
 
-function GameCard({ game, onRename, onDelete, isCommunity = false }) {
+function GameCard({ game, onRename, onDelete, onVisibility, isCommunity = false }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(game.title || '');
   const [busy, setBusy] = useState(false);
@@ -160,7 +136,10 @@ function GameCard({ game, onRename, onDelete, isCommunity = false }) {
   const [toggling, setToggling] = useState(false);
   const [shareStatus, setShareStatus] = useState('idle');
   const [copyStatus, setCopyStatus] = useState('idle');
-  const gameUrl = `${window.location.origin}/g/${game.id}`;
+  // Versioned per what the preview card shows (see gameShareUrl).
+  const urlFor = (visibility) => gameShareUrl(game.id, { visibility, title: game.title, artId: game.art_id, thumb: game.thumbnail_path });
+  const [sharePrompt, setSharePrompt] = useState(null); // 'share' | 'copy' while asking to publish
+  const [shareError, setShareError] = useState('');
 
   const toggleRemix = async () => {
     setToggling(true);
@@ -186,25 +165,32 @@ function GameCard({ game, onRename, onDelete, isCommunity = false }) {
     }
   };
 
-  const handleShare = async () => {
-    const res = await shareLink({
-      title: game.title,
-      text: `Play "${game.title}" on PlayMint!`,
-      url: gameUrl
-    });
-    if (res.ok) {
-      setShareStatus(res.method === 'share' ? 'shared' : 'copied');
-      setTimeout(() => setShareStatus('idle'), 2500);
-    }
+  const deliver = async (action, url) => {
+    const res = action === 'copy'
+      ? await copyLink(url)
+      : await shareLink({ title: game.title, text: `Play "${game.title}" on PlayMint!`, url });
+    if (!res.ok) return;
+    if (action === 'copy') { setCopyStatus('copied'); setTimeout(() => setCopyStatus('idle'), 2500); }
+    else { setShareStatus(res.method === 'share' ? 'shared' : 'copied'); setTimeout(() => setShareStatus('idle'), 2500); }
   };
-
-  const handleCopy = async () => {
-    const res = await copyLink(gameUrl);
-    if (res.ok) {
-      setCopyStatus('copied');
-      setTimeout(() => setCopyStatus('idle'), 2500);
-    }
+  // A private game's link opens for nobody and previews as the generic card —
+  // ask to publish first (the confirm click is the share sheet's gesture).
+  const startShare = (action) => {
+    if (!isCommunity && game.visibility === 'private') { setShareError(''); setSharePrompt(action); return; }
+    deliver(action, urlFor(game.visibility));
   };
+  const publishAndShare = async () => {
+    const action = sharePrompt;
+    const published = setGameVisibility(game.id, true);
+    const shared = deliver(action, urlFor('public'));
+    const res = await published;
+    if (!res.ok) { setShareError(res.error || 'Could not make the game public.'); return; }
+    if (onVisibility) onVisibility(game.id, 'public');
+    setSharePrompt(null);
+    await shared;
+  };
+  const handleShare = () => startShare('share');
+  const handleCopy = () => startShare('copy');
 
   return (
     <article className="pm-library__card">
@@ -337,6 +323,16 @@ function GameCard({ game, onRename, onDelete, isCommunity = false }) {
           </>
         )}
 
+        <ConfirmDialog
+          open={!!sharePrompt}
+          title="Make this game public?"
+          message={`"${game.title}" is private: anyone you send the link to could not open it, and chat apps would show a generic PlayMint card. Make it public so the link works and shows the game's own preview? It will also appear in Community Games.`}
+          error={shareError}
+          danger={false}
+          confirmLabel={sharePrompt === 'copy' ? 'Make public & copy link' : 'Make public & share'}
+          onCancel={() => setSharePrompt(null)}
+          onConfirm={publishAndShare}
+        />
         <div className="pm-library__actions">
           <button type="button" className="pm-btn pm-btn-primary pm-library__play" onClick={() => playSavedGame(game)}>
             <IconPlay /> Play
@@ -590,6 +586,7 @@ export function MyGamesPage() {
                         key={game.id}
                         game={game}
                         onRename={handleRenamed}
+                        onVisibility={(id, visibility) => handleRenamed(id, game.title, visibility)}
                         onDelete={(g) => { setDeleteError(''); setPendingDelete(g); }}
                       />
                     ))}

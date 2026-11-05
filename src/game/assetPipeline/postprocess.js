@@ -1109,6 +1109,62 @@ export function assembleSheet(frames, { cols, rows }) {
   return { canvas, frameWidth, frameHeight };
 }
 
+/**
+ * Cut a finished sprite sheet (an image + its frames meta) back into one canvas per
+ * frame, in frame-index order. Used by the run-cycle gate on the strip that will
+ * actually ship, and by the restore-time audit of stored sheets.
+ */
+export function sliceSheetFrames(img, { cols, rows = 1, frameWidth, frameHeight }) {
+  const out = [];
+  if (!img || !frameWidth || !frameHeight || !cols) return out;
+  for (let i = 0; i < cols * rows; i++) {
+    const c = document.createElement('canvas');
+    c.width = frameWidth;
+    c.height = frameHeight;
+    c.getContext('2d').drawImage(img,
+      (i % cols) * frameWidth, Math.floor(i / cols) * frameHeight, frameWidth, frameHeight,
+      0, 0, frameWidth, frameHeight);
+    out.push(c);
+  }
+  return out;
+}
+
+/** One frame of a sheet as its own image (the reference for a sheet repair). */
+export async function frameImageFromSheet(img, frames, index = 0) {
+  const cells = sliceSheetFrames(img, frames);
+  const cell = cells[index] || cells[0];
+  if (!cell) return null;
+  return loadImage(cell.toDataURL('image/png'), { crossOrigin: null });
+}
+
+/** 1×N strip image from equally sized frame canvases (inverse of sliceSheetFrames). */
+export async function stripFromFrames(frames) {
+  const { canvas, frameWidth, frameHeight } = assembleSheet(frames, { cols: frames.length, rows: 1 });
+  const img = await loadImage(canvas.toDataURL('image/png'), { crossOrigin: null });
+  return { img, frameWidth, frameHeight };
+}
+
+/**
+ * Share of the outermost `ring` pixels of a frame that are OPAQUE near-white. A
+ * frame standing on a white slab or card (the Nov 3 "idle on a white box" defect)
+ * fills its own border with white; a keyed sprite never touches the crop border
+ * with more than a sliver.
+ */
+export function whiteBorderFraction(canvas, { ring = 2 } = {}) {
+  const w = canvas.width, h = canvas.height;
+  const d = canvas.getContext('2d').getImageData(0, 0, w, h).data;
+  let n = 0, hit = 0;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (x >= ring && y >= ring && x < w - ring && y < h - ring) continue;
+      n++;
+      const i = (y * w + x) * 4;
+      if (d[i + 3] >= 128 && d[i] > 225 && d[i + 1] > 225 && d[i + 2] > 225) hit++;
+    }
+  }
+  return n ? hit / n : 0;
+}
+
 function insetCanvas(canvas, insetX, insetY = insetX) {
   const w = canvas.width - insetX * 2;
   const h = canvas.height - insetY * 2;

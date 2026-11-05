@@ -7,7 +7,8 @@ import ScreenZero from './components/ScreenZero';
 import { GAME_PRESETS } from './gameConfig';
 import { generateGameConfig } from './game/geminiService';
 import { regenerateAssetSlots, createCancelToken, isGeminiConfigured } from './game/assetPipeline';
-import { generateOrRestoreAssets, updateGameArt, makePromptKey, getGameById } from './game/assetCache';
+import { generateOrRestoreAssets, forkGameArt, makePromptKey, getGameById, THEME_KEYS } from './game/assetCache';
+import { frameImageFromSheet } from './game/assetPipeline/postprocess';
 import { encodeShareConfig, decodeShareConfig, hydrateAssetMetaLite, stripForShare } from './game/shareLink';
 import { generateTitle } from './game/promptUtils';
 import { interpretEditPrompt, resolveAssetTargets } from './game/gameEditor';
@@ -21,7 +22,7 @@ import { useAuth } from './auth/authContext';
 import { useRoute, navigate } from './router';
 import { MyGamesPage, RouteStubPage } from './components/MyGamesPage';
 import { PublicGamePage } from './components/PublicGamePage';
-import { saveGame, attachThumbnail } from './game/savedGames';
+import { saveGame, attachThumbnail, findMyRowByArtId, getRowVisibility, setGameVisibility } from './game/savedGames';
 import { captureGameFrameWhenReady } from './game/frameCapture';
 import { mergeRedrawnArt, mergeDesign } from './game/editMerge';
 
@@ -199,6 +200,21 @@ function App() {
   // running: /my-games and the reserved /g/:id replace ScreenZero. The sign-in
   // dialog pauses the game exactly like the Creator Panel does.
   const route = useRoute();
+  // /g/<rowId>?play=1 — a My Games / Community "Play" (see MyGamesPage). Read
+  // once and stripped from the URL: the router carries the query string along on
+  // every navigate(), so a leftover play=1 would autoplay the next page opened.
+  const [autoplayRowId] = useState(() => {
+    try {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get('play') !== '1') return null;
+      const m = url.pathname.match(/^\/g\/([A-Za-z0-9-]{6,64})\/?$/);
+      url.searchParams.delete('play');
+      window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+      return m ? m[1] : null;
+    } catch {
+      return null;
+    }
+  });
   const { dialog: authDialog, status: authStatus, user, requireAuth } = useAuth();
   const isSignInOpen = !!authDialog;
 
@@ -656,13 +672,27 @@ function App() {
     navigate('/my-games');
   };
 
-  // Play a public game directly on /g/:id
+  // Play ONE exact saved game, from its row (2026-11-05). My Games, Community and
+  // the public page all land here via /g/<rowId>?play=1, so the game that boots is
+  // always the row that was clicked, fetched fresh by id.
+  //  - The art id comes from the row's art_id column, and its art is immutable
+  //    (assetCache.forkGameArt), so it can no longer have been replaced by another
+  //    game's edit.
+  //  - The art arrives a moment later; it is applied only if THIS boot is still
+  //    the running game (a late result used to land on whatever game was running).
+  //  - Rows saved before art ids became immutable can point at art that another
+  //    game's edit overwrote ("Purple Alien Dash" → "African City Dash"). The
+  //    row's own snapshot (asset_meta) is compared with the stored art; on a
+  //    different WORLD we never show someone else's game — the row boots in its
+  //    built-in world with a notice instead.
   const handlePlayPublicGame = (publicGame) => {
     if (!publicGame) return;
     const isOwner = authStatus === 'authed' && user?.id === publicGame.owner_id;
-    const config = {
+    const artId = publicGame.art_id || null;
+    const themeKey = THEME_KEYS.includes(publicGame.config?.themeKey) ? publicGame.config.themeKey : 'ice';
+    const config = withRunId({
       ...(publicGame.config || {}),
-      gameId: publicGame.art_id || publicGame.config?.gameId || null,
+      gameId: artId,
       gameName: publicGame.title || publicGame.config?.gameName || 'PlayMint Game',
       gameType: publicGame.mode || publicGame.config?.gameType || 'runner',
       sourcePrompt: publicGame.prompt || publicGame.config?.sourcePrompt || '',
@@ -679,27 +709,50 @@ function App() {
       // row (manual Save updates it via savedGameId), and a visitor must never
       // get a copy in their own library.
       autoSaveExempt: true,
+      createdInSession: false,
       allowRemix: publicGame.allow_remix === true,
+      // Placeholder boot until this row's own art arrives — never a previous
+      // game's art routing.
+      dynamicAssetUrls: null,
+      preloadedImages: null,
       assetMeta: publicGame.asset_meta || null,
-    };
-    setLiveParams(withRunId(config));
+      remixBase: null,
+      staticNotice: null
+    });
+    const runId = config.saveRunId;
+    setLiveParams(config);
     setHasStarted(true);
     setGameKey(k => k + 1);
+    if (!artId) return;
 
-    // If art_id is available, hydrate from asset cache or Blob store
-    const artId = publicGame.art_id;
-    if (artId) {
-      getGameById(artId).then((cached) => {
-        if (!cached) return;
-        setLiveParams(prev => ({
-          ...prev,
-          dynamicAssetUrls: true,
-          preloadedImages: cached.preloadedImages,
-          assetMeta: hydrateAssetMetaLite({ assetMeta: cached.assetMeta }).assetMeta
-        }));
-        setGameKey(k => k + 1);
-      }).catch(() => {});
-    }
+    const snapshot = publicGame.asset_meta?.slots || null;
+    getGameById(artId).then((cached) => {
+      const still = liveParamsRef.current?.saveRunId === runId;
+      if (!still) return; // the player moved on — never paint this art over another game
+      if (!cached) {
+        setLiveParams(prev => (prev.saveRunId === runId
+          ? { ...prev, themeKey, staticNotice: 'This game\'s artwork could not be loaded right now — playing it in its built-in world.' }
+          : prev));
+        return;
+      }
+      const now = cached.assetMeta?.slots || {};
+      const worldChanged = !!snapshot && ['background_far', 'floor'].some((s) =>
+        snapshot[s]?.promptUsed && now[s]?.promptUsed && snapshot[s].promptUsed !== now[s].promptUsed);
+      if (worldChanged) {
+        console.warn('[Play] stored art no longer matches this saved game — not showing it.', { rowId: publicGame.id, artId });
+        setLiveParams(prev => (prev.saveRunId === runId
+          ? { ...prev, themeKey, staticNotice: 'This game\'s original artwork was replaced by another game\'s edit before Nov 5 and can\'t be shown — playing it in its built-in world.' }
+          : prev));
+        return;
+      }
+      setLiveParams(prev => (prev.saveRunId === runId ? {
+        ...prev,
+        dynamicAssetUrls: true,
+        preloadedImages: cached.preloadedImages,
+        assetMeta: hydrateAssetMetaLite({ assetMeta: cached.assetMeta }).assetMeta
+      } : prev));
+      setGameKey(k => k + 1);
+    }).catch(() => {});
   };
 
   // The viewer owns this game when it has no recorded owner (generated here, this
@@ -782,6 +835,45 @@ function App() {
     }
   }, [authStatus, user?.id, liveParams?.rowId, liveParams?.ownerId, liveParams?.savedGameId]);
 
+  // F5 or a copied link of your OWN game: the URL never carries the row id, so
+  // Save and Share used to lose the row (Share then produced a #config= link with
+  // the generic preview). Re-attach the signed-in owner's row by art id — only for
+  // a game that was imported, never for one generated in this session (art ids
+  // are shared, so an older row with the same art is a DIFFERENT game).
+  useEffect(() => {
+    if (authStatus !== 'authed' || !hasStarted) return;
+    const p = liveParamsRef.current;
+    if (!p?.gameId || p.savedGameId || p.rowId || p.createdInSession || p.isPublicGame) return;
+    const runId = p.saveRunId;
+    let stale = false;
+    findMyRowByArtId(p.gameId).then((row) => {
+      if (stale || !row) return;
+      setLiveParams(prev => (prev.saveRunId === runId && !prev.savedGameId
+        ? { ...prev, savedGameId: row.id, rowId: row.id, ownerId: row.owner_id, visibility: row.visibility }
+        : prev));
+    });
+    return () => { stale = true; };
+  }, [authStatus, hasStarted, liveParams.gameId, liveParams.saveRunId]);
+
+  // After an edit forked the art (new art id), point the owner's saved row at it,
+  // so My Games, Community and the share preview show the edited game. Runs only
+  // for rows this viewer owns (savedGameId is only ever set for the owner).
+  const updateOwnRowAfterEdit = (runId, persisted) => {
+    // The row is (re)written this session, so the frame captured after the edit
+    // may become its card (see the frame-capture effect).
+    if (liveParamsRef.current?.savedGameId) savedRunsRef.current.add(runId);
+    Promise.resolve(persisted).then(() => {
+      const p = liveParamsRef.current;
+      if (!p || p.saveRunId !== runId || !p.savedGameId) return;
+      const frame = frameRef.current?.runId === runId && frameRef.current?.gameId === p.gameId ? frameRef.current.blob : null;
+      return saveGame({ liveParams: p, preloadedImages: p.preloadedImages, frameBlob: frame }).then((res) => {
+        if (!res.ok) { console.warn('[SavedGames] could not update the saved game after the edit:', res.error); return; }
+        savedRunsRef.current.add(runId);
+        window.dispatchEvent(new CustomEvent('pm-games-changed'));
+      });
+    }).catch((err) => console.warn('[SavedGames] edit save skipped:', err?.message || err));
+  };
+
   const runSave = async () => {
     const current = liveParamsRef.current;
     setSaveState('saving');
@@ -799,7 +891,9 @@ function App() {
     const id = result.id;
     if (current?.saveRunId) savedRunsRef.current.add(current.saveRunId);
     setLiveParams(prev => (
-      id && prev.saveRunId === current?.saveRunId ? { ...prev, savedGameId: id } : prev
+      id && prev.saveRunId === current?.saveRunId
+        ? { ...prev, savedGameId: id, ...(result.visibility ? { visibility: result.visibility } : {}) }
+        : prev
     ));
     setSaveState('saved');
     // Back to the resting label on its own (the Share button's idiom), so a
@@ -807,6 +901,37 @@ function App() {
     setTimeout(() => setSaveState((s) => (s === 'saved' ? 'idle' : s)), 2000);
     window.dispatchEvent(new CustomEvent('pm-games-changed'));
     return true;
+  };
+
+  // ── Share target (2026-11-05) ─────────────────────────────────────────────
+  // A preview card needs a saved row others may open. Resolves the running
+  // game's row (waiting for an in-flight auto-save, else saving now) and its
+  // visibility; guests and unsaved static games get the plain #config= link.
+  const prepareShare = async () => {
+    const link = () => ({ kind: 'link', url: `${window.location.origin}/#config=${encodeShareConfig(liveParamsRef.current)}` });
+    if (authStatus !== 'authed') return link();
+    const runId = liveParamsRef.current?.saveRunId;
+    const ownRow = () => (liveParamsRef.current?.saveRunId === runId ? liveParamsRef.current?.savedGameId : null);
+    let rowId = ownRow() || liveParamsRef.current?.rowId || null;
+    if (!rowId && isViewerOwner) {
+      const p = liveParamsRef.current;
+      if (p?.createdInSession && !p.autoSaveExempt) {
+        for (let i = 0; i < 20 && !ownRow(); i++) await new Promise((r) => setTimeout(r, 400));
+      }
+      if (!ownRow()) await runSave();
+      rowId = ownRow();
+    }
+    if (!rowId) return link();
+    const visibility = liveParamsRef.current?.visibility || (await getRowVisibility(rowId)) || 'private';
+    return { kind: 'row', rowId, visibility, owner: !!ownRow() };
+  };
+  const publishForShare = async (rowId) => {
+    const res = await setGameVisibility(rowId, true);
+    if (res.ok) {
+      setLiveParams(prev => (prev.savedGameId === rowId || prev.rowId === rowId ? { ...prev, visibility: 'public' } : prev));
+      window.dispatchEvent(new CustomEvent('pm-games-changed'));
+    }
+    return res;
   };
 
   // A guest is sent through the sign-in dialog and the save runs itself
@@ -883,7 +1008,9 @@ function App() {
           // for two DIFFERENT static games — exactly the population without ids.
           // The per-boot token compares uniquely in every case.
           setLiveParams(prev => (
-            id && prev.saveRunId === params.saveRunId ? { ...prev, savedGameId: id } : prev
+            id && prev.saveRunId === params.saveRunId
+              ? { ...prev, savedGameId: id, ...(res.visibility ? { visibility: res.visibility } : {}) }
+              : prev
           ));
           savedRunsRef.current.add(params.saveRunId);
           setSaveState('saved');
@@ -963,13 +1090,25 @@ function App() {
       ? `${params.saveRunId}|${playerImg.src?.length || 0}|${playerImg.width}x${playerImg.height}|${playerImg.src?.slice(-48) || ''}`
       : null;
     if (!gameKeyForRepair || repairAttemptedRef.current === gameKeyForRepair) return;
-    // Only a game that HAS generated art and a static player to replace.
+    // Only a game that HAS generated art.
     if (!params.dynamicAssetUrls) return;
-    if (params.gameType === 'shooter') return;
+    // Only the OWNER's game (or an unsaved game of this viewer): a visitor must
+    // never pay to change someone else's game. Visitors still get the free audit
+    // fixes (bad idle / stained frames dropped) from the asset cache.
+    const ownsGame = !params.ownerId || (authStatus === 'authed' && user?.id === params.ownerId);
+    if (!ownsGame) return;
     const playerMeta = params.assetMeta?.slots?.player;
     if (!playerMeta) return;
-    // Has frames → the scene already built the animation. Nothing to repair.
-    if (playerMeta.frames) return;
+    const audit = params.assetMeta?.audit || {};
+    const isShooter = params.gameType === 'shooter';
+    // What needs a redraw:
+    //  - side view: a static player, or a stored sheet the free audit could not
+    //    fix (fewer than 4 run frames, a cycle that still stutters);
+    //  - shooter: characters drawn before the overhead checks (the "lying down"
+    //    Nov 3 sprites).
+    const needsSheet = !isShooter && (!playerMeta.frames || audit.needsRepair === true);
+    const needsTopdown = isShooter && audit.staleCast === true;
+    if (!needsSheet && !needsTopdown) return;
     if (!isGeminiConfigured()) return;
     try {
       if (localStorage.getItem('PM_FORCE_CACHE') === '1') return;
@@ -987,26 +1126,47 @@ function App() {
       setRepairState('running');
       const t0 = performance.now();
       try {
-        // instruction '' → local design path, no LLM call. slots ['player_sheet']
-        // is the same substitution generation makes for the player slot.
-        const res = await regenerateAssetSlots({
-          config: params,
-          instruction: '',
-          slots: ['player_sheet'],
-          cancelToken: token,
-          maxImageCalls: 4,
-          reuseStaticBase: true
-        });
+        let res;
+        if (needsTopdown) {
+          // Top-down cast drawn before the overhead checks: redraw player + enemy
+          // with today's scaffolds + top-down QA, designed from the game's world.
+          res = await regenerateAssetSlots({
+            config: params,
+            instruction: params.sourcePrompt || '',
+            slots: ['player', 'enemy'],
+            cancelToken: token,
+            maxImageCalls: 6
+          });
+        } else {
+          // A stored SHEET that failed the audit has no static base of its own:
+          // its first frame is the character reference for the new sheet.
+          let reference = params.preloadedImages?.player;
+          if (playerMeta.frames) reference = await frameImageFromSheet(reference, playerMeta.frames, 0);
+          if (token.cancelled) return;
+          // instruction '' → the game's own (or local) design, no new character.
+          res = await regenerateAssetSlots({
+            config: {
+              ...params,
+              preloadedImages: { ...(params.preloadedImages || {}), player: reference },
+              assetMeta: { ...(params.assetMeta || {}), slots: { ...(params.assetMeta?.slots || {}), player: { ...playerMeta, frames: undefined } } }
+            },
+            instruction: '',
+            slots: ['player_sheet'],
+            cancelToken: token,
+            maxImageCalls: 4,
+            reuseStaticBase: true
+          });
+        }
         if (token.cancelled) return;
         const newMeta = res?.meta || {};
         const newImages = res?.preloadedImages || {};
-        // The sheet result is stored under the `player` key. Without frames the
-        // gates rejected it again, so there is nothing to swap in and the static
-        // player (with its honest note) stays.
         ranToVerdict = true;
-        if (!newMeta.player?.frames || !newImages.player) {
+        const usable = needsTopdown
+          ? !!(newImages.player || newImages.enemy)
+          : !!(newMeta.player?.frames && newImages.player);
+        if (!usable) {
           setRepairState('failed');
-          console.warn('[PlayerRepair] the redraw did not produce an animated sheet; keeping the static player.');
+          console.warn('[PlayerRepair] the redraw did not produce usable characters; keeping the current ones.');
           return;
         }
         // Merge into the CURRENT params, not the snapshot from when the repair began:
@@ -1016,36 +1176,40 @@ function App() {
         // The player was replaced meanwhile (an edit redrew it): this sheet is of
         // the OLD character and must not be painted over the new one.
         if (latest.preloadedImages?.player !== playerImg) return;
-        const mergedImages = { ...(latest.preloadedImages || {}), player: newImages.player };
+        const replaced = needsTopdown ? ['player', 'enemy'].filter((k) => newImages[k] && !newMeta[k]?.dropped) : ['player'];
+        const mergedImages = { ...(latest.preloadedImages || {}) };
+        const mergedSlotMeta = { ...(latest.assetMeta?.slots || {}) };
+        for (const k of replaced) {
+          mergedImages[k] = newImages[k];
+          mergedSlotMeta[k] = { ...newMeta[k], source: 'generated' };
+        }
+        const { audit: _oldAudit, ...latestMeta } = latest.assetMeta || {};
         const mergedParams = {
           ...latest,
           preloadedImages: mergedImages,
           assetMeta: {
-            ...(latest.assetMeta || {}),
-            slots: {
-              ...(latest.assetMeta?.slots || {}),
-              player: { ...newMeta.player, source: 'generated' }
-            },
+            ...latestMeta,
+            slots: mergedSlotMeta,
             // The repair's spend is part of THIS game's cost, or the report
             // under-counts a game that quietly cost twice.
             cost: mergeRepairCost(latest.assetMeta?.cost, res.cost),
             run: { ...(latest.assetMeta?.run || {}), repairedPlayerAnim: true }
           }
         };
+        // New pixels → a NEW art id (art ids are immutable; the old in-place
+        // update rewrote art other games share). The owner's row follows it.
+        const fork = forkGameArt({
+          baseId: mergedParams.gameId,
+          config: mergedParams,
+          preloadedImages: mergedImages,
+          assetMeta: mergedParams.assetMeta
+        });
+        mergedParams.gameId = fork.gameId;
         setRepairState('done');
         window.__GAME_LIVE_CONFIG = mergedParams;
         setLiveParams(mergedParams);
         setGameKey(k => k + 1);
-        // Persist under the same cache entry so a later hit/share-link shows the
-        // animated player — but never for a game the viewer does not own (public
-        // plays carry autoSaveExempt): a visitor must not rewrite someone else's art.
-        if (mergedParams.gameId && (!mergedParams.autoSaveExempt || mergedParams.savedGameId)) {
-          updateGameArt(mergedParams.gameId, {
-            config: mergedParams,
-            preloadedImages: mergedImages,
-            assetMeta: mergedParams.assetMeta
-          });
-        }
+        updateOwnRowAfterEdit(mergedParams.saveRunId, fork.persisted);
         console.log(`[PlayerRepair] animated player installed in ${Math.round(performance.now() - t0)}ms`);
       } catch (err) {
         if (token.cancelled || err?.cancelled) return;
@@ -1062,7 +1226,7 @@ function App() {
     };
   // dynamicAssetUrls / hasArt: a restored game (share link, F5, My Games) boots on
   // placeholders and gets its art one remount later — the effect must re-evaluate then.
-  }, [hasStarted, liveParams.gameId, liveParams.saveRunId, liveParams.dynamicAssetUrls, hasLiveArt, liveParams.preloadedImages?.player]);
+  }, [hasStarted, liveParams.gameId, liveParams.saveRunId, liveParams.dynamicAssetUrls, hasLiveArt, liveParams.preloadedImages?.player, authStatus, user?.id]);
 
   // A new game clears the visible repair state and cancels an in-flight redraw
   // belonging to the previous one. The one-shot guard does NOT need resetting —
@@ -1094,7 +1258,7 @@ function App() {
     let cancelled = false;
     captureGameFrameWhenReady().then((blob) => {
       if (cancelled || !blob) return;
-      frameRef.current = { runId, blob };
+      frameRef.current = { runId, gameId: liveParamsRef.current?.gameId || null, blob };
       // A row saved before this point has no frame of its own.
       const params = liveParamsRef.current;
       if (params?.saveRunId === runId && params?.savedGameId && savedRunsRef.current.has(runId)) {
@@ -1104,7 +1268,9 @@ function App() {
       }
     });
     return () => { cancelled = true; };
-  }, [hasStarted, authStatus, liveParams.saveRunId]);
+    // gameId too: an edit forks the art (new id) and the card must show the
+    // edited game, not the frame captured before the edit.
+  }, [hasStarted, authStatus, liveParams.saveRunId, liveParams.gameId]);
 
   const handlePromptGenerate = async (promptText) => {
     console.log('[App.jsx] handlePromptGenerate triggered with prompt:', promptText);
@@ -1200,20 +1366,23 @@ function App() {
               }
             }
           };
+          // The edited art is a NEW art id pointing back at the old one. Art ids
+          // are shared between games (Quick Start, exact hits, matcher reuse), so
+          // re-uploading under the old id changed OTHER games — "Purple Alien Dash"
+          // opened somebody's "African city" edit. The owner's row follows the
+          // new id; nobody else's game can change.
+          const fork = forkGameArt({
+            baseId: base.gameId,
+            config: mergedParams,
+            preloadedImages: mergedImages,
+            assetMeta: mergedParams.assetMeta,
+            instruction: raw
+          });
+          mergedParams.gameId = fork.gameId;
           setGameKey(k => k + 1);
           setPresetKey('custom');
           setLiveParams(mergedParams);
-          // Persist the restyled art under the game's existing cache entry so a
-          // later cache hit / share-link restore shows the restyled art — only for
-          // a game this viewer owns (a visitor must not rewrite someone else's art).
-          // Fire-and-forget: a cache failure must never affect the running game.
-          if (!base.autoSaveExempt || base.savedGameId) {
-            updateGameArt(base.gameId, {
-              config: mergedParams,
-              preloadedImages: mergedImages,
-              assetMeta: mergedParams.assetMeta
-            });
-          }
+          updateOwnRowAfterEdit(mergedParams.saveRunId, fork.persisted);
           const summary = keptOld.length
             ? `${edit.summary} — kept the previous ${keptOld.join(', ')} (new version failed quality checks)`
             : edit.summary;
@@ -1412,6 +1581,8 @@ function App() {
               canSave={authStatus !== 'disabled' && isViewerOwner}
               isOwner={isViewerOwner}
               onRemix={canRemix ? () => handleRemix(liveParams) : null}
+              prepareShare={prepareShare}
+              publishForShare={publishForShare}
             />
 
             {/* Premium Virtual Mobile Controls Overlay */}
@@ -1492,7 +1663,9 @@ function App() {
       {!hasStarted && route.name === 'my-games' && <MyGamesPage />}
       {!hasStarted && route.name === 'game' && (
         <PublicGamePage
+          key={route.params.id}
           gameId={route.params.id}
+          autoplay={autoplayRowId === route.params.id}
           onPlay={handlePlayPublicGame}
           onRemix={handleRemix}
         />

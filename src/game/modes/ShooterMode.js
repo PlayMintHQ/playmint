@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import BaseMode from './BaseMode';
 import Projectile from '../objects/Projectile';
+import { buildNavGrid, computeFlowField, cellOf, steerPoint } from './arenaNav';
 
 // AIM ASSIST is the default; the config flag (or the localStorage dev override,
 // same shape as the other PM_* switches) turns on the manual twin-stick scheme.
@@ -126,6 +127,11 @@ export default class ShooterMode extends BaseMode {
     this.collectibles = null;
     this.cover = null;
     this.coverRects = [];
+    // Flow-field navigation around cover (arenaNav.js).
+    this.navGrid = null;
+    this.navDist = null;
+    this.navCell = -1;
+    this.navAt = 0;
   }
 
   create() {
@@ -275,6 +281,28 @@ export default class ShooterMode extends BaseMode {
       this.coverRects.push(new Phaser.Geom.Rectangle(
         block.x - block.displayWidth / 2, block.y - block.displayHeight / 2, block.displayWidth, block.displayHeight));
     }
+    // Cover is static for the whole run: the walkable grid is built once. The
+    // path margin must be at least the enemy body's half size (Arcade bodies are
+    // boxes) or waypoints sit where the body cannot reach and enemies grind along
+    // walls; the sight margin stays a little smaller so the path ahead is visible.
+    // Enemies are drawn 50px tall (spawnWave), so their width follows the art.
+    const eFrame = scene.textures.exists('dyn_enemy') ? scene.textures.get('dyn_enemy').get(0) : null;
+    const halfSize = eFrame ? Math.max(25, (eFrame.width * 50 / eFrame.height) / 2) : 25;
+    this.navInflate = Math.min(34, Math.ceil(halfSize) + 3);
+    this.navPad = this.navInflate - 3;
+    this.navGrid = buildNavGrid({ width: this.worldWidth, height: this.worldHeight, rects: this.coverRects, inflate: this.navInflate, cell: 16 });
+  }
+
+  // Shared distance map toward the player, refreshed when the player changes cell
+  // (and at most ~7×/s) — every enemy reads it.
+  refreshNav(player, time) {
+    if (!this.navGrid) return;
+    const c = cellOf(this.navGrid, player.x, player.y);
+    if (c === this.navCell && this.navDist) return;
+    if (this.navDist && time - this.navAt < 140) return;
+    this.navDist = computeFlowField(this.navGrid, player.x, player.y);
+    this.navCell = c;
+    this.navAt = time;
   }
 
   // Line of sight for the aim assist: a target behind cover is not a target.
@@ -401,23 +429,52 @@ export default class ShooterMode extends BaseMode {
     }
     this.drawLockReticle(autoTarget);
 
-    // Enemy AI: chase the player, rotate to face travel direction (same
-    // rotate-at-render-time treatment as the player — locked art decision).
-    // Cover steering: an enemy pressed against cover slides along it for a
-    // moment (a fixed side per enemy) instead of grinding into it — no
-    // pathfinding is needed with sparse, convex blocks.
-    this.enemies.children.iterate((enemy) => {
-      if (!enemy || !enemy.active) return;
-      let angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, player.x, player.y);
+    // Enemy AI: chase the player around cover (flow field, arenaNav.js), facing
+    // its travel direction (rotate-at-render-time, like the player). Heading is
+    // rate-limited so turns read as turns, enemies keep a little distance from
+    // each other, and one that has not moved for a moment gets a sideways nudge.
+    this.refreshNav(player, time);
+    const enemies = this.enemies.getChildren().filter((e) => e && e.active && !e._dying);
+    for (const enemy of enemies) {
       const b = enemy.body;
-      if (this.cover && b && (!b.blocked.none || !b.touching.none) && !(enemy._slideUntil > time)) {
-        enemy._slideUntil = time + 450;
-        if (!enemy._slideSide) enemy._slideSide = Math.random() < 0.5 ? -1 : 1;
+      if (!b) continue;
+      let tx = player.x, ty = player.y;
+      if (this.navDist && this.coverRects.length) {
+        if (!enemy._wp || time >= enemy._wpUntil) {
+          enemy._wp = steerPoint(this.navGrid, this.navDist, this.coverRects, enemy.x, enemy.y, player.x, player.y, { pad: this.navPad || 25 });
+          enemy._wpUntil = time + (enemy._wp.direct ? 120 : 200);
+        }
+        if (!enemy._wp.direct) { tx = enemy._wp.x; ty = enemy._wp.y; }
       }
-      if (enemy._slideUntil > time) angle += enemy._slideSide * Math.PI * 0.45;
-      b.setVelocity(Math.cos(angle) * this.enemySpeed, Math.sin(angle) * this.enemySpeed);
-      enemy.rotation = angle;
-    });
+      let desired = Phaser.Math.Angle.Between(enemy.x, enemy.y, tx, ty);
+      // Separation: a soft push away from enemies closer than 40px.
+      let sx = 0, sy = 0;
+      for (const other of enemies) {
+        if (other === enemy) continue;
+        const dx = enemy.x - other.x, dy = enemy.y - other.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 > 0 && d2 < 1600) { const d = Math.sqrt(d2); sx += dx / d * (40 - d) / 40; sy += dy / d * (40 - d) / 40; }
+      }
+      // Stuck: barely moved over ~0.5s while chasing → sideways nudge for 300ms.
+      if (!enemy._lastPos || time - enemy._lastPos.t > 500) {
+        const moved = enemy._lastPos ? Math.hypot(enemy.x - enemy._lastPos.x, enemy.y - enemy._lastPos.y) : 99;
+        if (moved < 8 && Phaser.Math.Distance.Between(enemy.x, enemy.y, player.x, player.y) > 60) {
+          enemy._nudgeUntil = time + 300;
+          enemy._nudgeSide = enemy._nudgeSide === 1 ? -1 : 1;
+          enemy._wpUntil = 0; // re-plan right away
+        }
+        enemy._lastPos = { x: enemy.x, y: enemy.y, t: time };
+      }
+      if (enemy._nudgeUntil > time) desired += enemy._nudgeSide * Math.PI / 2;
+      if (sx || sy) {
+        const vx = Math.cos(desired) + sx * 0.8, vy = Math.sin(desired) + sy * 0.8;
+        desired = Math.atan2(vy, vx);
+      }
+      const heading = enemy._heading == null ? desired : Phaser.Math.Angle.RotateTo(enemy._heading, desired, 6 * dt);
+      enemy._heading = heading;
+      b.setVelocity(Math.cos(heading) * this.enemySpeed, Math.sin(heading) * this.enemySpeed);
+      enemy.rotation = heading;
+    }
 
     if (this.fireCooldown > 0) this.fireCooldown -= delta;
     const canFire = this.fireCooldown <= 0;

@@ -63,3 +63,23 @@ export async function copyLink(url) {
   if (!url) return { ok: false, method: 'clipboard', error: 'No URL provided' };
   return copyToClipboard(url);
 }
+
+// Social-preview URL for a saved game (2026-11-05). WhatsApp, Discord and
+// Telegram cache the preview card PER URL. A game is private when it is first
+// shared (private is the default), so the first scrape gets the generic PlayMint
+// card — and kept showing it after the game was made public. `?v=` changes
+// whenever what the card shows changes (visibility, title, art), so every share
+// after a change is a URL the scrapers have not seen. The server ignores it.
+const shortHash = (text) => {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(36);
+};
+
+export function gameShareUrl(rowId, { visibility = '', title = '', artId = '', thumb = '' } = {}) {
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://playmintai.vercel.app';
+  return `${origin}/g/${encodeURIComponent(rowId)}?v=${shortHash(`${visibility}|${title}|${artId}|${thumb}`)}`;
+}

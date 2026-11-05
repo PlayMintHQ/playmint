@@ -11,7 +11,7 @@
 // because the pipeline (which throws without a key) is never reached on a hit.
 // Every cache failure degrades to a miss; nothing here may break generation.
 
-import { generateGameAssets, regenerateAssetSlots, isGeminiConfigured } from '../assetPipeline';
+import { generateGameAssets, regenerateAssetSlots, isGeminiConfigured, ART_REV, auditPlayerSheet } from '../assetPipeline';
 import { resetUsageTally, getUsageTally } from '../assetPipeline/providers/geminiImage.js';
 import { loadImage } from '../assetPipeline/postprocess.js';
 import * as backend from './idbBackend.js';
@@ -152,7 +152,7 @@ const persistRun = async ({ id, promptKey, sourcePrompt, createdAt, config, prel
     // `run` is run-scoped truth (tier/timing of ONE boot) — never persisted, or a
     // later restore would replay a stale outcome. `cost` IS persisted: it becomes
     // the entry's originalCost on restores.
-    const { run: _runScoped, ...persistedMeta } = assetMeta || {};
+    const { run: _runScoped, audit: _audit, ...persistedMeta } = assetMeta || {};
     const entry = {
       id,
       schemaVersion: SCHEMA_VERSION,
@@ -257,6 +257,130 @@ const restoredMeta = (entry) => {
   return { ...rest, slots, ...(originalCost ? { originalCost } : {}), restoredFromCache: true };
 };
 
+// ── Stored art is re-checked on every reuse (2026-11-05) ─────────────────────
+// Every sprite fix since Nov 3 reached NEW art only; the client's re-tests then
+// replayed the stored Nov 3 sprites (exact prompt hits, Quick Start preset hits,
+// matcher reuse, saved games). Two rules close that:
+//   1. A NEW game never reuses characters drawn before ART_REV — they are
+//      redrawn on reuse (staleCharacterSlots) and the fixed set is persisted.
+//   2. Whatever stored sheet is shown goes through today's gates first, for free
+//      (auditRestoredArt): bad idle / stained / slab frames dropped, and a sheet
+//      that can't be fixed for free is flagged `needsRepair` for the owner's
+//      background repair (App.jsx).
+const slotRev = (assetMeta, slot) => Number(assetMeta?.slots?.[slot]?.rev) || 0;
+
+export function staleCharacterSlots(assetMeta, images, gameType) {
+  const topdown = gameType === 'shooter' || assetMeta?.view === 'topdown';
+  const out = [];
+  if (topdown) {
+    for (const s of ['player', 'enemy']) if (images?.[s] && slotRev(assetMeta, s) < ART_REV) out.push(s);
+    return out;
+  }
+  if (images?.player && slotRev(assetMeta, 'player') < ART_REV) out.push('player_sheet');
+  return out;
+}
+
+export async function auditRestoredArt(preloadedImages, assetMeta) {
+  const audit = { needsRepair: false, staleCast: false, notes: [] };
+  const out = { preloadedImages, assetMeta: { ...(assetMeta || {}), audit } };
+  try {
+    if (assetMeta?.view === 'topdown') {
+      audit.staleCast = ['player', 'enemy'].some((s) => preloadedImages?.[s] && slotRev(assetMeta, s) < ART_REV);
+      if (audit.staleCast) audit.notes.push('top-down characters drawn before the overhead checks');
+      return out;
+    }
+    const player = preloadedImages?.player;
+    const pMeta = assetMeta?.slots?.player;
+    if (!player || !pMeta) return out;
+    if (!pMeta.frames) {
+      audit.needsRepair = true;
+      audit.notes.push('static player');
+      return out;
+    }
+    const res = await auditPlayerSheet(player, pMeta.frames, { promptUsed: pMeta.promptUsed || '' });
+    // A PAID redraw only for sheets made before today's gates: a current-revision
+    // sheet already went through them (or is the best a full ladder produced), and
+    // flagging it would re-buy a repair on every reload.
+    audit.needsRepair = res.needsRepair && slotRev(assetMeta, 'player') < ART_REV;
+    audit.notes.push(...res.notes);
+    if (res.changed) {
+      out.preloadedImages = { ...preloadedImages, player: res.img };
+      out.assetMeta = {
+        ...out.assetMeta,
+        slots: { ...(assetMeta.slots || {}), player: { ...pMeta, frames: res.frames, audited: true } }
+      };
+    }
+    if (res.notes.length) console.info('[AssetCache] stored player sheet audit:', res.notes.join('; '));
+  } catch (err) {
+    console.warn('[AssetCache] sheet audit skipped:', err?.message || err); // never breaks a restore
+  }
+  return out;
+}
+
+// Redraw some slots of a cached set and persist the result as a NEW entry (the
+// base entry is never modified). Shared by the matcher's partial reuse and by
+// exact/preset hits whose characters predate ART_REV.
+async function redrawOverEntry({ entry, baseImages, slots, config, userPrompt, promptKey, onProgress, cancelToken, t0, matcherCost = null, label, reason = '', tier = 'reuse-partial' }) {
+  const regenSlots = [...new Set(slots.map((s) => (s === 'player' && config?.gameType !== 'shooter' ? 'player_sheet' : s)))];
+  let regen = null;
+  try {
+    regen = await regenerateAssetSlots({
+      // The entry's stored design (when it has one) keeps the redraw in its style.
+      config: { ...config, sourcePrompt: config?.sourcePrompt || entry.sourcePrompt || userPrompt || '', assetMeta: entry.assetMeta },
+      instruction: userPrompt,
+      slots: regenSlots,
+      onProgress,
+      cancelToken
+    });
+  } catch (err) {
+    if (err?.cancelled) throw err;
+    onProgress?.('[CACHE] Redraw failed — reusing the cached art as-is.', null);
+  }
+  const mergedImages = { ...baseImages };
+  const baseMeta = restoredMeta(entry); // slots marked 'cache', cost → originalCost
+  const mergedSlots = { ...baseMeta.slots };
+  const generatedSlots = [];
+  for (const [slot, m] of Object.entries(regen?.meta || {})) {
+    if (m.dropped) {
+      if (mergedImages[slot]) continue; // failed redraw — keep the base art
+      mergedSlots[slot] = { ...m, source: 'generated' };
+      continue;
+    }
+    const img = regen.preloadedImages[slot];
+    if (!img) {
+      mergedSlots[slot] = { ...m, dropped: true, reason: 'missing image after redraw (internal)', source: 'generated' };
+      continue;
+    }
+    mergedImages[slot] = img;
+    mergedSlots[slot] = { ...m, source: 'generated' };
+    generatedSlots.push(slot);
+  }
+  if (cancelToken?.cancelled) throw cancelledError();
+  const cost = mergeCosts(matcherCost, regen?.cost);
+  const assetMeta = {
+    ...baseMeta,
+    slots: mergedSlots,
+    cost,
+    run: runInfo(tier, t0, {
+      matchedGameId: entry.id,
+      matchedLabel: label,
+      reason,
+      reusedSlots: Object.keys(mergedImages).filter((s) => !generatedSlots.includes(s)),
+      generatedSlots,
+      estUsd: cost.estUsd
+    })
+  };
+  bumpStats('reusePartial', cost.estUsd, matcherCost?.estUsd || 0);
+  if (!generatedSlots.length) {
+    // Nothing new to persist — the base entry is reused as-is.
+    return { gameId: entry.id, preloadedImages: mergedImages, assetMeta };
+  }
+  const gameId = newGameId();
+  const stamped = { ...config, gameId, sourcePrompt: userPrompt || entry.sourcePrompt || '', dynamicAssetUrls: true };
+  persistRun({ id: gameId, promptKey, sourcePrompt: stamped.sourcePrompt, config: stamped, preloadedImages: mergedImages, assetMeta });
+  return { gameId, preloadedImages: mergedImages, assetMeta };
+}
+
 // Tier 2 of the ladder: no exact hit — ask the matcher whether any cached set
 // fits the new prompt (LLM with a key, deterministic theme match without), then
 // reuse it whole or redraw only the clashing slots. Returns a full result object
@@ -273,10 +397,12 @@ async function tryMatchedReuse({ config, userPrompt, promptKey, onProgress, canc
     // still excluded from matching: they are a $0 stopgap, not showcase art — a
     // matcher must never prefer one over a fresh run or a real cached set.
     const local = ((await backend.listGames()) || [])
-      .filter((e) => e.schemaVersion === SCHEMA_VERSION && !e.assetMeta?.procedural);
+      // Forks (an edit of another game's art) answer only their own id — they
+      // carry an edit, not the prompt's world.
+      .filter((e) => e.schemaVersion === SCHEMA_VERSION && !e.assetMeta?.procedural && !e.assetMeta?.derivedFrom);
     const localIds = new Set(local.map((e) => e.id));
     const remote = (await server.listGames())
-      .filter((c) => c.schemaVersion === SCHEMA_VERSION && !localIds.has(c.id));
+      .filter((c) => c.schemaVersion === SCHEMA_VERSION && !localIds.has(c.id) && !c.derivedFrom && !c.assetMeta?.derivedFrom);
     candidates = [...local, ...remote];
   } catch {
     return null;
@@ -390,18 +516,24 @@ async function tryMatchedReuse({ config, userPrompt, promptKey, onProgress, canc
     slots = [...slots, 'obstacle'];
   }
 
+  // Characters drawn before ART_REV are never handed to a NEW game (the Nov 5
+  // shooter test reused the Nov 3 front-view sprites through exactly this tier).
+  const stale = cacheOnly || !isGeminiConfigured() ? [] : staleCharacterSlots(entry.assetMeta, baseImages, config?.gameType);
+  for (const s of stale) if (!slots.includes(s) && !(s === 'player_sheet' && slots.includes('player'))) slots = [...slots, s];
+  if (stale.length) onProgress?.(`[CACHE] Stored characters predate today's sprite checks — redrawing: ${stale.join(', ')}`, null);
+
   if (!slots.length) {
     // Whole-set reuse: the NEW prompt's config drives mode/physics; only art +
-    // frames/facing meta come from the entry. gameId stays the entry's — the App
-    // restore effect spreads the URL's config over cached art, so share/F5 work
-    // without persisting a duplicate entry.
+    // frames/facing meta come from the entry. gameId stays the entry's — art ids
+    // are immutable (forkGameArt), so sharing one is safe.
     onProgress?.(`[CACHE] Matched cached game "${label}"${reason} — reusing ${Object.keys(baseImages).length} image(s), $0 art spend`, 90);
     if (cacheOnly && verdict.replaceSlots?.length) {
       onProgress?.(`[CACHE] Cache only is ON — reused as-is (skipped redrawing: ${verdict.replaceSlots.join(', ')})`, null);
     }
     const cost = mergeCosts(matcherCost);
+    const audited = await auditRestoredArt(baseImages, restoredMeta(entry));
     const assetMeta = {
-      ...restoredMeta(entry),
+      ...audited.assetMeta,
       cost,
       run: runInfo('reuse', t0, {
         matchedGameId: entry.id,
@@ -415,72 +547,26 @@ async function tryMatchedReuse({ config, userPrompt, promptKey, onProgress, canc
     bumpStats('reuse', 0, matcherCost?.estUsd || 0);
     return {
       config: { ...config, gameId: entry.id, sourcePrompt: userPrompt, dynamicAssetUrls: true },
-      preloadedImages: baseImages,
+      preloadedImages: audited.preloadedImages,
       assetMeta,
       fromCache: true
     };
   }
 
-  // Partial reuse: redraw only the clashing slots (~$0.04/slot vs ~$0.40/game).
-  // A player redraw always takes the ANIMATED sheet path (player→player_sheet;
-  // the sheet's output lands under the 'player' key with frames meta, so the
-  // merge below needs no special-casing).
+  // Partial reuse: redraw only the clashing/stale slots (~$0.04/slot vs ~$0.40/game)
+  // and persist a NEW entry under this prompt's key so the next identical prompt
+  // exact-hits.
   onProgress?.(`[CACHE] Matched cached game "${label}"${reason} — reusing base art, redrawing: ${slots.join(', ')}`, 78);
-  // A shooter's player is a single rotating top-down sprite — no run-cycle sheet.
-  const regenSlots = [...new Set(slots.map((s) => (s === 'player' && config?.gameType !== 'shooter' ? 'player_sheet' : s)))];
-  let regen = null;
-  try {
-    regen = await regenerateAssetSlots({ config, instruction: userPrompt, slots: regenSlots, onProgress, cancelToken });
-  } catch (err) {
-    if (err?.cancelled) throw err;
-    onProgress?.('[CACHE] Redraw failed — reusing the cached art as-is.', null);
-  }
-  const mergedImages = { ...baseImages };
-  const baseMeta = restoredMeta(entry); // slots marked 'cache', cost → originalCost
-  const mergedSlots = { ...baseMeta.slots };
-  const generatedSlots = [];
-  for (const [slot, m] of Object.entries(regen?.meta || {})) {
-    if (m.dropped) {
-      if (mergedImages[slot]) continue; // failed redraw — keep the base art
-      mergedSlots[slot] = { ...m, source: 'generated' };
-      continue;
-    }
-    const img = regen.preloadedImages[slot];
-    if (!img) {
-      // Reported as succeeded but produced no image — an internal invariant
-      // violation (should be unreachable: pipeline.js asserts this). Never
-      // register a texture key with no backing image, and never count it as
-      // generated — cost/telemetry must stay honest.
-      mergedSlots[slot] = { ...m, dropped: true, reason: 'missing image after redraw (internal)', source: 'generated' };
-      continue;
-    }
-    mergedImages[slot] = img;
-    mergedSlots[slot] = { ...m, source: 'generated' };
-    generatedSlots.push(slot);
-  }
-  if (cancelToken?.cancelled) throw cancelledError();
-  // This run's true spend = the matcher call + the redraw run.
-  const cost = mergeCosts(matcherCost, regen?.cost);
-  const assetMeta = {
-    ...baseMeta,
-    slots: mergedSlots,
-    cost,
-    run: runInfo('reuse-partial', t0, {
-      matchedGameId: entry.id,
-      matchedLabel: label,
-      reason: verdict.reason || '',
-      reusedSlots: Object.keys(mergedImages).filter((s) => !generatedSlots.includes(s)),
-      generatedSlots,
-      estUsd: cost.estUsd
-    })
+  const redrawn = await redrawOverEntry({
+    entry, baseImages, slots, config, userPrompt, promptKey, onProgress, cancelToken, t0,
+    matcherCost, label, reason: verdict.reason || ''
+  });
+  return {
+    config: { ...config, gameId: redrawn.gameId, sourcePrompt: userPrompt, dynamicAssetUrls: true },
+    preloadedImages: redrawn.preloadedImages,
+    assetMeta: redrawn.assetMeta,
+    fromCache: true
   };
-  bumpStats('reusePartial', cost.estUsd, matcherCost?.estUsd || 0);
-  // New pixels exist → persist a NEW entry under this prompt's key so the next
-  // identical prompt exact-hits (persistRun strips the run-scoped block).
-  const gameId = newGameId();
-  const stamped = { ...config, gameId, sourcePrompt: userPrompt, dynamicAssetUrls: true };
-  persistRun({ id: gameId, promptKey, sourcePrompt: userPrompt, config: stamped, preloadedImages: mergedImages, assetMeta });
-  return { config: stamped, preloadedImages: mergedImages, assetMeta, fromCache: true };
 }
 
 /**
@@ -563,9 +649,11 @@ const buildFallbackBoot = ({ config, onProgress, reason = null, cacheOnlyMiss = 
 // Fresh generation with the fallback: a Gemini failure (no key, exhausted
 // quota, fatal slot) never dead-ends the boot — it falls back to built-in
 // theme art. Cancellations always propagate.
-const generateWithFallback = async ({ config, userPrompt, onProgress, cancelToken, t0, extraCost = null }) => {
+// promptKey MUST be forwarded: it was dropped here (2026-09-27 → 2026-11-05), so
+// fresh runs were persisted without a key and exact prompt hits never happened.
+const generateWithFallback = async ({ config, userPrompt, promptKey = null, onProgress, cancelToken, t0, extraCost = null }) => {
   try {
-    return await generateAndCache({ config, userPrompt, onProgress, cancelToken, t0, extraCost });
+    return await generateAndCache({ config, userPrompt, promptKey, onProgress, cancelToken, t0, extraCost });
   } catch (err) {
     if (err?.cancelled) throw err;
     console.warn('[AssetCache] Fresh generation failed — using built-in theme art:', err?.message || err);
@@ -592,13 +680,37 @@ export async function generateOrRestoreAssets({ config, userPrompt = '', promptK
     timeMark('cache-lookup');
     if (entry && entry.schemaVersion === SCHEMA_VERSION) {
       try {
-        const preloadedImages = await rehydrateEntry(entry, cancelToken);
+        const rehydrated = await rehydrateEntry(entry, cancelToken);
         timeMark('rehydrate');
         backend.touch(entry.id);
+        // An exact hit (same prompt typed again, or a Quick Start — every Quick
+        // Start of a mode shares one preset entry) must not replay characters
+        // drawn before today's sprite checks: redraw just those, persist the fixed
+        // set as a NEW entry under the same key (newest access wins next time).
+        const stale = cacheOnly || !isGeminiConfigured() ? [] : staleCharacterSlots(entry.assetMeta, rehydrated, config?.gameType);
+        if (!cacheOnly && isGeminiConfigured() && config?.gameType === 'shooter' && !rehydrated.obstacle) stale.push('obstacle');
+        if (stale.length) {
+          onProgress?.(`[CACHE] Exact match found, but its characters predate today's sprite checks — redrawing: ${stale.join(', ')}`, 78);
+          const label = entry.config?.gameName || entry.sourcePrompt || entry.id.slice(0, 8);
+          const redrawn = await redrawOverEntry({
+            entry, baseImages: rehydrated, slots: stale,
+            config: { ...artOnlyConfig(entry.config), ...config, sourcePrompt: entry.sourcePrompt || userPrompt || '' },
+            userPrompt, promptKey, onProgress, cancelToken, t0, label,
+            reason: 'exact hit with characters drawn before today\'s checks'
+          });
+          return {
+            config: { ...artOnlyConfig(entry.config), gameId: redrawn.gameId, sourcePrompt: entry.sourcePrompt || '', dynamicAssetUrls: true },
+            preloadedImages: redrawn.preloadedImages,
+            assetMeta: redrawn.assetMeta,
+            fromCache: true
+          };
+        }
+        const audited = await auditRestoredArt(rehydrated, restoredMeta(entry));
+        const preloadedImages = audited.preloadedImages;
         onProgress?.('[CACHE] Exact match found — restored artwork from local cache ($0 this run)', 90);
         onProgress?.('[CACHE] Want a fresh look? Open the Creator Panel in-game and ask it to redraw everything.', null);
         const assetMeta = {
-          ...restoredMeta(entry),
+          ...audited.assetMeta,
           cost: zeroCost(),
           run: runInfo('exact', t0, {
             matchedGameId: entry.id,
@@ -683,24 +795,34 @@ export function saveDerivedGame({ config, preloadedImages, assetMeta, promptKey 
   return stamped;
 }
 
-// Re-persist a game's art under its existing id (restyle / partial regeneration).
-// Fire-and-forget from the caller's perspective; keeps promptKey/createdAt.
-export async function updateGameArt(gameId, { config, preloadedImages, assetMeta }) {
-  if (!gameId) return;
-  try {
-    const existing = await backend.getGame(gameId);
-    await persistRun({
-      id: gameId,
-      promptKey: existing?.promptKey || null,
-      sourcePrompt: existing?.sourcePrompt ?? config?.sourcePrompt ?? '',
-      createdAt: existing?.createdAt,
-      config,
-      preloadedImages,
-      assetMeta
-    });
-  } catch (err) {
-    console.warn('[AssetCache] art update skipped:', err?.message || err);
-  }
+// Art ids are IMMUTABLE (2026-11-05). Exact hits, Quick Start and whole-set
+// reuse hand several games — and users — the SAME art id, and the old
+// updateGameArt() re-uploaded an edit under that id: "Purple Alien Dash" in
+// Community now opened the "African City Dash" world somebody else had edited
+// in. Every change of pixels (Quick Edit restyle, background player repair) now
+// becomes a NEW id that points back at its base; the base is never touched, and
+// the server refuses overwrites (api/games/upload.js).
+// Forks answer only their own id: no promptKey (an exact hit on the original
+// prompt must get the original) and excluded from the matcher (derivedFrom).
+// Returns { gameId, persisted } — await `persisted` before pointing a saved row
+// at the new id.
+export function forkGameArt({ baseId = null, config, preloadedImages, assetMeta, instruction = '' }) {
+  const gameId = newGameId();
+  const base = String(config?.sourcePrompt || '').trim();
+  const edit = String(instruction || '').trim();
+  const sourcePrompt = edit && !base.toLowerCase().includes(edit.toLowerCase())
+    ? (base ? `${base}, ${edit}` : edit)
+    : base;
+  const meta = { ...(assetMeta || {}), derivedFrom: baseId || null };
+  const persisted = persistRun({
+    id: gameId,
+    promptKey: null,
+    sourcePrompt,
+    config: { ...(config || {}), gameId },
+    preloadedImages,
+    assetMeta: meta
+  });
+  return { gameId, persisted };
 }
 
 // Share-link / F5 restore path: id → rehydrated game, or null (miss/corrupt).
@@ -725,11 +847,14 @@ export async function getGameById(id) {
     if (fromServer) backend.putGame(entry);
     else backend.touch(entry.id);
     bumpStats('restored');
+    // Saved / shared / Community plays show the STORED art — through today's
+    // sheet gates, for free (bad idle and stained frames dropped).
+    const audited = await auditRestoredArt(preloadedImages, restoredMeta(entry));
     return {
       config: { ...artOnlyConfig(entry.config), gameId: entry.id, dynamicAssetUrls: true },
-      preloadedImages,
+      preloadedImages: audited.preloadedImages,
       assetMeta: {
-        ...restoredMeta(entry),
+        ...audited.assetMeta,
         cost: zeroCost(),
         run: runInfo('restored', t0, {
           matchedGameId: entry.id,
