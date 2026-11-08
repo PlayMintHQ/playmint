@@ -85,7 +85,7 @@ export const QUICK_START_WORLDS = {
       prompt: 'a volcanic fortress courtyard with pools of molten lava and fire imp enemies',
       titles: ['Molten', 'Inferno', 'Ashen', 'Cinder'] },
     { id: 'sky-ruins', label: 'Sky Ruins', theme: 'space',
-      prompt: 'ancient ruins on a floating sky island above the clouds with harpy enemies',
+      prompt: 'ancient marble temple ruins on a floating sky island with harpy enemies',
       titles: ['Skyfall', 'Cloudbreak', 'Zenith', 'Windswept'] },
     { id: 'toxic-factory', label: 'Toxic Factory', theme: 'city',
       prompt: 'an abandoned toxic factory floor with acid pools and mutant enemies',

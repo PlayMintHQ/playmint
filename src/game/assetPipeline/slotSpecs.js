@@ -147,7 +147,10 @@ export const SLOT_SPECS = {
       // laid flat under the player.
       ? `Paint the ground of a top-down video game arena seen from directly above: ${subject}. ` +
         `The whole frame is ground surface in bird's-eye view — scattered terrain details, ` +
-        `markings and props lie flat on it. No horizon, no sky, no characters, no text, no logo. ${style}`
+        `markings and props lie flat on it. Every part of the frame is solid walkable ground, edge to ` +
+        `edge — no ledges, cliffs, drop-offs, open sky, clouds, chasms or open water around or across ` +
+        `it (the game draws the arena's edges and hazards itself). No horizon, no characters, no ` +
+        `text, no logo. ${style}`
       : `Paint a wide side-scrolling video game background: ${subject}. Distant landscape ` +
         `scenery fills the entire frame — no characters, no text, no logo. ${style}`,
     fallbackSubject: (d) => d?.backgrounds
