@@ -983,6 +983,14 @@ body.pm-capture .pm-auth-toast { display: none !important; }
   background: rgba(10, 14, 22, 0.72); border: 1px solid var(--pm-border);
   color: #fff;
 }
+/* The stored art for this game is gone (Play boots its built-in world). */
+.pm-library__artMissing {
+  position: absolute; left: 8px; top: 8px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.3px;
+  padding: 3px 8px; border-radius: 999px;
+  background: rgba(120, 30, 30, 0.85); border: 1px solid rgba(255, 140, 140, 0.45);
+  color: #ffd6d6;
+}
 .pm-library__body { display: flex; flex-direction: column; gap: 8px; padding: 12px; flex: 1; }
 .pm-library__title {
   font-family: var(--font-heading); font-size: 16px; font-weight: 700;

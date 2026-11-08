@@ -11,15 +11,25 @@
 // because the pipeline (which throws without a key) is never reached on a hit.
 // Every cache failure degrades to a miss; nothing here may break generation.
 
-import { generateGameAssets, regenerateAssetSlots, isGeminiConfigured, ART_REV, auditPlayerSheet } from '../assetPipeline';
+import { generateGameAssets, regenerateAssetSlots, isGeminiConfigured, ART_REV, auditPlayerSheet, cleanStoredProps } from '../assetPipeline';
 import { resetUsageTally, getUsageTally } from '../assetPipeline/providers/geminiImage.js';
 import { loadImage } from '../assetPipeline/postprocess.js';
 import * as backend from './idbBackend.js';
 import * as server from './serverBackend.js';
 import { matchCachedGame, localMatch, validateSemanticMatch } from './matcher.js';
 import { mark as timeMark, annotate as timeAnnotate } from '../metrics.js';
+import { QUICK_START_WORLDS, makeQuickStartKey } from '../quickStart.js';
 
 const SCHEMA_VERSION = 2;
+// Versions a SAVED game may restore from by id (2026-11-07). The stored layout
+// (config + assetMeta + one PNG per slot) never changed: commit 9f07e7a (Oct 6)
+// bumped 1 → 2 only to flush reuse. But getGameById also rejected v1, so every
+// game saved before Oct 6 — 65 of the 83 stored sets, incl. Community's
+// "Snowfall Chronicle" — booted its built-in world ("artwork could not be
+// loaded"). A game's OWN art always restores; reuse for NEW games (exact hit,
+// matcher) stays on SCHEMA_VERSION.
+const RESTORABLE_SCHEMAS = new Set([1, 2]);
+const isRestorable = (entry) => !!entry && RESTORABLE_SCHEMAS.has(entry.schemaVersion);
 
 // Redraw economics for the matcher's partial-reuse verdicts (tryMatchedReuse).
 // Weights ≈ image calls the individual redraw path spends per slot: a player
@@ -77,6 +87,7 @@ const readCacheOnly = () => {
     return false;
   }
 };
+export const readCacheOnlyFlag = readCacheOnly;
 
 // Exact-match identity of a generatable game. The quality tier is part of the
 // key on purpose: a quality-mode or demo-mode run must never silently reuse
@@ -283,6 +294,17 @@ export function staleCharacterSlots(assetMeta, images, gameType) {
 export async function auditRestoredArt(preloadedImages, assetMeta) {
   const audit = { needsRepair: false, staleCast: false, notes: [] };
   const out = { preloadedImages, assetMeta: { ...(assetMeta || {}), audit } };
+  // Props first (every view): grid-divider debris beside an enemy / obstacle /
+  // coin is removed for free (2026-11-07 — the client's Runner obstacle).
+  try {
+    const props = await cleanStoredProps(preloadedImages);
+    if (props.notes.length) {
+      out.preloadedImages = { ...preloadedImages, ...props.images };
+      preloadedImages = out.preloadedImages;
+      audit.notes.push(...props.notes);
+      console.info('[AssetCache] stored props cleaned:', props.notes.join('; '));
+    }
+  } catch { /* never breaks a restore */ }
   try {
     if (assetMeta?.view === 'topdown') {
       audit.staleCast = ['player', 'enemy'].some((s) => preloadedImages?.[s] && slotRev(assetMeta, s) < ART_REV);
@@ -320,7 +342,7 @@ export async function auditRestoredArt(preloadedImages, assetMeta) {
 // Redraw some slots of a cached set and persist the result as a NEW entry (the
 // base entry is never modified). Shared by the matcher's partial reuse and by
 // exact/preset hits whose characters predate ART_REV.
-async function redrawOverEntry({ entry, baseImages, slots, config, userPrompt, promptKey, onProgress, cancelToken, t0, matcherCost = null, label, reason = '', tier = 'reuse-partial' }) {
+async function redrawOverEntry({ entry, baseImages, slots, config, userPrompt, promptKey, onProgress, cancelToken, t0, matcherCost = null, label, reason = '', tier = 'reuse-partial', awaitServer = false }) {
   const regenSlots = [...new Set(slots.map((s) => (s === 'player' && config?.gameType !== 'shooter' ? 'player_sheet' : s)))];
   let regen = null;
   try {
@@ -336,7 +358,10 @@ async function redrawOverEntry({ entry, baseImages, slots, config, userPrompt, p
     if (err?.cancelled) throw err;
     onProgress?.('[CACHE] Redraw failed — reusing the cached art as-is.', null);
   }
-  const mergedImages = { ...baseImages };
+  // The new entry starts from CLEAN base props (divider debris stripped), so a
+  // persisted redraw never re-uploads an old bar.
+  const cleanedProps = await cleanStoredProps(baseImages).catch(() => ({ images: {} }));
+  const mergedImages = { ...baseImages, ...cleanedProps.images };
   const baseMeta = restoredMeta(entry); // slots marked 'cache', cost → originalCost
   const mergedSlots = { ...baseMeta.slots };
   const generatedSlots = [];
@@ -357,9 +382,14 @@ async function redrawOverEntry({ entry, baseImages, slots, config, userPrompt, p
   }
   if (cancelToken?.cancelled) throw cancelledError();
   const cost = mergeCosts(matcherCost, regen?.cost);
+  // The set is current once none of its characters predate ART_REV (the server
+  // card's artRev reads this).
+  const artRev = staleCharacterSlots({ ...baseMeta, slots: mergedSlots }, mergedImages, config?.gameType).length
+    ? (baseMeta.artRev || 0) : ART_REV;
   const assetMeta = {
     ...baseMeta,
     slots: mergedSlots,
+    artRev,
     cost,
     run: runInfo(tier, t0, {
       matchedGameId: entry.id,
@@ -377,7 +407,8 @@ async function redrawOverEntry({ entry, baseImages, slots, config, userPrompt, p
   }
   const gameId = newGameId();
   const stamped = { ...config, gameId, sourcePrompt: userPrompt || entry.sourcePrompt || '', dynamicAssetUrls: true };
-  persistRun({ id: gameId, promptKey, sourcePrompt: stamped.sourcePrompt, config: stamped, preloadedImages: mergedImages, assetMeta });
+  const persisted = persistRun({ id: gameId, promptKey, sourcePrompt: stamped.sourcePrompt, config: stamped, preloadedImages: mergedImages, assetMeta }, { awaitServer });
+  if (awaitServer) await persisted;
   return { gameId, preloadedImages: mergedImages, assetMeta };
 }
 
@@ -753,6 +784,170 @@ export async function generateOrRestoreAssets({ config, userPrompt = '', promptK
   return generateWithFallback({ config, userPrompt, promptKey, onProgress, cancelToken, t0, extraCost: box.matcherCost });
 }
 
+// ── Quick Start world pool (2026-11-07) ──────────────────────────────────────
+// See src/game/quickStart.js. Each pool world stores its art under its own key
+// (makeQuickStartKey); the newest entry under a key wins, locally or on the
+// shared server population. A world with no entry yet starts from its pinned
+// base set (characters drawn/redrawn once, persisted under the key) or, for the
+// self-filling top-down pool, a fresh generation.
+
+// Pool key → newest { id, createdAt } across this browser and the server cards.
+export async function listQuickStartEntries() {
+  const out = new Map();
+  const consider = (e) => {
+    if (!e?.promptKey || !String(e.promptKey).startsWith('v1|qs:') || e.schemaVersion !== SCHEMA_VERSION) return;
+    const cur = out.get(e.promptKey);
+    if (!cur || (e.createdAt || 0) > (cur.createdAt || 0)) out.set(e.promptKey, { id: e.id, createdAt: e.createdAt || 0 });
+  };
+  try { for (const e of (await backend.listGames()) || []) consider(e); } catch { /* local cache unavailable */ }
+  try { for (const c of (await server.listGames()) || []) consider(c); } catch { /* server unavailable */ }
+  return out;
+}
+
+// Local first, else the server (written back locally). Any restorable version.
+async function loadEntryImages(id, cancelToken) {
+  let entry = await backend.getGame(id);
+  let fromServer = false;
+  if (!isRestorable(entry)) {
+    entry = await server.getGame(id);
+    fromServer = !!entry;
+  }
+  if (!isRestorable(entry)) return null;
+  try {
+    const images = await rehydrateEntry(entry, cancelToken);
+    if (fromServer) backend.putGame(entry);
+    else backend.touch(entry.id);
+    return { entry, images, fromServer };
+  } catch (err) {
+    if (err?.cancelled) throw err;
+    return null;
+  }
+}
+
+/**
+ * Art for one Quick Start world. Returns the usual generation result shape
+ * ({ config, preloadedImages, assetMeta, fromCache }) or null when the world
+ * cannot be served (the caller picks another world or boots a built-in one).
+ * `config` is the Quick Start's own config (it is NOT replaced: only art routing
+ * comes back). `knownEntries` is listQuickStartEntries() when the caller already
+ * has it. `generate` allows a fresh run (top-down self-fill).
+ * `warm` (the warm-up tool) awaits the server upload.
+ */
+export async function restoreQuickStartWorld({ world, view, config, knownEntries = null, generate = false, onProgress, cancelToken, warm = false }) {
+  const t0 = performance.now();
+  const key = makeQuickStartKey(view, world.id);
+  const artType = view === 'topdown' ? 'shooter' : 'platformer'; // platformer art also serves runners (+projectile)
+  const cacheOnly = readCacheOnly();
+  const canSpend = !cacheOnly && isGeminiConfigured();
+
+  // Force fresh / demo: new art from the world prompt, never written to the pool.
+  if (canSpend && !warm && (readForceFresh() || readDemoMode())) {
+    onProgress?.(`[CACHE] Force fresh is ON — drawing a new ${world.label} world (not added to the Quick Start pool).`, null);
+    return generateWithFallback({ config, userPrompt: world.prompt, promptKey: null, onProgress, cancelToken, t0 });
+  }
+
+  const known = knownEntries || await listQuickStartEntries();
+  const ids = [known.get(key)?.id, world.baseArtId].filter(Boolean);
+  for (const id of ids) {
+    const loaded = await loadEntryImages(id, cancelToken);
+    if (!loaded) continue;
+    const { entry, images } = loaded;
+    const isBase = id === world.baseArtId && id !== known.get(key)?.id;
+    // What this set still needs before a NEW game may use it.
+    const slots = [];
+    if (canSpend) {
+      slots.push(...staleCharacterSlots(entry.assetMeta, images, artType));
+      if (view === 'side' && !images.player && !slots.includes('player_sheet')) slots.push('player_sheet');
+      if (view === 'side' && !images.projectile) slots.push('projectile');
+      if (view === 'topdown' && !images.obstacle) slots.push('obstacle');
+    }
+    const label = world.label;
+    if (slots.length) {
+      onProgress?.(`[CACHE] Quick Start world "${label}" — drawing ${slots.includes('player_sheet') || slots.includes('player') ? 'its animated player' : 'missing art'} once (${slots.join(', ')}); free for everyone after this.`, 78);
+      const redrawn = await redrawOverEntry({
+        entry, baseImages: images, slots,
+        config: { ...artOnlyConfig(entry.config), ...config, gameType: artType, sourcePrompt: world.prompt },
+        userPrompt: world.prompt, promptKey: key, onProgress, cancelToken, t0, label,
+        reason: isBase ? 'Quick Start world: first use of a pooled art set' : 'Quick Start world: characters predate today\'s checks',
+        tier: 'quickstart', awaitServer: warm
+      });
+      return {
+        config: { ...config, gameId: redrawn.gameId, sourcePrompt: world.prompt, dynamicAssetUrls: true },
+        preloadedImages: redrawn.preloadedImages,
+        assetMeta: redrawn.assetMeta,
+        fromCache: true,
+        quickStart: { worldId: world.id, upgraded: true }
+      };
+    }
+    const audited = await auditRestoredArt(images, restoredMeta(entry));
+    onProgress?.(`[CACHE] Quick Start world "${label}" — restored from the shared pool ($0 this run)`, 90);
+    bumpStats('exact');
+    return {
+      config: { ...config, gameId: entry.id, sourcePrompt: world.prompt, dynamicAssetUrls: true },
+      preloadedImages: audited.preloadedImages,
+      assetMeta: {
+        ...audited.assetMeta,
+        cost: zeroCost(),
+        run: runInfo('quickstart', t0, { matchedGameId: entry.id, matchedLabel: label, reusedSlots: Object.keys(images), generatedSlots: [], estUsd: 0 })
+      },
+      fromCache: true,
+      quickStart: { worldId: world.id, upgraded: false }
+    };
+  }
+
+  if (generate && canSpend) {
+    onProgress?.(`[CACHE] New Quick Start world "${world.label}" — generating it once; every later Quick Start reuses it for free.`, 76);
+    const gen = await generateWithFallback({ config: { ...config, gameType: artType }, userPrompt: world.prompt, promptKey: key, onProgress, cancelToken, t0 });
+    if (gen.staticBoot) return null;
+    return { ...gen, config: { ...config, gameId: gen.config.gameId, sourcePrompt: world.prompt, dynamicAssetUrls: true }, quickStart: { worldId: world.id, generated: true } };
+  }
+  return null;
+}
+
+/**
+ * Warm-up (console: window.__PM_WARM_QUICKSTART()). Upgrades every pinned
+ * side-view world once — draws the animated player (and a missing projectile)
+ * through the real pipeline and uploads the result under the world's key — so
+ * production Quick Starts are instant and $0 from the first click. Sequential,
+ * budget-capped, resumable (worlds that already have an entry are skipped).
+ */
+export async function warmQuickStartPool({ view = 'side', budgetUsd = 4 } = {}) {
+  if (!isGeminiConfigured()) { console.warn('[QS-WARM] No Gemini key — nothing to do.'); return []; }
+  if (readCacheOnly()) { console.warn('[QS-WARM] "Cache only" is ON in this browser — turn it off (ScreenZero top-right) and run again.'); return []; }
+  const known = await listQuickStartEntries();
+  const report = [];
+  let total = 0;
+  for (const world of QUICK_START_WORLDS[view] || []) {
+    if (!world.baseArtId) continue;
+    const key = makeQuickStartKey(view, world.id);
+    if (known.has(key)) { report.push({ world: world.id, status: 'already warm', id: known.get(key).id }); continue; }
+    if (total >= budgetUsd) { report.push({ world: world.id, status: 'skipped (budget)' }); continue; }
+    const t0 = performance.now();
+    console.log(`[QS-WARM] ${world.label}…`);
+    try {
+      const res = await restoreQuickStartWorld({
+        world, view, knownEntries: known, warm: true,
+        config: { gameType: view === 'topdown' ? 'shooter' : 'platformer', themeKey: world.theme, sourcePrompt: world.prompt, dynamicAssetUrls: true },
+        onProgress: (text) => { if (text) console.log(`   ${text}`); }
+      });
+      const usd = res?.assetMeta?.cost?.estUsd || 0;
+      total += usd;
+      const player = res?.assetMeta?.slots?.player;
+      report.push({
+        world: world.id, status: res ? (res.quickStart?.upgraded ? 'upgraded' : 'reused as-is') : 'FAILED',
+        id: res?.config?.gameId || null, estUsd: Math.round(usd * 1000) / 1000,
+        animated: !!player?.frames, runFrames: player?.frames?.runFrameCount ?? null,
+        secs: Math.round((performance.now() - t0) / 1000)
+      });
+    } catch (err) {
+      report.push({ world: world.id, status: `FAILED: ${err?.message || err}` });
+    }
+  }
+  console.table(report);
+  console.log(`[QS-WARM] done — ≈$${total.toFixed(2)}`);
+  return report;
+}
+
 /**
  * Fresh generation + cache persist (the ladder's tier 3, also the bulk runner's
  * engine). skipSlots skips whole slots ('player' = playerless population sets);
@@ -834,12 +1029,13 @@ export async function getGameById(id) {
   let entry = await backend.getGame(id);
   timeMark('cache-lookup');
   let fromServer = false;
-  if (!entry) {
+  // A local copy in a version we can't read must not hide the server copy.
+  if (!isRestorable(entry)) {
     entry = await server.getGame(id);
     fromServer = !!entry;
     timeMark('server-fetch');
   }
-  if (!entry || entry.schemaVersion !== SCHEMA_VERSION) return null;
+  if (!isRestorable(entry)) return null;
   try {
     const preloadedImages = await rehydrateEntry(entry);
     timeMark('rehydrate');
@@ -870,6 +1066,25 @@ export async function getGameById(id) {
   } catch {
     if (!fromServer) backend.deleteGame(id); // corrupt LOCAL entry only
     return null;
+  }
+}
+
+// Publish guard (2026-11-07): a game may only go public when its art can be
+// restored by anyone. "Spiders" was published with art that never reached the
+// server, so every visitor got the built-in world. Returns
+// { ok: false } ONLY on a definite miss that this browser cannot repair by
+// uploading its own copy; an unreachable store never blocks (ok, checked:false).
+export async function ensureArtStored(gameId) {
+  if (!gameId) return { ok: true, checked: false };
+  try {
+    const state = await server.probeGame(gameId);
+    if (state === 'present') return { ok: true, checked: true };
+    if (state === 'unknown') return { ok: true, checked: false };
+    const entry = await backend.getGame(gameId);
+    if (isRestorable(entry) && await server.putGame(entry)) return { ok: true, checked: true, uploaded: true };
+    return { ok: (await server.probeGame(gameId)) === 'present', checked: true };
+  } catch {
+    return { ok: true, checked: false };
   }
 }
 

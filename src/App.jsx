@@ -371,6 +371,10 @@ function App() {
     // Lazy import keeps the runner + prompt list out of the hot path.
     window.__PM_BULK = (list, opts) =>
       import('./game/assetCache/bulkRunner.js').then((m) => m.runBulkPopulation(list, opts));
+    // Quick Start pool warm-up (2026-11-07): draws each pinned world's animated
+    // player once and stores it under the world's key (see src/game/quickStart.js).
+    window.__PM_WARM_QUICKSTART = (opts) =>
+      import('./game/assetCache/index.js').then((m) => m.warmQuickStartPool(opts));
   }, []);
 
   // Detect touch device or narrow screen layout dynamically for mobile virtual D-pad
@@ -576,9 +580,11 @@ function App() {
 
   const handleSliderChange = (e) => {
     const { name, value } = e.target;
+    // Choice controls (selects, e.g. the shooter arena edge) keep their string.
+    const isChoice = e.target.tagName === 'SELECT';
     setLiveParams(prev => ({
       ...prev,
-      [name]: parseFloat(value) || 0
+      [name]: isChoice ? value : (parseFloat(value) || 0)
     }));
   };
 
@@ -926,7 +932,7 @@ function App() {
     return { kind: 'row', rowId, visibility, owner: !!ownRow() };
   };
   const publishForShare = async (rowId) => {
-    const res = await setGameVisibility(rowId, true);
+    const res = await setGameVisibility(rowId, true, { artId: liveParamsRef.current?.gameId || null });
     if (res.ok) {
       setLiveParams(prev => (prev.savedGameId === rowId || prev.rowId === rowId ? { ...prev, visibility: 'public' } : prev));
       window.dispatchEvent(new CustomEvent('pm-games-changed'));

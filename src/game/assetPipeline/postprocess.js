@@ -1457,6 +1457,267 @@ function pickSheetLayout(img, spec) {
   return best;
 }
 
+// ── Grid divider lines (2026-11-07) ─────────────────────────────────────────
+// The combined props image (and now and then a sheet) comes back with thin
+// painted DIVIDER LINES between cells, although the prompt forbids them.
+// detectGridCuts counts a divider as content and cuts in the empty column beside
+// it, so the line lands inside the neighbouring cell, past the small inset. The
+// flood key removes only the backdrop colour, the outline then wraps the line and
+// the crop keeps it: the client's Runner obstacle shipped with a 2px white bar
+// ~30px beside it (and a hitbox that included the bar). 6 of 308 stored props had
+// one, incl. an L-shaped corner around a coin.
+//
+// Two passes: eraseDividerLines paints divider runs with the backdrop colour
+// BEFORE the cuts are detected (so the cut lands in the real gutter and the key
+// removes it); stripEdgeBars removes whatever still reaches a finished sprite.
+
+const lumaOf = (r, g, b) => 0.299 * r + 0.587 * g + 0.114 * b;
+
+// Backdrop colour of a raw grid: the dominant border colour, preferring
+// chroma-screen pixels when the prompt asked for one (a frame line drawn along
+// the whole border would otherwise win the vote).
+function backdropColorOf(data, w, h, chroma) {
+  const bins = new Map();
+  const isChroma = (r, g, b) => (chroma === 'green' ? g >= 120 && g >= r + 40 && g >= b + 40
+    : chroma === 'magenta' ? r >= 120 && b >= 120 && r >= g + 40 && b >= g + 40 : true);
+  const band = Math.max(2, Math.round(Math.min(w, h) * 0.04));
+  const add = (x, y) => {
+    const i = (y * w + x) * 4;
+    const r = data[i], g = data[i + 1], b = data[i + 2];
+    if (chroma && !isChroma(r, g, b)) return;
+    const key = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
+    let bin = bins.get(key);
+    if (!bin) { bin = { n: 0, r: 0, g: 0, b: 0 }; bins.set(key, bin); }
+    bin.n++; bin.r += r; bin.g += g; bin.b += b;
+  };
+  for (let k = 0; k < band; k++) {
+    for (let x = 0; x < w; x += 2) { add(x, k); add(x, h - 1 - k); }
+    for (let y = 0; y < h; y += 2) { add(k, y); add(w - 1 - k, y); }
+  }
+  let dom = null;
+  for (const bin of bins.values()) if (!dom || bin.n > dom.n) dom = bin;
+  if (!dom) return chroma ? backdropColorOf(data, w, h, null) : [0, 255, 0];
+  return [dom.r / dom.n, dom.g / dom.n, dom.b / dom.n];
+}
+
+/**
+ * Paint thin, uniform, (near) full-span lines that sit where a grid divider or an
+ * outer frame would be with the backdrop colour. In place; returns the number of
+ * lines erased. A line must be: at most max(4px, 2.5% of a cell) thick, content (≠ backdrop)
+ * over ≥ minCover of the full span, one near-uniform colour (a painted divider,
+ * not a sprite column), and within 8% of a cell of a boundary or in the outer band.
+ * Only line-coloured pixels are repainted, so a sprite touching the line survives.
+ */
+export function eraseDividerLines(canvas, { cols = 1, rows = 1, chroma = null, minCover = 0.85, maxLumaStd = 16 } = {}) {
+  const w = canvas.width, h = canvas.height;
+  if (w < 32 || h < 32) return 0;
+  const ctx = canvas.getContext('2d');
+  const img = ctx.getImageData(0, 0, w, h);
+  const d = img.data;
+  const [br, bg, bb] = backdropColorOf(d, w, h, chroma);
+  const isContent = (i) => {
+    const dr = d[i] - br, dg = d[i + 1] - bg, db = d[i + 2] - bb;
+    return dr * dr + dg * dg + db * db > 60 * 60;
+  };
+  let erased = 0;
+  // axis 'x' = vertical lines (columns), 'y' = horizontal lines (rows).
+  const pass = (axis) => {
+    const size = axis === 'x' ? w : h;      // positions along the cut axis
+    const span = axis === 'x' ? h : w;      // length of one line
+    const parts = axis === 'x' ? cols : rows;
+    const idx = (p, q) => (axis === 'x' ? (q * w + p) : (p * w + q)) * 4;
+    const cover = new Float32Array(size);
+    for (let p = 0; p < size; p++) {
+      let n = 0;
+      for (let q = 0; q < span; q++) if (isContent(idx(p, q))) n++;
+      cover[p] = n / span;
+    }
+    // Windows and thickness are CELL-relative: on a 1×10 strip a whole-image 6%
+    // window would cover every column.
+    const cellSize = size / Math.max(1, parts);
+    const win = Math.max(3, Math.round(cellSize * 0.08));
+    const edge = Math.max(2, Math.round(cellSize * 0.05));
+    const inWindow = (p) => {
+      if (p < edge || p >= size - edge) return true;
+      for (let k = 1; k < parts; k++) if (Math.abs(p - Math.round((size * k) / parts)) <= win) return true;
+      return false;
+    };
+    const maxThick = Math.max(4, Math.round(cellSize * 0.025));
+    let p = 0;
+    while (p < size) {
+      if (!(cover[p] >= minCover && inWindow(p))) { p++; continue; }
+      let e = p;
+      while (e + 1 < size && cover[e + 1] >= minCover) e++;
+      const thick = e - p + 1;
+      if (thick <= maxThick) {
+        // One near-uniform colour along the run (a painted divider, not art).
+        let n = 0, sr = 0, sg = 0, sb = 0, sl = 0, sl2 = 0;
+        for (let x = p; x <= e; x++) {
+          for (let q = 0; q < span; q++) {
+            const i = idx(x, q);
+            if (!isContent(i)) continue;
+            const L = lumaOf(d[i], d[i + 1], d[i + 2]);
+            n++; sr += d[i]; sg += d[i + 1]; sb += d[i + 2]; sl += L; sl2 += L * L;
+          }
+        }
+        const mean = sl / n;
+        const std = Math.sqrt(Math.max(0, sl2 / n - mean * mean));
+        if (n && std <= maxLumaStd) {
+          const lr = sr / n, lg = sg / n, lb = sb / n;
+          // Repaint line-coloured pixels on the run plus a 1px blend rim each side.
+          for (let x = Math.max(0, p - 1); x <= Math.min(size - 1, e + 1); x++) {
+            for (let q = 0; q < span; q++) {
+              const i = idx(x, q);
+              const dr = d[i] - lr, dg = d[i + 1] - lg, db = d[i + 2] - lb;
+              const nearLine = dr * dr + dg * dg + db * db <= 70 * 70;
+              const rim = (x < p || x > e) && isContent(i) && !nearLine
+                // a blend pixel lies between the line colour and the backdrop
+                && Math.abs(lumaOf(d[i], d[i + 1], d[i + 2]) - (mean + lumaOf(br, bg, bb)) / 2) < 40;
+              if (nearLine || rim) { d[i] = br; d[i + 1] = bg; d[i + 2] = bb; d[i + 3] = 255; }
+            }
+          }
+          erased++;
+        }
+      }
+      p = e + 1;
+    }
+  };
+  pass('x');
+  pass('y');
+  if (erased) ctx.putImageData(img, 0, 0);
+  return erased;
+}
+
+/**
+ * Remove grid-divider debris from a FINISHED (keyed, outlined, cropped) sprite:
+ * a component lying entirely in a thin band along the canvas edges
+ * (≤ max(10px, 10%) — upscaled cells give 10px bars), spanning ≥ 60% of a side — a straight bar or an L/U corner —
+ * in ONE flat colour (its outline excluded), while a real sprite (a component
+ * outside the band, at least a quarter of the bar's size) survives beside it.
+ * Size is not the test: a small coin can be smaller than the L-line framing it.
+ * In place; returns { removed } (components cleared). The caller re-crops.
+ * Detached only by design: a bar fused to the sprite is eraseDividerLines' job
+ * before keying, and hasEdgeBar's gate after it.
+ */
+export function stripEdgeBars(canvas, { alphaMin = 16, minSpan = 0.6 } = {}) {
+  const w = canvas.width, h = canvas.height;
+  if (w < 8 || h < 8) return { removed: 0 };
+  const ctx = canvas.getContext('2d');
+  const img = ctx.getImageData(0, 0, w, h);
+  const d = img.data;
+  const label = new Int32Array(w * h).fill(-1);
+  const comps = [];
+  const stack = [];
+  for (let start = 0; start < w * h; start++) {
+    if (label[start] !== -1 || d[start * 4 + 3] < alphaMin) continue;
+    const id = comps.length;
+    const c = { id, n: 0, pixels: [] };
+    label[start] = id;
+    stack.push(start);
+    while (stack.length) {
+      const k = stack.pop();
+      c.n++; c.pixels.push(k);
+      const x = k % w, y = (k / w) | 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        const ny = y + dy;
+        if (ny < 0 || ny >= h) continue;
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = x + dx;
+          if (nx < 0 || nx >= w) continue;
+          const j = ny * w + nx;
+          if (label[j] === -1 && d[j * 4 + 3] >= alphaMin) { label[j] = id; stack.push(j); }
+        }
+      }
+    }
+    comps.push(c);
+  }
+  if (comps.length < 2) return { removed: 0 };
+  const t = Math.max(10, Math.round(Math.min(w, h) * 0.1));
+  const bars = [];
+  const keepers = [];
+  for (const c of comps) {
+    // Every pixel within t of some edge; track the span along each edge.
+    let inBand = true;
+    const ext = { top: [w, -1], bottom: [w, -1], left: [h, -1], right: [h, -1] };
+    let ln = 0, ls = 0, ls2 = 0;
+    for (const k of c.pixels) {
+      const x = k % w, y = (k / w) | 0;
+      const nearTop = y < t, nearBottom = y >= h - t, nearLeft = x < t, nearRight = x >= w - t;
+      if (!(nearTop || nearBottom || nearLeft || nearRight)) { inBand = false; break; }
+      if (nearTop) { ext.top[0] = Math.min(ext.top[0], x); ext.top[1] = Math.max(ext.top[1], x); }
+      if (nearBottom) { ext.bottom[0] = Math.min(ext.bottom[0], x); ext.bottom[1] = Math.max(ext.bottom[1], x); }
+      if (nearLeft) { ext.left[0] = Math.min(ext.left[0], y); ext.left[1] = Math.max(ext.left[1], y); }
+      if (nearRight) { ext.right[0] = Math.min(ext.right[0], y); ext.right[1] = Math.max(ext.right[1], y); }
+      const L = lumaOf(d[k * 4], d[k * 4 + 1], d[k * 4 + 2]);
+      if (L >= 70) { ln++; ls += L; ls2 += L * L; } // outline pixels (dark) excluded
+    }
+    if (!inBand) { keepers.push(c); continue; }
+    const spans = [
+      (ext.top[1] - ext.top[0] + 1) / w, (ext.bottom[1] - ext.bottom[0] + 1) / w,
+      (ext.left[1] - ext.left[0] + 1) / h, (ext.right[1] - ext.right[0] + 1) / h
+    ];
+    const mean = ln ? ls / ln : 0;
+    const flat = ln < 5 || Math.sqrt(Math.max(0, ls2 / ln - mean * mean)) <= 28;
+    if (Math.max(...spans) >= minSpan && flat) bars.push(c);
+    else keepers.push(c);
+  }
+  let removed = 0;
+  for (const c of bars) {
+    // Only beside a real sprite: never erase the whole image.
+    if (!keepers.some((k) => k.n >= c.n * 0.25)) continue;
+    for (const k of c.pixels) d[k * 4 + 3] = 0;
+    removed++;
+  }
+  if (!removed) return { removed: 0 };
+  // Faint (alpha < alphaMin) halo pixels left beside a removed bar would keep the
+  // crop wide: clear any faint pixel inside the edge band that no longer touches
+  // a surviving solid pixel.
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const k = y * w + x;
+      const a = d[k * 4 + 3];
+      if (a === 0 || a >= alphaMin) continue;
+      if (!(y < t || y >= h - t || x < t || x >= w - t)) continue;
+      let solid = false;
+      for (let dy = -1; dy <= 1 && !solid; dy++) {
+        for (let dx = -1; dx <= 1 && !solid; dx++) {
+          const nx = x + dx, ny = y + dy;
+          if (nx >= 0 && ny >= 0 && nx < w && ny < h && d[(ny * w + nx) * 4 + 3] >= alphaMin) solid = true;
+        }
+      }
+      if (!solid) d[k * 4 + 3] = 0;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return { removed };
+}
+
+/**
+ * A divider bar FUSED to a finished sprite (what stripEdgeBars cannot separate):
+ * one of the outer 3 columns/rows is ≥ 92% opaque and ≥ 80% flat pale. Used as a
+ * gate on props-grid cells only — such a cell goes to its individual call.
+ */
+export function hasEdgeBar(canvas) {
+  const w = canvas.width, h = canvas.height;
+  if (w < 8 || h < 8) return false;
+  const d = canvas.getContext('2d').getImageData(0, 0, w, h).data;
+  const lineIs = (count, at) => {
+    let opaque = 0, pale = 0;
+    for (let k = 0; k < count; k++) {
+      const i = at(k);
+      if (d[i + 3] < 128) continue;
+      opaque++;
+      if (Math.min(d[i], d[i + 1], d[i + 2]) > 200) pale++;
+    }
+    return opaque >= count * 0.92 && pale >= opaque * 0.8;
+  };
+  for (let k = 0; k < 3; k++) {
+    if (lineIs(h, (y) => (y * w + k) * 4) || lineIs(h, (y) => (y * w + (w - 1 - k)) * 4)) return true;
+    if (lineIs(w, (x) => (k * w + x) * 4) || lineIs(w, (x) => ((h - 1 - k) * w + x) * 4)) return true;
+  }
+  return false;
+}
+
 /**
  * Slice a RAW (un-keyed) grid image into per-cell PNG data URLs at DETECTED cell
  * boundaries — the combined-props call's slicer. Unlike processSheet this does NO
@@ -1467,11 +1728,14 @@ function pickSheetLayout(img, spec) {
  * (cuts collapsed to a sliver) come back as null so the caller can fall back
  * per slot.
  */
-export async function sliceRawGrid(rawSrc, { cols, rows, insetFrac = 0.01 } = {}) {
+export async function sliceRawGrid(rawSrc, { cols, rows, insetFrac = 0.01, chroma = null } = {}) {
   const img = await loadImage(rawSrc);
   const w = img.naturalWidth || img.width;
   const h = img.naturalHeight || img.height;
   const canvas = drawToCanvas(img, { width: w, height: h, fit: 'stretch' });
+  // Painted dividers out first, so the cuts land in the real gutters.
+  const erased = eraseDividerLines(canvas, { cols, rows, chroma });
+  if (erased) console.info(`[AssetPipeline] Erased ${erased} grid divider line(s) from the props image.`);
   const { xCuts, yCuts } = detectGridCuts(canvas, { cols, rows });
   const cells = [];
   for (let r = 0; r < rows; r++) {
@@ -1510,6 +1774,10 @@ export async function processSheet(rawSrc, spec, { inset = 3, chroma = null } = 
   const layout = pickSheetLayout(img, spec);
   const canvas = drawToCanvas(img, { ...(layout.canvas || spec.canvas), fit: spec.post.fit });
   const { cols, rows } = layout;
+  // Sheets: stricter (characters stand nearly full height in a 1-row strip, so a
+  // line must cover the whole span in one flat colour).
+  const erased = eraseDividerLines(canvas, { cols, rows, chroma, minCover: 0.92, maxLumaStd: 12 });
+  if (erased) console.info(`[AssetPipeline] Erased ${erased} grid divider line(s) from the sheet.`);
   const { xCuts, yCuts } = detectGridCuts(canvas, { cols, rows });
   const cellW = Math.floor(canvas.width / cols);
   const cellH = Math.floor(canvas.height / rows);
@@ -1927,6 +2195,13 @@ export async function postProcessAsset(rawSrc, spec, opts = {}) {
   }
   if (spec.post.darken) darkenCanvas(canvas, spec.post.darken);
   if (spec.post.crop) canvas = cropCanvasToContent(canvas);
+  // A detached divider bar that still reached the finished sprite (see
+  // stripEdgeBars) is removed and the sprite re-cropped to its real size.
+  let edgeBars = 0;
+  if (spec.post.crop && spec.post.edgeBars) {
+    edgeBars = stripEdgeBars(canvas).removed;
+    if (edgeBars) canvas = cropCanvasToContent(canvas);
+  }
   // Re-fill the spec canvas after cropping: consumers that tile the texture into a
   // fixed-size physics box (platforms) need the art to exactly fill the frame, or the
   // visible shape and the hitbox drift apart.
@@ -1934,5 +2209,6 @@ export async function postProcessAsset(rawSrc, spec, opts = {}) {
   if (spec.post.solidify) solidifyColumns(canvas);
   const out = await loadImage(canvas.toDataURL('image/png'), { crossOrigin: null });
   out.pmBoxed = boxed; // read by the pipeline's boxed-sprite gate
+  out.pmEdgeBars = edgeBars; // divider debris removed (logged by the pipeline)
   return out;
 }

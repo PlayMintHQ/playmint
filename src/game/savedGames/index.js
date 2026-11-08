@@ -20,7 +20,7 @@
 
 import { getSupabase, isAuthConfigured } from '../../auth/supabaseClient';
 import { stripForShare } from '../shareLink.js';
-import { ensureUploaded } from '../assetCache/index.js';
+import { ensureUploaded, ensureArtStored } from '../assetCache/index.js';
 import * as server from '../assetCache/serverBackend.js';
 import { composeThumbnail } from './thumbnail.js';
 
@@ -338,10 +338,14 @@ export const listMyGames = async () => {
     const games = data || [];
     // Absolute card URLs, resolved client-side: art is stored as a PATH because
     // the store's hostname can change while the path is the read-path contract.
+    // The owner's own games are never hidden; a game whose art is definitely gone
+    // gets a badge instead (Play boots its built-in world).
     await Promise.all(games.map(async (g) => {
-      if (!g.thumbnail_path) return;
-      const url = await server.publicUrl(g.thumbnail_path);
-      g.thumbnail_url = url || null;
+      const probe = g.art_id ? server.probeGame(g.art_id, { timeoutMs: 2500 }) : Promise.resolve('none');
+      const url = g.thumbnail_path ? server.publicUrl(g.thumbnail_path) : Promise.resolve('');
+      const [state, thumb] = await Promise.all([probe, url]);
+      g.art_missing = state === 'missing';
+      if (g.thumbnail_path) g.thumbnail_url = thumb || null;
     }));
     return { ok: true, games, configured: true };
   } catch (err) {
@@ -383,13 +387,24 @@ export const listPublicGames = async ({ limit = 60 } = {}) => {
         /* profile lookup failure is non-fatal */
       }
     }
+    // Community never lists a game whose art is gone (2026-11-07: "Spiders" was
+    // published with art that never reached the server, so Play could only show
+    // the built-in world). One cached HEAD per row, in parallel and time-boxed;
+    // only a definite 404 hides a row — a slow or offline store hides nothing.
+    const artState = new Map();
     await Promise.all(games.map(async (g) => {
       g.creator_name = profileMap.get(g.owner_id) || 'Community Creator';
-      if (!g.thumbnail_path) return;
-      const url = await server.publicUrl(g.thumbnail_path);
-      g.thumbnail_url = url || null;
+      const probe = g.art_id ? server.probeGame(g.art_id, { timeoutMs: 2500 }) : Promise.resolve('none');
+      const url = g.thumbnail_path ? server.publicUrl(g.thumbnail_path) : Promise.resolve('');
+      const [state, thumb] = await Promise.all([probe, url]);
+      artState.set(g.id, state);
+      if (g.thumbnail_path) g.thumbnail_url = thumb || null;
     }));
-    return { ok: true, games, configured: true };
+    const listed = games.filter((g) => artState.get(g.id) !== 'missing');
+    if (listed.length < games.length) {
+      console.info(`[Community] hiding ${games.length - listed.length} game(s) whose artwork is missing.`);
+    }
+    return { ok: true, games: listed, configured: true };
   } catch (err) {
     return { ok: false, games: [], configured: true, error: err?.message || String(err) };
   }
@@ -416,10 +431,19 @@ export const renameGame = async (id, title) => {
   }
 };
 
-export const setGameVisibility = async (id, isPublic) => {
+export const setGameVisibility = async (id, isPublic, { artId = null } = {}) => {
   const supabase = await client();
   if (!supabase) return fail('Accounts are not enabled on this deployment.');
   if (!id) return fail('Missing game id.');
+  // A public game must be playable by anyone, so its art has to be on the
+  // server first (uploaded from this browser's cache when it never got there).
+  // Only a definite miss refuses; an unreachable store never blocks a publish.
+  if (isPublic && artId) {
+    const stored = await ensureArtStored(artId);
+    if (!stored.ok) {
+      return fail('This game\'s artwork is missing, so it can\'t be shared publicly. Use Quick Edit to redraw it, then publish again.');
+    }
+  }
   const visibility = isPublic ? 'public' : 'private';
   const published_at = isPublic ? new Date().toISOString() : null;
   try {

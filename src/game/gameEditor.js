@@ -23,7 +23,7 @@ import { parsePromptKeywords } from './promptUtils';
  * API failure) a local keyword fallback applies modifier deltas to the current values.
  */
 
-// field → { min, max, int } | { bool } | { str, maxLen }
+// field → { min, max, int } | { bool } | { str, maxLen } | { oneOf: [...] }
 const EDITABLE_FIELDS = {
   runSpeed: { min: 150, max: 800, label: 'runner scroll speed (px/s)' },
   jumpForce: { min: 400, max: 1000, label: 'runner jump impulse' },
@@ -45,7 +45,11 @@ const EDITABLE_FIELDS = {
   shooterManualAim: { bool: true, label: 'shooter manual aim (off = auto-target aim assist)' },
   shooterEnemySpeed: { min: 40, max: 400, label: 'shooter enemy chase speed' },
   shooterWaveCount: { min: 1, max: 20, int: true, label: 'shooter number of waves' },
-  shooterEnemiesPerWave: { min: 1, max: 20, int: true, label: 'shooter enemies per wave' }
+  shooterEnemiesPerWave: { min: 1, max: 20, int: true, label: 'shooter enemies per wave' },
+  // Contextual arena hazards (2026-11-07, modes/arenaHazards.js).
+  shooterEdge: { oneOf: ['wall', 'void', 'water'], label: 'shooter arena edge: wall (solid boundary), void (a raised platform/rooftop: walking off kills), water (an island: walking off drowns)' },
+  shooterHazard: { oneOf: ['none', 'lava', 'acid', 'water', 'pit'], label: 'shooter arena hazard pools: none, lava or acid (burn), water (slows), pit (fall)' },
+  shooterHazardCount: { min: 0, max: 4, int: true, label: 'shooter number of hazard pools (0 = none)' }
 };
 
 // Friendly element name → pipeline slot list. 'player' maps to the sheet slot —
@@ -60,7 +64,8 @@ const ASSET_TARGET_SLOTS = {
   enemy: ['enemy'],
   obstacle: ['obstacle'],
   projectile: ['projectile'],
-  collectibles: ['collectible']
+  collectibles: ['collectible'],
+  hazards: ['hazard'] // shooter arena lava/acid/water surface
 };
 
 /** Map restyle target names to a deduped pipeline slot list for this config. */
@@ -86,6 +91,7 @@ export function resolveAssetTargets(targets, config) {
       if (isShooter && SHOOTER_SKIPPED.includes(rawSlot)) continue;
       const slot = rawSlot === 'player_sheet' && isShooter ? 'player' : rawSlot;
       if (slot === 'projectile' && !isPlatformer && !isShooter) continue; // runners never shoot
+      if (slot === 'hazard' && !isShooter) continue; // arena surfaces exist only in the shooter
       slots.add(slot);
     }
   }
@@ -102,7 +108,7 @@ const EDITOR_RESPONSE_SCHEMA = {
     },
     assetTargets: {
       type: 'ARRAY',
-      items: { type: 'STRING', enum: ['background', 'foreground', 'floor', 'platforms', 'player', 'enemy', 'obstacle', 'projectile', 'collectibles', 'all'] },
+      items: { type: 'STRING', enum: ['background', 'foreground', 'floor', 'platforms', 'player', 'enemy', 'obstacle', 'projectile', 'collectibles', 'hazards', 'all'] },
       description: 'Only for intent=restyle: which elements get new artwork. Use "all" for a whole-look re-theme.'
     },
     summary: { type: 'STRING', description: 'One short line describing what changed, e.g. "runSpeed 400 → 560, enemies 5 → 10". For restyle/regenerate, say what is being redrawn and why.' },
@@ -130,7 +136,10 @@ const EDITOR_RESPONSE_SCHEMA = {
         shooterManualAim: { type: 'BOOLEAN' },
         shooterEnemySpeed: { type: 'NUMBER' },
         shooterWaveCount: { type: 'NUMBER' },
-        shooterEnemiesPerWave: { type: 'NUMBER' }
+        shooterEnemiesPerWave: { type: 'NUMBER' },
+        shooterEdge: { type: 'STRING', enum: ['wall', 'void', 'water'] },
+        shooterHazard: { type: 'STRING', enum: ['none', 'lava', 'acid', 'water', 'pit'] },
+        shooterHazardCount: { type: 'NUMBER' }
       }
     }
   },
@@ -145,6 +154,9 @@ function clampChanges(rawChanges) {
     const value = rawChanges[key];
     if (rule.bool) {
       changes[key] = !!value;
+    } else if (rule.oneOf) {
+      const v = String(value ?? '').trim().toLowerCase();
+      if (rule.oneOf.includes(v)) changes[key] = v;
     } else if (rule.str) {
       const s = String(value ?? '').trim();
       if (s) changes[key] = s.slice(0, rule.maxLen);
@@ -239,7 +251,7 @@ export function enforceScope(result, instruction) {
 
 async function geminiInterpret(config, instruction) {
   const fieldDocs = Object.entries(EDITABLE_FIELDS)
-    .map(([k, r]) => `- ${k}: ${r.label}${r.bool ? ' (boolean)' : r.str ? '' : ` (range ${r.min}-${r.max})`}`)
+    .map(([k, r]) => `- ${k}: ${r.label}${r.bool ? ' (boolean)' : r.oneOf ? ` (one of: ${r.oneOf.join(', ')})` : r.str ? '' : ` (range ${r.min}-${r.max})`}`)
     .join('\n');
 
   const prompt = [
@@ -355,6 +367,18 @@ function localInterpret(config, instruction) {
     changes.actionEnemyCount = cur('actionEnemyCount', 5) * 2;
   }
   Object.assign(changes, parsed.tuningParams);
+  // Shooter arena rules, keyless ("make the edges deadly", "add lava pools").
+  if (config?.gameType === 'shooter') {
+    if (/\b(deadly|lethal|dangerous)\s+edges?\b|\bfall (?:off|from)\b|\bno walls?\b/.test(text)) changes.shooterEdge = 'void';
+    else if (/\b(solid|safe)\s+(?:edges?|walls?|boundar\w*)\b|\bwalls? around\b/.test(text)) changes.shooterEdge = 'wall';
+    const pool = text.match(/\b(lava|acid|water|pits?)\b/);
+    if (/\bno (?:hazards?|pools?|lava|acid|pits?)\b|\bremove (?:the )?(?:hazards?|pools?|lava|acid|pits?)\b/.test(text)) {
+      changes.shooterHazard = 'none';
+    } else if (pool && /\b(add|more|with|put|some|pools?)\b/.test(text)) {
+      changes.shooterHazard = pool[1].replace(/s$/, '');
+      if (!Number.isFinite(config?.shooterHazardCount) || config.shooterHazardCount < 1) changes.shooterHazardCount = 3;
+    }
+  }
 
   const clamped = clampChanges(changes);
   if (Object.keys(clamped).length) {

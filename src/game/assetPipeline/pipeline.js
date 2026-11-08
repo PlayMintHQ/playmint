@@ -9,11 +9,12 @@
  * (ScreenZero's toStaticThemeConfig; App surfaces it in the regen overlay).
  */
 import { SLOT_SPECS, BASELINE_SLOTS, GENERATED_SLOTS, GEMINI_SHEET_MODEL, GEMINI_PRO_SHEET_MODEL, PROPS_GRID_SPEC, BG_CLAUSE, GAPS_CLAUSE } from './slotSpecs';
-import { postProcessAsset, mirrorImage, rotateImageQuarter, drawToCanvas, alphaFraction, borderResidueFraction, topBandOpaqueFraction, brightResidueFraction, contentBoundsOf, processSheet, finalizeSheetFrames, loadImage, keyCellWithQuality, cleanKeyedEdges, alignFrames, maskIoU, composeFilmstrip, lockPalette, sliceRawGrid, removeEnclosedPockets, chromaResidueFraction, isBoxedSprite, sliceSheetFrames, stripFromFrames, whiteBorderFraction } from './postprocess';
+import { postProcessAsset, mirrorImage, rotateImageQuarter, drawToCanvas, alphaFraction, borderResidueFraction, topBandOpaqueFraction, brightResidueFraction, contentBoundsOf, processSheet, finalizeSheetFrames, loadImage, keyCellWithQuality, cleanKeyedEdges, alignFrames, maskIoU, composeFilmstrip, lockPalette, sliceRawGrid, removeEnclosedPockets, chromaResidueFraction, isBoxedSprite, sliceSheetFrames, stripFromFrames, whiteBorderFraction, hasEdgeBar, stripEdgeBars, cropCanvasToContent } from './postprocess';
 import { reviewSprite } from './qa';
 import * as gemini from './providers/geminiImage';
 import { designAssetPrompts, buildFinalPrompt, buildPropsGridPrompt, chromaFromPrompt } from './promptDesigner';
 import { parsePromptKeywords } from '../promptUtils';
+import { resolveArenaRules, arenaSurfaceKind, HAZARD_SUBJECTS } from '../modes/arenaHazards';
 import { recordSheetAttempt, registerSheetReplayDeps } from './sheetDebug';
 import { recordLayerAttempt, registerLayerReplayDeps } from './layerDebug';
 
@@ -353,6 +354,32 @@ export function dropRunFrame(cells, meta, index) {
  * redraws it.
  * @returns {Promise<{img, frames, changed: boolean, needsRepair: boolean, notes: string[]}>}
  */
+/**
+ * Stored props (2026-11-07): strip grid-divider debris from enemy / obstacle /
+ * collectible art made before the slicer erased dividers. $0, in memory — the
+ * stored files are immutable, so this runs on every restore (small images, a
+ * few ms). Returns { images (changed slots only), notes }.
+ */
+export async function cleanStoredProps(preloadedImages, slots = ['enemy', 'obstacle', 'collectible']) {
+  const images = {};
+  const notes = [];
+  for (const slot of slots) {
+    const image = preloadedImages?.[slot];
+    if (!image) continue;
+    try {
+      const canvas = drawToCanvas(image, { width: image.naturalWidth || image.width, height: image.naturalHeight || image.height, fit: 'stretch' });
+      const { removed } = stripEdgeBars(canvas);
+      if (!removed) continue;
+      const cropped = cropCanvasToContent(canvas);
+      images[slot] = await loadImage(cropped.toDataURL('image/png'), { crossOrigin: null });
+      notes.push(`${slot}: stray divider line removed`);
+    } catch {
+      /* a cleanup failure keeps the stored art */
+    }
+  }
+  return { images, notes };
+}
+
 export async function auditPlayerSheet(img, frames, { promptUsed = '' } = {}) {
   const notes = [];
   const result = { img, frames, changed: false, needsRepair: false, notes };
@@ -1598,6 +1625,7 @@ export async function generateAssets({
         // keying itself is color-agnostic, but residue checks and despill need it.
         const chroma = chromaFromPrompt(attemptPrompt);
         let img = await postProcessAsset(raw.dataUrl, spec, { chroma });
+        if (img.pmEdgeBars) report(`[QA] ${slot}: removed ${img.pmEdgeBars} stray divider line(s) beside the sprite.`);
         img = await enforceKeyQuality(slot, spec, raw, img, chroma);
         const { img: finalImg, outcome } = await applyQualityAssurance(slot, spec, raw, img, attemptPrompt);
         if (spec.qa?.clean) {
@@ -1724,7 +1752,7 @@ export async function generateAssets({
     members.forEach((s) => noteSlotProgress(s, 0.6));
     let cellUrls = null;
     try {
-      cellUrls = await sliceRawGrid(raw.dataUrl, plan.layout);
+      cellUrls = await sliceRawGrid(raw.dataUrl, { ...plan.layout, chroma: chromaFromPrompt(plan.prompt) });
     } catch (err) {
       console.warn(`[AssetPipeline] Grid slicing failed (${err.message}) — falling back to individual slots.`);
     }
@@ -1741,6 +1769,7 @@ export async function generateAssets({
       try {
         if (!cellUrl) throw new Error('grid cut produced a degenerate cell');
         let img = await postProcessAsset(cellUrl, spec, { chroma });
+        if (img.pmEdgeBars) report(`[QA] ${slot}: removed ${img.pmEdgeBars} stray divider line(s) beside the sprite.`);
         img = await enforceKeyQuality(slot, spec, { dataUrl: cellUrl }, img, chroma);
         // Deterministic acceptance: the processed cell must contain real art. Keying
         // quality is enforceKeyQuality's job (same as the individual path); this
@@ -1752,6 +1781,9 @@ export async function generateAssets({
             (bounds.maxY - bounds.minY + 1) < canvas.height * 0.1) {
           throw new Error('grid cell had no usable content');
         }
+        // A divider fused to the sprite (a white bar along one side) cannot be cut
+        // off safely — redraw this prop on its own instead of shipping the bar.
+        if (spec.post.edgeBars && hasEdgeBar(canvas)) throw new Error('a divider line is fused to the sprite');
         // A pickup is a compact object: a cell whose content is a long strip or a
         // sliver of a neighbour (a cell swap, a cut through the wrong gutter) goes
         // to the individual call instead of shipping as a "coin".
@@ -1960,10 +1992,20 @@ export async function generateGameAssets({ config, userPrompt = '', onProgress =
   // Both modes spawn score pickups (optional slot: on failure the game keeps the
   // static coin.svg). Last in the FIFO so required slots always come first.
   slots.push('collectible');
+  // Shooter arenas with a surface hazard (lava / acid / water pools, or an island
+  // in deep water) get the surface drawn in the world's style — one lite call,
+  // optional (the game paints a built-in surface without it).
+  const hazardSurface = config.gameType === 'shooter' ? arenaSurfaceKind(resolveArenaRules(config)) : null;
+  if (hazardSurface) {
+    finalPrompts.hazard = buildFinalPrompt('hazard', { ...design.subjects, hazard: HAZARD_SUBJECTS[hazardSurface] }, design.styleGuide, { gameType: config.gameType });
+    slots.push('hazard');
+  }
   slots = slots.filter(s => !effectiveSkipSlots.includes(s));
 
   const gridPlan = planPropsGrid(slots, design, namedBySlot, onProgress, config.gameType);
   const { preloadedImages, meta } = await generateAssets({ finalPrompts, slots, onProgress, cancelToken, gridPlan, gameType: config.gameType });
+  // Which surface the hazard texture shows — the scene only uses it for that kind.
+  if (hazardSurface && meta.hazard) meta.hazard.kind = hazardSurface;
 
   const generated = Object.values(meta).filter(m => !m.dropped).length;
   onProgress(
@@ -2091,8 +2133,12 @@ export async function regenerateAssetSlots({ config, instruction = '', slots, on
     collectible: design.entities?.collectible
   };
   const finalPrompts = {};
+  // A hazard-surface redraw shows the arena's own surface kind.
+  const redrawSurface = slots.includes('hazard') ? arenaSurfaceKind(resolveArenaRules(config)) : null;
+  if (slots.includes('hazard') && !redrawSurface) slots = slots.filter((s) => s !== 'hazard');
+  const subjectsFor = redrawSurface ? { ...design.subjects, hazard: HAZARD_SUBJECTS[redrawSurface] } : design.subjects;
   for (const slot of slots) {
-    finalPrompts[slot] = buildFinalPrompt(slot, design.subjects, design.styleGuide,
+    finalPrompts[slot] = buildFinalPrompt(slot, subjectsFor, design.styleGuide,
       { userNamed: !!namedBySlot[slot], gameType: config.gameType });
     // Sheet slots fall back to their static slot on gate failure — that fallback
     // run needs its own prompt present.
@@ -2115,6 +2161,7 @@ export async function regenerateAssetSlots({ config, instruction = '', slots, on
     reuseStaticBase,
     initialPreloadedImages: reuseStaticBase ? (config.preloadedImages || {}) : {}
   });
+  if (redrawSurface && meta.hazard) meta.hazard.kind = redrawSurface;
 
   const updated = Object.values(meta).filter(m => !m.dropped).length;
   onProgress(

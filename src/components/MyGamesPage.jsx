@@ -156,7 +156,7 @@ function GameCard({ game, onRename, onDelete, onVisibility, isCommunity = false 
   const toggleVisibility = async () => {
     setToggling(true);
     const isPublic = game.visibility !== 'public';
-    const res = await setGameVisibility(game.id, isPublic);
+    const res = await setGameVisibility(game.id, isPublic, { artId: game.art_id || null });
     setToggling(false);
     if (res.ok) {
       if (onRename) onRename(game.id, game.title, res.visibility);
@@ -181,7 +181,7 @@ function GameCard({ game, onRename, onDelete, onVisibility, isCommunity = false 
   };
   const publishAndShare = async () => {
     const action = sharePrompt;
-    const published = setGameVisibility(game.id, true);
+    const published = setGameVisibility(game.id, true, { artId: game.art_id || null });
     const shared = deliver(action, urlFor('public'));
     const res = await published;
     if (!res.ok) { setShareError(res.error || 'Could not make the game public.'); return; }
@@ -228,6 +228,14 @@ function GameCard({ game, onRename, onDelete, onVisibility, isCommunity = false 
           />
         )}
         <span className="pm-library__playBadge" aria-hidden="true"><IconPlay /></span>
+        {game.art_missing && !isCommunity && (
+          <span
+            className="pm-library__artMissing"
+            title="This game's artwork is no longer stored. Play shows its built-in world; use Quick Edit to redraw it."
+          >
+            Artwork missing
+          </span>
+        )}
       </button>
 
       <div className="pm-library__body">

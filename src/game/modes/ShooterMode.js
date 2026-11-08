@@ -2,6 +2,8 @@ import Phaser from 'phaser';
 import BaseMode from './BaseMode';
 import Projectile from '../objects/Projectile';
 import { buildNavGrid, computeFlowField, cellOf, steerPoint } from './arenaNav';
+import { COVER_BLOCK_PX, layoutArenaCover, resolveArenaRules, layoutArenaHazards, surfaceAt, navBlockRects, spawnRimPoints, SURFACE, isLethalSurface, arenaSurfaceKind } from './arenaHazards';
+import { drawArenaSurface } from './arenaSurface';
 
 // AIM ASSIST is the default; the config flag (or the localStorage dev override,
 // same shape as the other PM_* switches) turns on the manual twin-stick scheme.
@@ -35,47 +37,8 @@ function readManualAim(cfg) {
 // Player/enemy art is a single static top-down sprite rotated at render time,
 // never a directional sheet — GameManagerScene skips SpriteAlignmentManager's
 // ground-anchor/flip logic for this mode and leaves the sprite origin centered.
-// Cover layout (pure, no Phaser — unit-checkable): world-space block centres.
-export const COVER_BLOCK_PX = 88;
-export function layoutArenaCover({ width, height, rnd = Math.random }) {
-  const cx = width / 2, cy = height / 2;
-  const spawnRing = Math.min(width, height) / 2 - 40; // ShooterMode.spawnWave radius
-  const minR = 170;                                     // the player's start area
-  const maxR = spawnRing - 110;                          // enemies spawn on the ring
-  const MIN_GAP = 80;                                    // edge gap between pieces > player width
-  if (maxR <= minR) return [];
-  const blocks = [];
-  const pieces = 6 + Math.floor(rnd() * 4);
-  let placed = 0;
-  let guard = 0;
-  while (placed < pieces && guard++ < 600) {
-    const a = rnd() * Math.PI * 2;
-    const r = minR + rnd() * (maxR - minR);
-    const ax = cx + Math.cos(a) * r;
-    const ay = cy + Math.sin(a) * r;
-    // Every third piece is a short wall of 2-3 blocks.
-    const len = placed % 3 === 0 ? 2 + Math.floor(rnd() * 2) : 1;
-    const horizontal = rnd() < 0.5;
-    const group = [];
-    for (let k = 0; k < len; k++) {
-      const off = (k - (len - 1) / 2) * COVER_BLOCK_PX;
-      group.push({ x: Math.round(horizontal ? ax + off : ax), y: Math.round(horizontal ? ay : ay + off) });
-    }
-    const inBand = group.every((b) => {
-      const d = Math.hypot(b.x - cx, b.y - cy);
-      return d >= minR && d <= maxR &&
-        b.x >= COVER_BLOCK_PX && b.y >= COVER_BLOCK_PX &&
-        b.x <= width - COVER_BLOCK_PX && b.y <= height - COVER_BLOCK_PX;
-    });
-    if (!inBand) continue;
-    const clear = group.every((b) => blocks.every((o) =>
-      Math.max(Math.abs(b.x - o.x), Math.abs(b.y - o.y)) - COVER_BLOCK_PX >= MIN_GAP));
-    if (!clear) continue;
-    blocks.push(...group);
-    placed++;
-  }
-  return blocks;
-}
+// Cover layout lives in arenaHazards.js (pure, node-testable); re-exported here.
+export { COVER_BLOCK_PX, layoutArenaCover };
 
 export default class ShooterMode extends BaseMode {
   init() {
@@ -127,6 +90,15 @@ export default class ShooterMode extends BaseMode {
     this.collectibles = null;
     this.cover = null;
     this.coverRects = [];
+    // Contextual hazards (2026-11-07, arenaHazards.js): rules from the world —
+    // a rooftop has deadly edges, a volcano has lava pools, an arena has walls.
+    this.rules = resolveArenaRules(cfg);
+    this.arena = null;
+    this.arenaView = null;
+    this.walkRects = [];      // cover + hazards: what enemies path around
+    this.hazardMs = 0;        // time the player has spent on a burning/drowning surface
+    this.hazardGraceUntil = 0;
+    this.falling = false;
     // Flow-field navigation around cover (arenaNav.js).
     this.navGrid = null;
     this.navDist = null;
@@ -158,7 +130,9 @@ export default class ShooterMode extends BaseMode {
     // Arena cover (2026-11-04, client: "the map was almost empty apart from the
     // characters"): solid themed props — the generated obstacle art, drawn from
     // overhead for this world — that block movement and stop shots.
+    this.buildArena();
     this.buildCover();
+    this.buildNav();
     if (this.cover) {
       scene.physics.add.collider(player, this.cover);
       scene.physics.add.collider(this.enemies, this.cover);
@@ -263,11 +237,14 @@ export default class ShooterMode extends BaseMode {
     const useDyn = cfg.dynamicAssetUrls && scene.textures.exists('dyn_obstacle');
     const texture = useDyn ? 'dyn_obstacle' : (scene.textures.exists('crate') ? 'crate' : null);
     if (!texture) return;
-    const rnd = new Phaser.Math.RandomDataGenerator([String(cfg.gameId || cfg.gameName || 'arena')]);
+    // layoutSeed (Quick Start) varies the arena per game; saved games keep theirs.
+    const rnd = new Phaser.Math.RandomDataGenerator([String(cfg.layoutSeed || cfg.gameId || cfg.gameName || 'arena')]);
     const placements = layoutArenaCover({
       width: this.worldWidth,
       height: this.worldHeight,
-      rnd: () => rnd.frac()
+      rnd: () => rnd.frac(),
+      bounds: this.arena && this.arena.edge !== 'wall' ? this.arena.platform : null,
+      avoid: this.arena ? this.arena.pools.flatMap((pool) => pool.rects) : []
     });
     if (!placements.length) return;
     this.cover = scene.physics.add.staticGroup();
@@ -281,16 +258,116 @@ export default class ShooterMode extends BaseMode {
       this.coverRects.push(new Phaser.Geom.Rectangle(
         block.x - block.displayWidth / 2, block.y - block.displayHeight / 2, block.displayWidth, block.displayHeight));
     }
-    // Cover is static for the whole run: the walkable grid is built once. The
-    // path margin must be at least the enemy body's half size (Arcade bodies are
-    // boxes) or waypoints sit where the body cannot reach and enemies grind along
-    // walls; the sight margin stays a little smaller so the path ahead is visible.
-    // Enemies are drawn 50px tall (spawnWave), so their width follows the art.
+  }
+
+  // Cover and hazards are static for the run: the walkable grid is built once
+  // (again only when a live edit changes the arena rules). The path margin must be
+  // at least the enemy body's half size (Arcade bodies are boxes) or waypoints sit
+  // where the body cannot reach and enemies grind along walls; the sight margin
+  // stays a little smaller so the path ahead is visible. Enemies are drawn 50px
+  // tall (spawnWave), so their width follows the art. Lethal pools and the void
+  // band are in the grid too: enemies route round lava and never walk off a roof.
+  buildNav() {
+    const { scene } = this;
+    this.walkRects = [...this.coverRects, ...navBlockRects(this.arena, this.worldWidth, this.worldHeight)];
+    this.navDist = null;
+    this.navCell = -1;
+    if (!this.walkRects.length) { this.navGrid = null; return; }
     const eFrame = scene.textures.exists('dyn_enemy') ? scene.textures.get('dyn_enemy').get(0) : null;
     const halfSize = eFrame ? Math.max(25, (eFrame.width * 50 / eFrame.height) / 2) : 25;
     this.navInflate = Math.min(34, Math.ceil(halfSize) + 3);
     this.navPad = this.navInflate - 3;
-    this.navGrid = buildNavGrid({ width: this.worldWidth, height: this.worldHeight, rects: this.coverRects, inflate: this.navInflate, cell: 16 });
+    this.navGrid = buildNavGrid({ width: this.worldWidth, height: this.worldHeight, rects: this.walkRects, inflate: this.navInflate, cell: 16 });
+  }
+
+  // The arena's surface rules (arenaHazards.js) and their visuals (arenaSurface.js).
+  // `avoid` keeps new pools off existing cover and the player on a live rebuild.
+  buildArena(avoid = []) {
+    const { scene } = this;
+    const cfg = scene.gameConfig || {};
+    const rnd = new Phaser.Math.RandomDataGenerator([`${cfg.layoutSeed || cfg.gameId || cfg.gameName || 'arena'}|hazards`]);
+    this.arena = layoutArenaHazards({ width: this.worldWidth, height: this.worldHeight, ...this.rules, rnd: () => rnd.frac(), avoid });
+    if (this.arena.edge === 'wall' && !this.arena.pools.length) return;
+    const words = `${cfg.sourcePrompt || ''} ${cfg.gameName || ''}`.toLowerCase();
+    const hazardKind = cfg.assetMeta?.slots?.hazard?.kind || null;
+    this.arenaView = drawArenaSurface(scene, this.arena, {
+      width: this.worldWidth,
+      height: this.worldHeight,
+      starry: /\b(space|stars?|galax\w*|orbit\w*|asteroid|cosmic|nebula|moon)\b/.test(words),
+      hazardKind: hazardKind && hazardKind === arenaSurfaceKind(this.rules) ? hazardKind : null
+    });
+    console.info(`[Shooter] arena rules: edge=${this.arena.edge}, hazard=${this.arena.hazard} ×${this.arena.pools.length}`);
+  }
+
+  // A live edit changed the rules ("make the edges deadly", "add lava pools"):
+  // rebuild the hazards around the existing cover, never under the player, and
+  // give the player a moment before any new surface can hurt.
+  rebuildArena() {
+    const { scene } = this;
+    const player = scene.player;
+    if (this.arenaView) { this.arenaView.destroy(); this.arenaView = null; }
+    const here = player ? [{ x: player.x - 110, y: player.y - 110, width: 220, height: 220 }] : [];
+    this.buildArena([...this.coverRects, ...here]);
+    // Cover left standing in a new void band would float in the air: drop it.
+    if (this.cover && this.arena.edge !== 'wall') {
+      const p = this.arena.platform;
+      for (const block of [...this.cover.getChildren()]) {
+        if (block.x < p.x || block.y < p.y || block.x > p.x + p.width || block.y > p.y + p.height) block.destroy();
+      }
+      this.coverRects = this.cover.getChildren().map((block) => new Phaser.Geom.Rectangle(
+        block.x - block.displayWidth / 2, block.y - block.displayHeight / 2, block.displayWidth, block.displayHeight));
+    }
+    this.buildNav();
+    this.hazardGraceUntil = scene.time.now + 1500;
+  }
+
+  // Off the roof / into a pit: the player drops away, then the run ends.
+  fallPlayer() {
+    const { scene } = this;
+    const player = scene.player;
+    if (this.falling || scene.isGameOver) return;
+    this.falling = true;
+    player.body.setVelocity(0, 0);
+    player.body.enable = false;
+    scene.tweens.add({
+      targets: player,
+      scaleX: player.scaleX * 0.2,
+      scaleY: player.scaleY * 0.2,
+      alpha: 0,
+      angle: player.angle + 220,
+      duration: 450,
+      ease: 'Quad.easeIn',
+      onComplete: () => scene.hitObstacle(player, null)
+    });
+  }
+
+  // Burned (lava/acid) or drowned (deep water) after the surface's grace time.
+  hazardDeath(kind) {
+    const { scene } = this;
+    const player = scene.player;
+    scene.fx?.burst?.(player.x, player.y, {
+      color: kind === 'drown' ? 0x8fd8ff : 0xff7a1a, count: 16, speed: 180, gravityY: 0, scale: 1
+    });
+    scene.hitObstacle(player, null);
+  }
+
+  // An enemy pushed onto a lethal surface is lost to it (the player scores).
+  environmentKill(enemy, surface) {
+    const { scene } = this;
+    enemy._dying = true;
+    if (enemy.body) enemy.body.enable = false;
+    const fall = SURFACE[surface]?.kind === 'fall';
+    if (!fall) enemy.setTint(surface === 'acid' ? 0x9dff3a : surface === 'deep' ? 0x6ab8ff : 0xff6a2a);
+    scene.tweens.add({
+      targets: enemy,
+      scaleX: enemy.scaleX * (fall ? 0.2 : 0.6),
+      scaleY: enemy.scaleY * (fall ? 0.2 : 0.6),
+      alpha: 0,
+      angle: enemy.angle + (fall ? 200 : 0),
+      duration: fall ? 450 : 300,
+      onComplete: () => { if (enemy.scene) enemy.destroy(); }
+    });
+    this.awardScore(50);
   }
 
   // Shared distance map toward the player, refreshed when the player changes cell
@@ -337,10 +414,15 @@ export default class ShooterMode extends BaseMode {
       : useTopdownPlaceholder ? 'topdown_enemy'
       : (scene.activeTheme?.enemyTexture || 'dude');
 
+    // Arrival points sit just inside the walkable platform and never on a hazard
+    // (or in cover); a walled arena keeps the old perimeter ring.
+    const points = (this.arena && (this.arena.edge !== 'wall' || this.arena.pools.length))
+      ? spawnRimPoints(this.arena, count, { width: this.worldWidth, height: this.worldHeight, clearOf: this.coverRects })
+      : null;
     for (let i = 0; i < count; i++) {
       const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
-      const x = Phaser.Math.Clamp(centerX + Math.cos(angle) * radius, 20, this.worldWidth - 20);
-      const y = Phaser.Math.Clamp(centerY + Math.sin(angle) * radius, 20, this.worldHeight - 20);
+      const x = points ? points[i].x : Phaser.Math.Clamp(centerX + Math.cos(angle) * radius, 20, this.worldWidth - 20);
+      const y = points ? points[i].y : Phaser.Math.Clamp(centerY + Math.sin(angle) * radius, 20, this.worldHeight - 20);
 
       const enemy = this.enemies.create(x, y, enemyTexture);
       enemy.health = 3;
@@ -372,8 +454,13 @@ export default class ShooterMode extends BaseMode {
   update(time, delta) {
     const { scene } = this;
     if (scene.isGameOver || scene.isGamePaused) return;
-
     const player = scene.player;
+    this.arenaView?.update(time, scene.cameras?.main);
+    if (this.falling) return;
+    // The surface under the player (forgiving: the rule fires a few px past the edge).
+    const surface = this.arena ? surfaceAt(this.arena, player.x, player.y, 6) : null;
+    const surfaceRule = surface ? SURFACE[surface] : null;
+
     const keys = scene.keyStates || {};
     const pointer = scene.input.activePointer;
     const dt = delta / 1000;
@@ -399,7 +486,8 @@ export default class ShooterMode extends BaseMode {
     if (moving) {
       const len = Math.hypot(vx, vy);
       vx /= len; vy /= len;
-      player.body.setVelocity(vx * this.moveSpeed, vy * this.moveSpeed);
+      const speed = this.moveSpeed * (surfaceRule?.slow || 1);
+      player.body.setVelocity(vx * speed, vy * speed);
     } else {
       player.body.setVelocity(0, 0);
     }
@@ -439,9 +527,9 @@ export default class ShooterMode extends BaseMode {
       const b = enemy.body;
       if (!b) continue;
       let tx = player.x, ty = player.y;
-      if (this.navDist && this.coverRects.length) {
+      if (this.navDist && this.walkRects.length) {
         if (!enemy._wp || time >= enemy._wpUntil) {
-          enemy._wp = steerPoint(this.navGrid, this.navDist, this.coverRects, enemy.x, enemy.y, player.x, player.y, { pad: this.navPad || 25 });
+          enemy._wp = steerPoint(this.navGrid, this.navDist, this.walkRects, enemy.x, enemy.y, player.x, player.y, { pad: this.navPad || 25 });
           enemy._wpUntil = time + (enemy._wp.direct ? 120 : 200);
         }
         if (!enemy._wp.direct) { tx = enemy._wp.x; ty = enemy._wp.y; }
@@ -472,8 +560,35 @@ export default class ShooterMode extends BaseMode {
       }
       const heading = enemy._heading == null ? desired : Phaser.Math.Angle.RotateTo(enemy._heading, desired, 6 * dt);
       enemy._heading = heading;
-      b.setVelocity(Math.cos(heading) * this.enemySpeed, Math.sin(heading) * this.enemySpeed);
+      const enemySurface = this.arena ? surfaceAt(this.arena, enemy.x, enemy.y, 8) : null;
+      if (enemySurface && isLethalSurface(enemySurface) && time >= this.hazardGraceUntil) {
+        this.environmentKill(enemy, enemySurface);
+        continue;
+      }
+      const enemySpeed = this.enemySpeed * (enemySurface ? (SURFACE[enemySurface]?.slow || 1) : 1);
+      b.setVelocity(Math.cos(heading) * enemySpeed, Math.sin(heading) * enemySpeed);
       enemy.rotation = heading;
+    }
+
+    // Hazards (the player). One-hit death is unchanged; a fall is instant, a burn
+    // or drowning needs `lethalAfter` ms on the surface, so brushing an edge of a
+    // pool is survivable. A rule change mid-run gives 1.5s before anything bites.
+    if (this.arena && time >= this.hazardGraceUntil) {
+      if (surfaceRule?.kind === 'fall') { this.fallPlayer(); return; }
+      if (surfaceRule && surfaceRule.lethalAfter != null) {
+        this.hazardMs += delta;
+        player.setTint(Math.floor(time / 80) % 2 ? (surfaceRule.kind === 'drown' ? 0x7ac8ff : 0xff6a3a) : 0xffffff);
+        if (this.hazardMs >= surfaceRule.lethalAfter) { this.hazardDeath(surfaceRule.kind); return; }
+      } else if (this.hazardMs) {
+        this.hazardMs = 0;
+        player.clearTint();
+      }
+      // Deadly edge close by: pulse the rim.
+      if (this.arenaView && this.arena.edge !== 'wall') {
+        const p = this.arena.platform;
+        const d = Math.min(player.x - p.x, p.x + p.width - player.x, player.y - p.y, p.y + p.height - player.y);
+        this.arenaView.warn(d < 50 ? 1 - Math.max(0, d) / 50 : 0);
+      }
     }
 
     if (this.fireCooldown > 0) this.fireCooldown -= delta;
@@ -645,6 +760,11 @@ export default class ShooterMode extends BaseMode {
   }
 
   onConfigUpdate(newConfig) {
+    const nextRules = resolveArenaRules(newConfig);
+    if (this.arena && (nextRules.edge !== this.rules.edge || nextRules.hazard !== this.rules.hazard || nextRules.count !== this.rules.count)) {
+      this.rules = nextRules;
+      this.rebuildArena();
+    }
     this.moveSpeed = newConfig.shooterMoveSpeed || 260;
     this.fireRate = newConfig.shooterFireRate || 500;
     this.projectileSpeed = newConfig.shooterProjectileSpeed || 500;
@@ -694,6 +814,8 @@ export default class ShooterMode extends BaseMode {
       try { this.cover.clear(true, true); } catch { /* scene already torn down */ }
     }
     this.coverRects = [];
+    this.walkRects = [];
+    if (this.arenaView) { this.arenaView.destroy(); this.arenaView = null; }
 
     if (this.gameInputListener) {
       window.removeEventListener('game-input', this.gameInputListener);

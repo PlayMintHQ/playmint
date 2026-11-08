@@ -84,6 +84,26 @@ export const getGame = async (id) => {
   }
 };
 
+// Three-state probe (2026-11-07): 'present' | 'missing' (a definite 404) |
+// 'unknown' (no store configured, offline, CDN error). Callers that HIDE or
+// REFUSE something act only on 'missing' — a flaky network must never make a
+// Community game disappear or block a publish.
+export const probeGame = async (id, { timeoutMs = 0 } = {}) => {
+  const base = id ? await resolveBase() : '';
+  if (!base) return 'unknown';
+  const ctrl = timeoutMs && typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
+  try {
+    const res = await fetch(metaUrl(base, id), { method: 'HEAD', signal: ctrl?.signal });
+    if (res.ok) return 'present';
+    return res.status === 404 ? 'missing' : 'unknown';
+  } catch {
+    return 'unknown';
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+};
+
 // Cheap existence probe for ensureUploaded (no image downloads).
 export const hasGame = async (id) => {
   const base = id ? await resolveBase() : '';

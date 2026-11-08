@@ -6,6 +6,7 @@ import { downloadMetricsReport } from '../game/metricsReport';
 import { getRecords as getTimingRecords } from '../game/metrics';
 import { ensureUploaded } from '../game/assetCache';
 import { normalizeRunnerPacing } from '../game/promptUtils';
+import { resolveArenaRules } from '../game/modes/arenaHazards';
 import { shareLink, copyLink, gameShareUrl } from '../utils/shareUtils';
 import ConfirmDialog from './ConfirmDialog';
 import { setGameRemix } from '../game/savedGames';
@@ -166,8 +167,48 @@ const ShooterControls = ({ liveParams, onSliderChange }) => (
       </div>
       <input type="range" className="pm-slider" name="shooterEnemiesPerWave" min="1" max="20" step="1" value={liveParams.shooterEnemiesPerWave || 4} onChange={onSliderChange} />
     </div>
+    <ArenaRuleControls liveParams={liveParams} onSliderChange={onSliderChange} />
   </>
 );
+
+// Arena rules (2026-11-07): what the edge does and which hazard pools exist.
+// Defaults come from the world (resolveArenaRules), so an untouched rooftop game
+// shows "Deadly drop" here.
+const ArenaRuleControls = ({ liveParams, onSliderChange }) => {
+  const rules = resolveArenaRules(liveParams);
+  const selectStyle = { width: '100%', padding: '8px', borderRadius: '8px', background: 'rgba(255,255,255,0.06)', color: 'var(--pm-text-primary)', border: '1px solid var(--pm-border)' };
+  return (
+    <>
+      <div>
+        <label className="pm-label" htmlFor="pm-arena-edge">Arena Edge</label>
+        <select id="pm-arena-edge" name="shooterEdge" value={rules.edge} onChange={onSliderChange} style={selectStyle}>
+          <option value="wall">Solid walls</option>
+          <option value="void">Deadly drop (rooftop / cliff)</option>
+          <option value="water">Deep water (island)</option>
+        </select>
+      </div>
+      <div>
+        <label className="pm-label" htmlFor="pm-arena-hazard">Hazard Pools</label>
+        <select id="pm-arena-hazard" name="shooterHazard" value={rules.hazard} onChange={onSliderChange} style={selectStyle}>
+          <option value="none">None</option>
+          <option value="lava">Lava (burns)</option>
+          <option value="acid">Acid (burns)</option>
+          <option value="water">Shallow water (slows)</option>
+          <option value="pit">Pits (fall)</option>
+        </select>
+      </div>
+      {rules.hazard !== 'none' && (
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+            <label className="pm-label" style={{ margin: 0 }}>Hazard Pools Count</label>
+            <span style={{ fontSize: '13px', color: 'var(--pm-accent-teal)', fontWeight: '600' }}>{rules.count}</span>
+          </div>
+          <input type="range" className="pm-slider" name="shooterHazardCount" min="1" max="4" step="1" value={rules.count} onChange={onSliderChange} />
+        </div>
+      )}
+    </>
+  );
+};
 
 const ConfigActions = ({ liveParams, setLiveParams, setPresetKey, onHomeClick }) => {
   const [exportStatus, setExportStatus] = useState('idle');

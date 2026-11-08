@@ -98,6 +98,7 @@ const classify = (row, meta) => {
     verdict: worldChanged ? 'DELETE' : changed.length ? 'review' : 'ok',
     changed,
     storedName: meta.config?.gameName || null,
+    schemaVersion: meta.schemaVersion ?? null,
     oldCharacters: oldChars
   };
 };
@@ -150,9 +151,17 @@ const main = async () => {
       r.changed.length ? r.changed.join(',') : '',
       r.storedName && r.storedName !== r.title && r.verdict !== 'ok' ? `stored art is "${r.storedName}"` : '',
       shared[r.artId].length > 1 ? `art shared by ${shared[r.artId].length} rows` : '',
-      r.oldCharacters?.length ? `pre-fix characters: ${r.oldCharacters.join(',')}` : ''
+      r.oldCharacters?.length ? `pre-fix characters: ${r.oldCharacters.join(',')}` : '',
+      r.schemaVersion === 1 ? 'stored before Oct 6 (v1 — restorable since Nov 7)' : ''
     ].filter(Boolean).join(' · ');
     console.log(`${pad(r.verdict, 11)} ${pad(r.title, 28)} ${pad(r.mode, 10)} ${pad(r.visibility, 8)} ${pad(r.artId?.slice(0, 8), 9)} ${notes}`);
+  }
+  // Public rows whose art is gone: Community hides them at load time; this
+  // statement makes them private for good (the owner keeps the row).
+  const missingPublic = out.filter((r) => r.verdict === 'missing-art' && r.visibility === 'public');
+  if (missingPublic.length) {
+    console.log(`\n${missingPublic.length} public game(s) have no stored art. To hide them for good (owner keeps the row), run in the SQL editor:`);
+    console.log(`update public.games set visibility = 'private', published_at = null where id in (${missingPublic.map((r) => `'${r.id}'`).join(', ')}) and visibility = 'public';`);
   }
   const del = out.filter((r) => r.verdict === 'DELETE');
   console.log(`\n${del.length} delete candidate(s) (world replaced by another game's edit), ${out.filter((r) => r.verdict === 'review').length} to review.`);

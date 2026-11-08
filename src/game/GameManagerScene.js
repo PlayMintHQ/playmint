@@ -136,7 +136,8 @@ export default class GameManagerScene extends Phaser.Scene {
         enemy: 'dyn_enemy',
         obstacle: 'dyn_obstacle',
         projectile: 'dyn_projectile',
-        collectible: 'dyn_collectible'
+        collectible: 'dyn_collectible',
+        hazard: 'dyn_hazard'
       };
 
       Object.entries(preloaded).forEach(([key, img]) => {

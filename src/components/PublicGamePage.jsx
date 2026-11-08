@@ -94,7 +94,7 @@ export function PublicGamePage({ gameId, onPlay, onRemix, autoplay = false }) {
   };
   const publishAndShare = async () => {
     const action = sharePrompt;
-    const published = setGameVisibility(game.id, true);
+    const published = setGameVisibility(game.id, true, { artId: game.art_id || null });
     const shared = deliver(action, urlFor('public'));
     const res = await published;
     if (!res.ok) { setShareError(res.error || 'Could not make the game public.'); return; }

@@ -261,6 +261,24 @@ export const SLOT_SPECS = {
   // Score pickup (coins by default, or whatever the player named — "gems", etc.).
   // Both modes spawn collectibles. Optional: on failure the game keeps the static
   // coin.svg, so a dropped slot never blocks a run.
+  // Shooter Arena hazard surface (2026-11-07): a seamless top-down texture of the
+  // arena's lava / acid / water, drawn in the world's style and tiled inside the
+  // pools (or round the island). Shooter-only, generated only when the arena's
+  // rules have a surface hazard; optional — the game draws a built-in surface
+  // without it. The subject is set by the pipeline from the rules, not designed.
+  hazard: {
+    textureKey: 'dyn_hazard',
+    canvas: { width: 128, height: 128 },
+    gen: { aspectRatio: '1:1', model: GEMINI_SLOT_MODEL },
+    post: { fit: 'stretch', keying: null, trimBorder: true, crop: false },
+    optional: true,
+    scaffold: (subject, style) =>
+      `Create a seamless tileable surface texture, viewed from directly above ` +
+      `(top-down bird's-eye view): ${subject}. All four edges match perfectly for ` +
+      `tiling in every direction, and the surface fills the whole frame edge to edge — ` +
+      `no shore, no border, no objects, no vignette. ${style}`,
+    fallbackSubject: () => null
+  },
   collectible: {
     textureKey: 'dyn_collectible',
     canvas: { width: 128, height: 128 },
@@ -269,7 +287,7 @@ export const SLOT_SPECS = {
     // contain-fit (a non-square grid cell no longer squashes the coin),
     // pocketClean (the hole of a ring/charm coin kept a disc of green screen) and
     // a background-clean vision check (re-key on failure) like the characters get.
-    post: { fit: 'contain', keying: 'flood', trimBorder: false, crop: true, outline: true, pocketClean: true },
+    post: { fit: 'contain', keying: 'flood', trimBorder: false, crop: true, outline: true, pocketClean: true, edgeBars: true },
     qa: { clean: false },
     optional: true,
     scaffold: (subject, style, { chroma } = {}) =>
@@ -292,7 +310,7 @@ export const SLOT_SPECS = {
     // reference, so if animation quality drops, restore with
     // localStorage PM_MODEL_PLAYER='gemini-3.1-flash-image'.
     gen: { aspectRatio: '1:1', model: GEMINI_SLOT_MODEL },
-    post: { fit: 'stretch', keying: 'flood', trimBorder: false, crop: true, outline: true, pocketClean: true },
+    post: { fit: 'stretch', keying: 'flood', trimBorder: false, crop: true, outline: true, pocketClean: true, edgeBars: true },
     qa: { facing: true },
     // Front-loaded pose language ("mid-run stride") avoids stiff standing poses;
     // "no ground, no motion lines" suppresses baked-in floor streaks under runners.
@@ -321,7 +339,7 @@ export const SLOT_SPECS = {
     textureKey: 'dyn_enemy',
     canvas: { width: 128, height: 128 },
     gen: { aspectRatio: '1:1', model: GEMINI_SLOT_MODEL },
-    post: { fit: 'stretch', keying: 'flood', trimBorder: false, crop: true, outline: true, pocketClean: true },
+    post: { fit: 'stretch', keying: 'flood', trimBorder: false, crop: true, outline: true, pocketClean: true, edgeBars: true },
     qa: { facing: true },
     scaffold: (subject, style, { chroma, gameType } = {}) => gameType === 'shooter'
       ? `Draw a 2d video game enemy sprite for a top-down arena shooter, seen from ` +
@@ -411,7 +429,7 @@ export const SLOT_SPECS = {
     textureKey: 'dyn_obstacle',
     canvas: { width: 128, height: 128 },
     gen: { aspectRatio: '1:1', model: GEMINI_SLOT_MODEL },
-    post: { fit: 'stretch', keying: 'flood', trimBorder: false, crop: true, outline: true },
+    post: { fit: 'stretch', keying: 'flood', trimBorder: false, crop: true, outline: true, edgeBars: true },
     scaffold: (subject, style, { chroma, gameType } = {}) => gameType === 'shooter'
       // Arena COVER (added 2026-11-04): solid props the player hides behind and
       // shots stop on. Overhead view, square footprint — the game places them as

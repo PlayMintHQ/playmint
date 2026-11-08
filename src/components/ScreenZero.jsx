@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { GAME_PRESETS } from '../gameConfig';
-import { generateTitle, normalizeRunnerPacing } from '../game/promptUtils';
+import { normalizeRunnerPacing, generateProceduralLayout } from '../game/promptUtils';
 import { generateGameConfig } from '../game/geminiService';
 import { isGeminiConfigured, createCancelToken } from '../game/assetPipeline';
-import { generateOrRestoreAssets, makePromptKey, makePresetKey, THEME_KEYS, THEME_LABELS, pickRandomTheme, describeFailure, buildStaticBoot } from '../game/assetCache';
+import { generateOrRestoreAssets, makePromptKey, THEME_KEYS, THEME_LABELS, pickRandomTheme, describeFailure, buildStaticBoot, listQuickStartEntries, restoreQuickStartWorld, readCacheOnlyFlag } from '../game/assetCache';
+import { QUICK_START_WORLDS, viewForMode, makeQuickStartKey, pickQuickStartWorld, recordQuickStartPick, readRecent, quickStartTitle } from '../game/quickStart';
 import * as metrics from '../game/metrics';
 import AccountButton from '../auth/AccountButton';
 import { IconRemix } from './Icons';
@@ -402,7 +403,37 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
     ? { ...freshConfig, gameId: result.config.gameId, sourcePrompt: result.config.sourcePrompt, dynamicAssetUrls: true }
     : result.config;
 
-  const startCompilationSequence = async (newConfig, promptText, cacheKey = null) => {
+  // Quick Start art (2026-11-07): the picked pool world, then up to two other
+  // worlds if one can't be served, then a built-in world. Each attempt rebuilds
+  // the config for ITS world (title, physics, layout), so the art and the title
+  // always agree.
+  const resolveQuickStartArt = async (firstConfig, qs, token) => {
+    const tried = new Set();
+    let pick = qs.pick;
+    let config = firstConfig;
+    for (let i = 0; i < 3 && pick; i++) {
+      tried.add(pick.world.id);
+      if (i > 0) config = await buildQuickStartConfig(qs.mode, pick.world);
+      const res = await restoreQuickStartWorld({
+        world: pick.world, view: qs.view, config, knownEntries: qs.known,
+        generate: pick.generate, onProgress: assetProgressHandler, cancelToken: token
+      });
+      if (res) {
+        if (!res.staticBoot) recordQuickStartPick(qs.view, pick.world.id);
+        return res;
+      }
+      setTerminalLogs(prev => [...prev, `[CACHE] "${pick.world.label}" could not be loaded — picking another world.`]);
+      pick = pickQuickStartWorld(qs.view, { cachedIds: qs.cachedIds, canSpend: false, recent: [...readRecent(qs.view), ...tried] });
+      if (pick && tried.has(pick.world.id)) pick = null;
+    }
+    const themeKey = THEME_KEYS.includes(config.themeKey) ? config.themeKey : pickRandomTheme();
+    return buildStaticBoot({ ...config, gameName: config.gameName }, themeKey, null);
+  };
+
+  // A Quick Start boots its OWN config (rolled for the world) with the result's art routing.
+  const bootConfigFor = (newConfig, gen, qs) => (qs ? gen.config : presetBootConfig(newConfig, gen));
+
+  const startCompilationSequence = async (newConfig, promptText, cacheKey = null, qs = null) => {
     if (isOverlay) {
       // Overlay runs show the same compiler terminal as the first-run flow
       // ('compiling' is the phase the progress UI actually renders — the old
@@ -424,19 +455,21 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
       ]);
       setProgress(10);
       try {
-        const gen = await generateOrRestoreAssets({
-          config: newConfig,
-          promptKey: cacheKey,
-          onProgress: assetProgressHandler,
-          cancelToken: token
-        });
+        const gen = qs
+          ? await resolveQuickStartArt(newConfig, qs, token)
+          : await generateOrRestoreAssets({
+            config: newConfig,
+            promptKey: cacheKey,
+            onProgress: assetProgressHandler,
+            cancelToken: token
+          });
         if (token.cancelled) {
           metrics.cancelRun();
           return; // stale run — the user moved on
         }
         metrics.mark('assets-ready');
         setTransitionPhase('done');
-        onGenerate('custom', { ...presetBootConfig(newConfig, gen), preloadedImages: gen.preloadedImages, assetMeta: gen.assetMeta });
+        onGenerate('custom', { ...bootConfigFor(newConfig, gen, qs), preloadedImages: gen.preloadedImages, assetMeta: gen.assetMeta });
       } catch (err) {
         if (token.cancelled || err.cancelled) {
           metrics.cancelRun();
@@ -453,7 +486,7 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
     }
 
     metrics.beginRun('generate', {
-      via: promptText ? 'prompt' : 'preset',
+      via: qs ? 'quickstart' : promptText ? 'prompt' : 'preset',
       gameType: newConfig.gameType,
       promptChars: (promptText || '').length
     });
@@ -495,17 +528,20 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
     setProgress(75);
 
     try {
-      const gen = await generateOrRestoreAssets({
-        config: newConfig,
-        promptKey: cacheKey,
-        onProgress: assetProgressHandler,
-        cancelToken: beginRun() // defensive symmetry with the overlay paths
-      });
+      const runToken = beginRun(); // defensive symmetry with the overlay paths
+      const gen = qs
+        ? await resolveQuickStartArt(newConfig, qs, runToken)
+        : await generateOrRestoreAssets({
+          config: newConfig,
+          promptKey: cacheKey,
+          onProgress: assetProgressHandler,
+          cancelToken: runToken
+        });
 
       metrics.mark('assets-ready');
       setTerminalLogs(prev => [...prev, '[ENGINE] Booting game scene and registering WebGL textures...']);
       onStartTransition({
-        ...presetBootConfig(newConfig, gen),
+        ...bootConfigFor(newConfig, gen, qs),
         remixParentId: currentConfig?.remixParentId || null,
         remixParentTitle: currentConfig?.remixParentTitle || null,
         preloadedImages: gen.preloadedImages,
@@ -738,22 +774,69 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
     }
   };
 
-  const generateRandom = () => {
-    const mode = getRandomMode(selectedMode);
-    const config = { ...GAME_PRESETS[mode] };
+  // A Quick Start world's config: the world prompt through the normal local
+  // config generator (title words, physics keywords, arena rules), a random
+  // difficulty on the existing dial, an Action Quest level laid out for the FINAL
+  // physics, and a random layout seed (shooter cover/hazards) stored in the config
+  // so a saved or shared game keeps its arena.
+  const buildQuickStartConfig = async (mode, world) => {
+    const { config } = await generateGameConfig(world.prompt, () => {}, { mode });
     config.difficulty = getRandomDifficulty();
-    
     applyDifficulty(config, mode);
-    
-    const theme = 'ice';
-    config.themeKey = theme;
-    
-    config.gameName = generateTitle("", mode, theme);
-    // Boolean flag only — true routes to AI (dyn_*) textures once generation
-    // succeeds; keyless goes straight to built-in theme art.
-    config.dynamicAssetUrls = isGeminiConfigured() ? true : null;
+    if (config.gameType === 'platformer') {
+      config.layoutArray = generateProceduralLayout(world.prompt, 'action_quest', config.worldWidth || 4000, config.difficulty, {
+        walkSpeed: config.actionWalkSpeed,
+        jumpHeight: config.actionJumpHeight,
+        gravity: config.actionGravity
+      });
+    }
+    // Built-in world for any fallback (never the custom-world choice dialog).
+    config.themeKey = THEME_KEYS.includes(config.themeKey) ? config.themeKey : world.theme;
+    config.gameName = quickStartTitle(world, mode);
+    config.sourcePrompt = world.prompt;
+    config.layoutSeed = Math.random().toString(36).slice(2, 10);
+    config.quickStartWorld = world.id;
+    return config;
+  };
 
-    startCompilationSequence(config, "Random Preset", makePresetKey(mode));
+  // Quick Start (2026-11-07): a random world from the shared pool — never the
+  // last few seen — instead of one ice art set per mode. See src/game/quickStart.js.
+  const quickStartBusyRef = useRef(false);
+  const generateRandom = async () => {
+    // The pool lookup runs before the compile screen appears — ignore repeat clicks.
+    if (quickStartBusyRef.current) return;
+    quickStartBusyRef.current = true;
+    try {
+      await runQuickStart();
+    } catch (err) {
+      console.error('[QuickStart] failed before compiling:', err);
+      const mode = getRandomMode(selectedMode);
+      const config = { ...GAME_PRESETS[mode], gameName: GAME_PRESETS[mode].name, difficulty: getRandomDifficulty(), themeKey: pickRandomTheme() };
+      applyDifficulty(config, mode);
+      startCompilationSequence(config, 'Quick Start', null, { mode, view: viewForMode(mode), pick: null, known: new Map(), cachedIds: new Set() });
+    } finally {
+      quickStartBusyRef.current = false;
+    }
+  };
+  const runQuickStart = async () => {
+    const mode = getRandomMode(selectedMode);
+    const view = viewForMode(mode);
+    let known = new Map();
+    try { known = await listQuickStartEntries(); } catch { /* pool lookup failed: bases still work */ }
+    const cachedIds = new Set((QUICK_START_WORLDS[view] || [])
+      .filter((w) => known.has(makeQuickStartKey(view, w.id)))
+      .map((w) => w.id));
+    const canSpend = isGeminiConfigured() && !readCacheOnlyFlag();
+    const pick = pickQuickStartWorld(view, { cachedIds, canSpend });
+    if (!pick) {
+      // No pool art usable at all: the resolver boots a built-in world.
+      const config = { ...GAME_PRESETS[mode], gameName: GAME_PRESETS[mode].name, difficulty: getRandomDifficulty(), themeKey: pickRandomTheme() };
+      applyDifficulty(config, mode);
+      startCompilationSequence(config, 'Quick Start', null, { mode, view, pick: null, known, cachedIds });
+      return;
+    }
+    const config = await buildQuickStartConfig(mode, pick.world);
+    startCompilationSequence(config, `Quick Start · ${pick.world.label}`, null, { mode, view, pick, known, cachedIds });
   };
 
   const applyDifficulty = (config, mode) => {
