@@ -334,6 +334,7 @@ export const SLOT_SPECS = {
         : `Draw a 2d video game hero sprite: ${subject}. The character is caught mid-run ` +
           `in a dynamic stride, full body in crisp side profile facing right, a single ` +
           `character filling most of the frame with a sharp clean outline. ` +
+          `${gameType === 'runner' ? RUNNER_HERO_CLAUSE + ' ' : ''}` +
           `${BG_CLAUSE(chroma)}. ${GAPS_CLAUSE}. No shadow, no ground, no motion lines, ` +
           `no text. ${style}`,
     fallbackSubject: (d) => d?.player
@@ -414,7 +415,7 @@ export const SLOT_SPECS = {
     // cell differ from every OTHER cell: the cycle legitimately repeats its
     // passing pose (cells 2/4), and "dramatically different" pressure makes
     // models redesign the character per cell (regression observed 2026-07-30).
-    scaffold: (subject, style, { chroma } = {}) =>
+    scaffold: (subject, style, { chroma, gameType } = {}) =>
       `Draw one horizontal sprite-sheet strip of ten animation frames, reading left ` +
       `to right, of the EXACT SAME video game character: ${subject}. ` +
       `${SHEET_IDENTITY_CLAUSE('ten')} ` +
@@ -425,6 +426,7 @@ export const SLOT_SPECS = {
       `The arms swing opposite to the legs and visibly change position between the ` +
       `stride frames. All ten frames keep consistent proportions and lighting. ` +
       `${SHEET_HELD_ITEM_CLAUSE} ` +
+      `${gameType === 'runner' ? RUNNER_HERO_CLAUSE + ' ' : ''}` +
       `${SHEET_FRAMING_CLAUSE(chroma)}. ${style}`,
     fallbackSubject: (d) => d?.player
   },
@@ -466,6 +468,16 @@ export const PROPS_GRID_SPEC = {
   },
   cellOrder: ['platform', 'enemy', 'obstacle', 'collectible', 'projectile']
 };
+
+// Runner heroes (2026-11-18): the endless runner needs a SPRINTER, not the armed
+// adventurer the Action Quest cast reads as. Appended to the static player and the
+// sheet only for gameType 'runner'; the world's own look still comes from the subject.
+export const RUNNER_HERO_CLAUSE =
+  'This is the hero of an endless runner: a lean, agile sprinter with a streamlined ' +
+  'athletic silhouette leaning forward into the run, light gear that suits the world, ' +
+  'hands empty or lightly gloved. No sword, shield, bow, gun, staff or other held ' +
+  'weapon, and no long flowing cape or trailing cloak that hides the legs, so the ' +
+  'arms and legs read clearly in every running pose.';
 
 export const BASELINE_SLOTS = ['background_far', 'floor', 'platform', 'player', 'enemy', 'obstacle'];
 

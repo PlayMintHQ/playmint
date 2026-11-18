@@ -1693,6 +1693,79 @@ export function stripEdgeBars(canvas, { alphaMin = 16, minSpan = 0.6 } = {}) {
 }
 
 /**
+ * Per-cell stray-fragment sweep (2026-11-17). A sprite-sheet cut that lands a few
+ * pixels inside the neighbouring pose leaves a detached sliver of that pose (a cape
+ * tip, a blade, a boot) floating beside the character; nothing else removes it
+ * because it is real, opaque content. Keeps the largest component and drops any
+ * other that (a) is small (< maxFrac of the main body) AND farther than `gap` px
+ * from it, or (b) touches the left/right cell edge, is < edgeFrac of the body and
+ * is not within `gap` of it. Attached or nearly-touching parts (a hand across a
+ * 1-3px outline gap, a hugging cape) always survive. In place; returns { removed }.
+ */
+export function removeStrayFragments(canvas, { alphaMin = 16, gap = 6, maxFrac = 0.12, edgeFrac = 0.35 } = {}) {
+  const w = canvas.width, h = canvas.height;
+  if (w < 8 || h < 8) return { removed: 0 };
+  const ctx = canvas.getContext('2d');
+  const img = ctx.getImageData(0, 0, w, h);
+  const d = img.data;
+  const label = new Int32Array(w * h).fill(-1);
+  const comps = [];
+  const stack = [];
+  for (let start = 0; start < w * h; start++) {
+    if (label[start] !== -1 || d[start * 4 + 3] < alphaMin) continue;
+    const id = comps.length;
+    const c = { id, n: 0, pixels: [], edge: false };
+    label[start] = id;
+    stack.push(start);
+    while (stack.length) {
+      const k = stack.pop();
+      c.n++; c.pixels.push(k);
+      const x = k % w, y = (k / w) | 0;
+      if (x <= 1 || x >= w - 2) c.edge = true;
+      for (let dy = -1; dy <= 1; dy++) {
+        const ny = y + dy;
+        if (ny < 0 || ny >= h) continue;
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = x + dx;
+          if (nx < 0 || nx >= w) continue;
+          const j = ny * w + nx;
+          if (label[j] === -1 && d[j * 4 + 3] >= alphaMin) { label[j] = id; stack.push(j); }
+        }
+      }
+    }
+    comps.push(c);
+  }
+  if (comps.length < 2) return { removed: 0 };
+  let main = comps[0];
+  for (const c of comps) if (c.n > main.n) main = c;
+  const nearMain = (c) => {
+    for (const k of c.pixels) {
+      const x = k % w, y = (k / w) | 0;
+      for (let dy = -gap; dy <= gap; dy++) {
+        const ny = y + dy;
+        if (ny < 0 || ny >= h) continue;
+        for (let dx = -gap; dx <= gap; dx++) {
+          const nx = x + dx;
+          if (nx >= 0 && nx < w && label[ny * w + nx] === main.id) return true;
+        }
+      }
+    }
+    return false;
+  };
+  let removed = 0;
+  for (const c of comps) {
+    if (c === main) continue;
+    const frac = c.n / main.n;
+    if (frac >= (c.edge ? edgeFrac : maxFrac)) continue;
+    if (nearMain(c)) continue;
+    for (const k of c.pixels) d[k * 4 + 3] = 0;
+    removed++;
+  }
+  if (removed) ctx.putImageData(img, 0, 0);
+  return { removed };
+}
+
+/**
  * A divider bar FUSED to a finished sprite (what stripEdgeBars cannot separate):
  * one of the outer 3 columns/rows is ≥ 92% opaque and ≥ 80% flat pale. Used as a
  * gate on props-grid cells only — such a cell goes to its individual call.
@@ -1835,6 +1908,7 @@ export async function processSheet(rawSrc, spec, { inset = 3, chroma = null } = 
     // Transparent headroom BEFORE the edge chain (after keying — padding earlier
     // would poison the border-seeded flood) so erode/outline treat the head's top
     // like any other edge. Uniform across cells; the union crop trims it back off.
+    .map((cell) => { removeStrayFragments(cell); return cell; })
     .map((cell) => padCanvasTop(cell, 4))
     .map((cell) => cleanKeyedEdges(cell, { erode: 1, outline: !!spec.post.outline, despill: chroma }));
   cells.forEach((cell, i) => { cell.pmBoxed = !!boxedFlags[i]; });

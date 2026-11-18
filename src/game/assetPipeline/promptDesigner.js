@@ -331,7 +331,9 @@ function buildDesignerPrompt(userPrompt, gameType, entities = {}, themeKey = nul
     `- background_near: closer foreground scenery elements (max 15 words)\n` +
     `- floor: the ground/terrain surface material (max 15 words)\n` +
     `- platform: a floating platform block (max 15 words)\n` +
-    `- player: the hero character (max 20 words)\n` +
+    (gameType === 'runner'
+      ? `- player: the hero of an endless RUNNER — a lean, agile sprinter in light gear that suits the world, no held weapon and no long cape (max 20 words)\n`
+      : `- player: the hero character (max 20 words)\n`) +
     `- enemy: a patrolling enemy creature${must(entities.enemy)} (max 20 words)\n` +
     (gameType === 'shooter'
       ? `- obstacle: a solid COVER prop for the arena — a crate, barrier or wall block that clearly belongs to this world${must(entities.hazard)} (max 15 words)\n`

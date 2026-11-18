@@ -836,7 +836,8 @@ async function loadEntryImages(id, cancelToken) {
 export async function restoreQuickStartWorld({ world, view, config, knownEntries = null, generate = false, onProgress, cancelToken, warm = false }) {
   const t0 = performance.now();
   const key = makeQuickStartKey(view, world.id);
-  const artType = view === 'topdown' ? 'shooter' : 'platformer'; // platformer art also serves runners (+projectile)
+  // 'runner' view = the Runner's own pool (sprinter heroes); 'side' = Action Quest's.
+  const artType = view === 'topdown' ? 'shooter' : view === 'runner' ? 'runner' : 'platformer';
   const cacheOnly = readCacheOnly();
   const canSpend = !cacheOnly && isGeminiConfigured();
 
@@ -857,7 +858,7 @@ export async function restoreQuickStartWorld({ world, view, config, knownEntries
     const slots = [];
     if (canSpend) {
       slots.push(...staleCharacterSlots(entry.assetMeta, images, artType));
-      if (view === 'side' && !images.player && !slots.includes('player_sheet')) slots.push('player_sheet');
+      if (view !== 'topdown' && !slots.includes('player_sheet') && (!images.player || (view === 'runner' && isBase))) slots.push('player_sheet');
       if (view === 'side' && !images.projectile) slots.push('projectile');
       if (view === 'topdown' && !images.obstacle) slots.push('obstacle');
     }
@@ -927,7 +928,7 @@ export async function warmQuickStartPool({ view = 'side', budgetUsd = 4 } = {}) 
     try {
       const res = await restoreQuickStartWorld({
         world, view, knownEntries: known, warm: true,
-        config: { gameType: view === 'topdown' ? 'shooter' : 'platformer', themeKey: world.theme, sourcePrompt: world.prompt, dynamicAssetUrls: true },
+        config: { gameType: view === 'topdown' ? 'shooter' : view === 'runner' ? 'runner' : 'platformer', themeKey: world.theme, sourcePrompt: world.prompt, dynamicAssetUrls: true },
         onProgress: (text) => { if (text) console.log(`   ${text}`); }
       });
       const usd = res?.assetMeta?.cost?.estUsd || 0;

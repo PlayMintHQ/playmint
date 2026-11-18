@@ -105,7 +105,13 @@ export const QUICK_START_WORLDS = {
   ]
 };
 
-export const viewForMode = (mode) => (mode === 'shooter_arena' ? 'topdown' : 'side');
+// The Runner has its OWN pool over the same 16 worlds (2026-11-18): the shared side-view
+// pool drew its heroes as Action Quest adventurers (gameType 'platformer'), which is not
+// what an endless runner's hero should look like. Same backdrops, separate keys, sprinter
+// heroes (RUNNER_HERO_CLAUSE). Action Quest keeps the 'side' pool.
+QUICK_START_WORLDS.runner = QUICK_START_WORLDS.side;
+
+export const viewForMode = (mode) => (mode === 'shooter_arena' ? 'topdown' : mode === 'standard' ? 'runner' : 'side');
 
 // One key per world and view; mode-agnostic within a view (a side-view set
 // serves Runner AND Action Quest). Normal quality tier only: a Quick Start is
