@@ -342,7 +342,7 @@ export async function auditRestoredArt(preloadedImages, assetMeta) {
 // Redraw some slots of a cached set and persist the result as a NEW entry (the
 // base entry is never modified). Shared by the matcher's partial reuse and by
 // exact/preset hits whose characters predate ART_REV.
-async function redrawOverEntry({ entry, baseImages, slots, config, userPrompt, promptKey, onProgress, cancelToken, t0, matcherCost = null, label, reason = '', tier = 'reuse-partial', awaitServer = false }) {
+async function redrawOverEntry({ entry, baseImages, slots, config, userPrompt, promptKey, onProgress, cancelToken, t0, matcherCost = null, label, reason = '', tier = 'reuse-partial', awaitServer = false, bailOnFail = false }) {
   const regenSlots = [...new Set(slots.map((s) => (s === 'player' && config?.gameType !== 'shooter' ? 'player_sheet' : s)))];
   let regen = null;
   try {
@@ -358,6 +358,9 @@ async function redrawOverEntry({ entry, baseImages, slots, config, userPrompt, p
     if (err?.cancelled) throw err;
     onProgress?.('[CACHE] Redraw failed — reusing the cached art as-is.', null);
   }
+  // Quick Start pool: a failed redraw must NEVER be stored under the pool key (it would
+  // read as "warm" and pin the old art for everyone). The caller serves the base as-is.
+  if (bailOnFail && !regen) return null;
   // The new entry starts from CLEAN base props (divider debris stripped), so a
   // persisted redraw never re-uploads an old bar.
   const cleanedProps = await cleanStoredProps(baseImages).catch(() => ({ images: {} }));
@@ -870,15 +873,18 @@ export async function restoreQuickStartWorld({ world, view, config, knownEntries
         config: { ...artOnlyConfig(entry.config), ...config, gameType: artType, sourcePrompt: world.prompt },
         userPrompt: world.prompt, promptKey: key, onProgress, cancelToken, t0, label,
         reason: isBase ? 'Quick Start world: first use of a pooled art set' : 'Quick Start world: characters predate today\'s checks',
-        tier: 'quickstart', awaitServer: warm
+        tier: 'quickstart', awaitServer: warm, bailOnFail: true
       });
-      return {
-        config: { ...config, gameId: redrawn.gameId, sourcePrompt: world.prompt, dynamicAssetUrls: true },
-        preloadedImages: redrawn.preloadedImages,
-        assetMeta: redrawn.assetMeta,
-        fromCache: true,
-        quickStart: { worldId: world.id, upgraded: true }
-      };
+      if (!redrawn && warm) throw new Error('redraw failed (not stored)');
+      if (redrawn) {
+        return {
+          config: { ...config, gameId: redrawn.gameId, sourcePrompt: world.prompt, dynamicAssetUrls: true },
+          preloadedImages: redrawn.preloadedImages,
+          assetMeta: redrawn.assetMeta,
+          fromCache: true,
+          quickStart: { worldId: world.id, upgraded: true }
+        };
+      }
     }
     const audited = await auditRestoredArt(images, restoredMeta(entry));
     onProgress?.(`[CACHE] Quick Start world "${label}" — restored from the shared pool ($0 this run)`, 90);
@@ -912,7 +918,7 @@ export async function restoreQuickStartWorld({ world, view, config, knownEntries
  * production Quick Starts are instant and $0 from the first click. Sequential,
  * budget-capped, resumable (worlds that already have an entry are skipped).
  */
-export async function warmQuickStartPool({ view = 'side', budgetUsd = 4 } = {}) {
+export async function warmQuickStartPool({ view = 'side', budgetUsd = 4, redo = [] } = {}) {
   if (!isGeminiConfigured()) { console.warn('[QS-WARM] No Gemini key — nothing to do.'); return []; }
   if (readCacheOnly()) { console.warn('[QS-WARM] "Cache only" is ON in this browser — turn it off (ScreenZero top-right) and run again.'); return []; }
   const known = await listQuickStartEntries();
@@ -921,7 +927,7 @@ export async function warmQuickStartPool({ view = 'side', budgetUsd = 4 } = {}) 
   for (const world of QUICK_START_WORLDS[view] || []) {
     if (!world.baseArtId) continue;
     const key = makeQuickStartKey(view, world.id);
-    if (known.has(key)) { report.push({ world: world.id, status: 'already warm', id: known.get(key).id }); continue; }
+    if (known.has(key) && !redo.includes(world.id)) { report.push({ world: world.id, status: 'already warm', id: known.get(key).id }); continue; }
     if (total >= budgetUsd) { report.push({ world: world.id, status: 'skipped (budget)' }); continue; }
     const t0 = performance.now();
     console.log(`[QS-WARM] ${world.label}…`);
