@@ -836,7 +836,7 @@ async function loadEntryImages(id, cancelToken) {
  * has it. `generate` allows a fresh run (top-down self-fill).
  * `warm` (the warm-up tool) awaits the server upload.
  */
-export async function restoreQuickStartWorld({ world, view, config, knownEntries = null, generate = false, onProgress, cancelToken, warm = false }) {
+export async function restoreQuickStartWorld({ world, view, config, knownEntries = null, generate = false, onProgress, cancelToken, warm = false, forceRedraw = false }) {
   const t0 = performance.now();
   const key = makeQuickStartKey(view, world.id);
   // 'runner' view = the Runner's own pool (sprinter heroes); 'side' = Action Quest's.
@@ -864,6 +864,8 @@ export async function restoreQuickStartWorld({ world, view, config, knownEntries
       if (view !== 'topdown' && !slots.includes('player_sheet') && (!images.player || (view === 'runner' && isBase))) slots.push('player_sheet');
       if (view === 'side' && !images.projectile) slots.push('projectile');
       if (view === 'topdown' && !images.obstacle) slots.push('obstacle');
+      // Warm-up redo: redraw the hero even when its stored rev is current (new animation method).
+      if (forceRedraw && view !== 'topdown' && !slots.includes('player_sheet')) slots.push('player_sheet');
     }
     const label = world.label;
     if (slots.length) {
@@ -933,7 +935,7 @@ export async function warmQuickStartPool({ view = 'side', budgetUsd = 4, redo = 
     console.log(`[QS-WARM] ${world.label}…`);
     try {
       const res = await restoreQuickStartWorld({
-        world, view, knownEntries: known, warm: true,
+        world, view, knownEntries: known, warm: true, forceRedraw: redo.includes(world.id),
         config: { gameType: view === 'topdown' ? 'shooter' : view === 'runner' ? 'runner' : 'platformer', themeKey: world.theme, sourcePrompt: world.prompt, dynamicAssetUrls: true },
         onProgress: (text) => { if (text) console.log(`   ${text}`); }
       });
