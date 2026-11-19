@@ -197,17 +197,20 @@ const pos = (x) => Math.max(0, x);
 export function runPose(k) {
   const phi = Math.PI / 2 + (k * Math.PI) / 4;
   const sin = Math.sin(phi), cos = Math.cos(phi);
-  const nearArm = -42 * sin;
-  const farArm = 42 * sin;
+  // Arms swing wider than before (±62°) and the elbow OPENS when the arm drives back
+  // (a bent forearm pointing forward in every frame read as "arms never move").
+  const nearArm = -62 * sin;
+  const farArm = 62 * sin;
+  const elbow = (a) => 38 + 62 * pos(a / 62);
   return {
     nearThigh: 6 + 42 * sin,
     nearFlex: 12 + 78 * Math.pow(pos(cos), 1.3),
     farThigh: 6 - 42 * sin,
     farFlex: 12 + 78 * Math.pow(pos(-cos), 1.3),
     nearArm,
-    nearElbow: 70 + 22 * pos(nearArm / 42),
+    nearElbow: elbow(nearArm),
     farArm,
-    farElbow: 70 + 22 * pos(farArm / 42),
+    farElbow: elbow(farArm),
     lean: 9,
     dy: 3 * (1 + Math.cos(2 * phi - Math.PI)) / 2
   };

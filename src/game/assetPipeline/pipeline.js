@@ -1226,6 +1226,7 @@ export async function generateAssets({
           const keyed = keyCellWithQuality(canvas, { chroma });
           const { parts, issue } = extractRigParts(keyed);
           if (!parts) { report(`[ASSETS] Rig parts sheet rejected (${issue})`); continue; }
+          try { window.__PM_RIG_DEBUG = { parts, raw: raw.dataUrl }; } catch { /* debug only */ }
           const { cells, poses, framesMeta } = composeRigFrames(parts);
           if (!rigSwapsLimbs(poses)) return null;
           const finished = cells.map((cell) => cleanKeyedEdges(cell, { erode: 1, outline: !!spec.post.outline, despill: chroma }));
