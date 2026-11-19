@@ -8,8 +8,8 @@
  * every caller handles it by downgrading to the built-in static theme asset set
  * (ScreenZero's toStaticThemeConfig; App surfaces it in the regen overlay).
  */
-import { SLOT_SPECS, BASELINE_SLOTS, GENERATED_SLOTS, GEMINI_SHEET_MODEL, GEMINI_PRO_SHEET_MODEL, PROPS_GRID_SPEC, BG_CLAUSE, GAPS_CLAUSE, RIG_PARTS_PROMPT } from './slotSpecs';
-import { extractRigParts, composeRigFrames, rigSwapsLimbs } from './rig';
+import { SLOT_SPECS, BASELINE_SLOTS, GENERATED_SLOTS, GEMINI_SHEET_MODEL, GEMINI_PRO_SHEET_MODEL, PROPS_GRID_SPEC, BG_CLAUSE, GAPS_CLAUSE, RIG_PARTS_PROMPT, GUIDE_SHEET_PREAMBLE, GUIDED_POSES_SENTENCE } from './slotSpecs';
+import { extractRigParts, composeRigFrames, rigSwapsLimbs, renderPoseGuide } from './rig';
 import { postProcessAsset, mirrorImage, rotateImageQuarter, drawToCanvas, alphaFraction, borderResidueFraction, topBandOpaqueFraction, brightResidueFraction, contentBoundsOf, processSheet, finalizeSheetFrames, loadImage, keyCellWithQuality, cleanKeyedEdges, alignFrames, maskIoU, composeFilmstrip, lockPalette, sliceRawGrid, removeEnclosedPockets, chromaResidueFraction, isBoxedSprite, sliceSheetFrames, stripFromFrames, whiteBorderFraction, hasEdgeBar, stripEdgeBars, cropCanvasToContent } from './postprocess';
 import { reviewSprite } from './qa';
 import * as gemini from './providers/geminiImage';
@@ -124,7 +124,7 @@ async function generateSlotImage(slot, prompt, seed, onProgress, maxAttemptsPerP
       const result = await gemini.generateImage({
         prompt,
         aspectRatio: spec.gen.aspectRatio,
-        referenceImageDataUrl,
+        ...(Array.isArray(referenceImageDataUrl) ? { referenceImageDataUrls: referenceImageDataUrl } : { referenceImageDataUrl }),
         model: spec.gen.model,
         imageSize: spec.gen.imageSize,
         label: slot // cost-report attribution
@@ -1198,7 +1198,8 @@ export async function generateAssets({
       // parts sheet (1 call, ~$0.05) posed in code swaps them by construction and
       // bakes out the SAME sheet contract. Any failure falls through to the ladder
       // below, so behaviour is never worse than before. PM_RIG='0' disables it.
-      const rigOff = (() => { try { return localStorage.getItem('PM_RIG') === '0'; } catch { return false; } })();
+      // The rigged cut-out looked bad live (duplicated arms, smeared rotated pixels) — opt-in only.
+      const rigOff = (() => { try { return localStorage.getItem('PM_RIG') !== '1'; } catch { return true; } })();
       let rigged = false;
       const tryRigSheet = async () => {
         const models = [activeSpec.gen.model, GEMINI_SHEET_MODEL];
@@ -1276,14 +1277,21 @@ export async function generateAssets({
         // The sheet is an image-editing call anchored to the static base; the
         // prompt preamble tells the model the attachment IS the character.
         const useReference = baseSrc && gemini.isGeminiConfigured() && !runState.skipGemini;
-        const sheetPrompt = useReference
+        // Runner heroes: attach the stick-figure pose guide as a 2nd reference (see
+        // GUIDE_SHEET_PREAMBLE). PM_POSE_GUIDE='0' disables it.
+        const guideOn = useReference && !isRepair && runState.gameType === 'runner' &&
+          !(() => { try { return localStorage.getItem('PM_POSE_GUIDE') === '0'; } catch { return false; } })();
+        const guideSrc = guideOn ? renderPoseGuide() : null;
+        const sheetPrompt = guideOn
+          ? GUIDE_SHEET_PREAMBLE + prompt.replace(/Frames 1 to 8 are[\s\S]*?(?=The arms swing opposite)/, GUIDED_POSES_SENTENCE)
+          : useReference
           ? `Using the provided image of the character, redraw THIS EXACT character — keep ` +
             `every feature completely unchanged, do not reinvent anything about it — as the ` +
             `following sprite strip. ${prompt}`
           : prompt;
         let raw;
         try {
-          raw = await generateSlotImage(slot, sheetPrompt, seed + attempt * 13, report, maxAttemptsPerProvider, runState, onAttempt, useReference ? baseSrc : null, attemptSpec);
+          raw = await generateSlotImage(slot, sheetPrompt, seed + attempt * 13, report, maxAttemptsPerProvider, runState, onAttempt, guideOn ? [baseSrc, guideSrc] : (useReference ? baseSrc : null), attemptSpec);
         } catch (genErr) {
           if (genErr?.cancelled) throw genErr;
           // A later rung dying (quota, budget, network) must not throw away a

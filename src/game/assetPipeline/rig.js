@@ -253,3 +253,62 @@ export function rigSwapsLimbs(poses) {
   const opposed = run.every((p) => Math.abs(p.nearArm + p.farArm) < 1 && Math.abs((p.nearThigh - 6) + (p.farThigh - 6)) < 1);
   return sign(arms) && sign(legs) && opposed;
 }
+
+/* ------------------------------------------------------------ pose guide */
+// A stick-figure strip drawn from the SAME pose table, sent to Gemini as a second
+// reference so each cell gets an explicit pose (the PixelLab/ControlNet idea: a
+// skeleton per frame). RED limbs = in front of the body (camera side), BLUE = behind.
+const GUIDE = { neck: 10, torso: 30, head: 7, thigh: 24, shin: 24, upper: 17, fore: 17 };
+const GUIDE_COLORS = { nearArm: '#e02020', nearLeg: '#e02020', farArm: '#1f4fe0', farLeg: '#1f4fe0', body: '#222222' };
+
+function limbEnd(x, y, deg, len, extraDeg = 0, sign = 1) {
+  // deg positive = forward (+x) from straight down; same convention as drawRigPose.
+  const a = rad(deg) * sign - rad(extraDeg) * sign;
+  return { x: x + Math.sin(a) * len, y: y + Math.cos(a) * len };
+}
+
+function drawStick(ctx, cx, groundY, pose) {
+  const hip = { x: cx, y: groundY - GUIDE.thigh - GUIDE.shin };
+  const lean = rad(pose.lean || 0);
+  const sh = { x: hip.x + Math.sin(lean) * GUIDE.torso, y: hip.y - Math.cos(lean) * GUIDE.torso };
+  const head = { x: sh.x + Math.sin(lean) * (GUIDE.neck + GUIDE.head), y: sh.y - Math.cos(lean) * (GUIDE.neck + GUIDE.head) };
+  hip.y += pose.dy || 0; sh.y += pose.dy || 0; head.y += pose.dy || 0;
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  const seg = (a, b, color, w) => { ctx.strokeStyle = color; ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); };
+  const leg = (thighDeg, flex, color) => {
+    const knee = limbEnd(hip.x, hip.y, thighDeg, GUIDE.thigh);
+    // shin = thigh angle minus flex (swings backward), matching drawLeg
+    const foot = limbEnd(knee.x, knee.y, thighDeg - flex, GUIDE.shin);
+    seg(hip, knee, color, 5); seg(knee, foot, color, 5);
+    seg(foot, { x: foot.x + 7, y: foot.y }, color, 4); // toe points right
+  };
+  const arm = (armDeg, elbow, color) => {
+    const el = limbEnd(sh.x, sh.y, armDeg, GUIDE.upper);
+    const hand = limbEnd(el.x, el.y, armDeg + elbow, GUIDE.fore);
+    seg(sh, el, color, 4); seg(el, hand, color, 4);
+    ctx.fillStyle = color; ctx.beginPath(); ctx.arc(hand.x, hand.y, 3, 0, Math.PI * 2); ctx.fill();
+  };
+  // back to front, like the real draw order
+  arm(pose.farArm, pose.farElbow, GUIDE_COLORS.farArm);
+  leg(pose.farThigh, pose.farFlex, GUIDE_COLORS.farLeg);
+  seg(hip, sh, GUIDE_COLORS.body, 6);
+  seg(sh, { x: sh.x + Math.sin(lean) * GUIDE.neck, y: sh.y - Math.cos(lean) * GUIDE.neck }, GUIDE_COLORS.body, 4);
+  ctx.fillStyle = GUIDE_COLORS.body; ctx.beginPath(); ctx.arc(head.x, head.y, GUIDE.head, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(head.x + GUIDE.head - 1, head.y - 3); ctx.lineTo(head.x + GUIDE.head + 6, head.y + 1); ctx.lineTo(head.x + GUIDE.head - 1, head.y + 4); ctx.fill(); // nose = facing right
+  leg(pose.nearThigh, pose.nearFlex, GUIDE_COLORS.nearLeg);
+  arm(pose.nearArm, pose.nearElbow, GUIDE_COLORS.nearArm);
+}
+
+/** 10-cell guide strip (8 run phases, idle, jump) as a PNG data URL, 1280x128 like the sheet. */
+export function renderPoseGuide() {
+  const cells = 10, w = 128 * cells, h = 128;
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#f2f2f2'; ctx.fillRect(0, 0, w, h);
+  const poses = [];
+  for (let k = 0; k < RUN_FRAMES; k++) poses.push(runPose(k));
+  poses.push(IDLE_RIG_POSE, JUMP_RIG_POSE);
+  poses.forEach((p, i) => drawStick(ctx, 64 + i * 128, 118, p));
+  return c.toDataURL('image/png');
+}

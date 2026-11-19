@@ -497,6 +497,24 @@ export const RIG_PARTS_PROMPT = (chroma) =>
   `outline and the same lighting. ${BG_CLAUSE(chroma)}. ` +
   `No text, no labels, no numbers, no ground, no shadow.`;
 
+// Pose-guided sheet (Runner heroes, 2026-11-19): a stick-figure strip drawn from the pose
+// table rides along as the SECOND reference image, so every cell gets an explicit pose
+// instead of the model copying the reference's arms (the PixelLab/ControlNet idea).
+export const GUIDE_SHEET_PREAMBLE =
+  `You are given two images. Image 1 is the character reference. Image 2 is a POSE GUIDE: ` +
+  `a strip of ten stick-figure poses, one per cell, left to right, all facing right. In the ` +
+  `guide the RED limbs are the arm and leg in FRONT of the body (nearest the camera) and ` +
+  `the BLUE limbs are the arm and leg BEHIND the body. Draw the exact character from ` +
+  `Image 1 ONCE in each of the ten cells, copying that cell's stick-figure pose exactly: ` +
+  `where the red arm swings forward the character's front arm swings forward, where the ` +
+  `blue arm swings back the rear arm swings back, and the arms and legs change sides ` +
+  `between the first half and the second half of the strip. Draw the real character ` +
+  `only: never draw the stick figures, the red or blue lines, or the guide's grey ` +
+  `background. `;
+export const GUIDED_POSES_SENTENCE =
+  'Frames 1 to 8 are the eight phases of one full running stride cycle, frame 9 is the ' +
+  'idle stance and frame 10 is the jump, exactly as drawn in the pose guide. ';
+
 export const BASELINE_SLOTS = ['background_far', 'floor', 'platform', 'player', 'enemy', 'obstacle'];
 
 // Full generation set: baseline + optional parallax layers.
