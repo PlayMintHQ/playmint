@@ -479,6 +479,24 @@ export const RUNNER_HERO_CLAUSE =
   'weapon, and no long flowing cape or trailing cloak that hides the legs, so the ' +
   'arms and legs read clearly in every running pose.';
 
+// Rigged run cycle (2026-11-19): the hero redrawn ONCE as six separate parts, which
+// rig.js poses in code so the near/far arms and legs genuinely swap. An image-EDIT of
+// the static hero, so identity, outfit and pixel scale come from the reference.
+export const RIG_PARTS_PROMPT = (chroma) =>
+  `You are given one image: the character reference. Redraw the exact character from ` +
+  `the image as a disassembled paper-doll parts sheet: SIX separate pieces in ONE ` +
+  `horizontal row, left to right, each drawn exactly once, upright, in side profile ` +
+  `facing right, with wide empty backdrop gaps between them so no piece touches ` +
+  `another. The pieces, in order: 1) the head and neck; 2) the torso with the hips, ` +
+  `with NO arms and NO legs; 3) ONE upper arm hanging straight down, shoulder end at ` +
+  `the top; 4) ONE forearm and hand hanging straight down, elbow end at the top; ` +
+  `5) ONE thigh hanging straight down, hip end at the top; 6) ONE shin and foot ` +
+  `hanging straight down, knee end at the top, the foot pointing right. Keep every ` +
+  `feature completely unchanged — same design, colors, outfit, outline style and ` +
+  `pixel scale as the reference. Each piece is a complete clean shape with a sharp ` +
+  `outline and the same lighting. ${BG_CLAUSE(chroma)}. ` +
+  `No text, no labels, no numbers, no ground, no shadow.`;
+
 export const BASELINE_SLOTS = ['background_far', 'floor', 'platform', 'player', 'enemy', 'obstacle'];
 
 // Full generation set: baseline + optional parallax layers.

@@ -8,7 +8,8 @@
  * every caller handles it by downgrading to the built-in static theme asset set
  * (ScreenZero's toStaticThemeConfig; App surfaces it in the regen overlay).
  */
-import { SLOT_SPECS, BASELINE_SLOTS, GENERATED_SLOTS, GEMINI_SHEET_MODEL, GEMINI_PRO_SHEET_MODEL, PROPS_GRID_SPEC, BG_CLAUSE, GAPS_CLAUSE } from './slotSpecs';
+import { SLOT_SPECS, BASELINE_SLOTS, GENERATED_SLOTS, GEMINI_SHEET_MODEL, GEMINI_PRO_SHEET_MODEL, PROPS_GRID_SPEC, BG_CLAUSE, GAPS_CLAUSE, RIG_PARTS_PROMPT } from './slotSpecs';
+import { extractRigParts, composeRigFrames, rigSwapsLimbs } from './rig';
 import { postProcessAsset, mirrorImage, rotateImageQuarter, drawToCanvas, alphaFraction, borderResidueFraction, topBandOpaqueFraction, brightResidueFraction, contentBoundsOf, processSheet, finalizeSheetFrames, loadImage, keyCellWithQuality, cleanKeyedEdges, alignFrames, maskIoU, composeFilmstrip, lockPalette, sliceRawGrid, removeEnclosedPockets, chromaResidueFraction, isBoxedSprite, sliceSheetFrames, stripFromFrames, whiteBorderFraction, hasEdgeBar, stripEdgeBars, cropCanvasToContent } from './postprocess';
 import { reviewSprite } from './qa';
 import * as gemini from './providers/geminiImage';
@@ -1192,6 +1193,64 @@ export async function generateAssets({
       //        or the call budget is gone — the static base, logged as a FAILURE.
       // Before this the cost defaults stopped at the static player by design and
       // papered over it with a tilt-bob; both are gone.
+      // ---- Rigged run cycle (Runner heroes, 2026-11-19) -------------------------
+      // The one-call strip copies the reference's arms, so arms/legs never swap. A
+      // parts sheet (1 call, ~$0.05) posed in code swaps them by construction and
+      // bakes out the SAME sheet contract. Any failure falls through to the ladder
+      // below, so behaviour is never worse than before. PM_RIG='0' disables it.
+      const rigOff = (() => { try { return localStorage.getItem('PM_RIG') === '0'; } catch { return false; } })();
+      let rigged = false;
+      const tryRigSheet = async () => {
+        const models = [activeSpec.gen.model, GEMINI_SHEET_MODEL];
+        for (let i = 0; i < models.length; i++) {
+          if (runState.cancelToken?.cancelled) throw cancelledError();
+          if (runState.skipGemini || runState.imageCalls >= runState.maxImageCalls) return null;
+          runState.imageCalls++;
+          let raw;
+          try {
+            raw = await gemini.generateImage({
+              prompt: RIG_PARTS_PROMPT(chroma),
+              aspectRatio: '16:9',
+              referenceImageDataUrls: [baseSrc],
+              model: models[i],
+              imageSize: '1K',
+              label: 'player_sheet:rig-parts'
+            });
+          } catch (err) {
+            console.warn(`[AssetPipeline] Rig parts call failed: ${err.message}`);
+            if (err.kind === 'auth' || err.kind === 'no-key' || err.kind === 'quota') { if (err.kind !== 'quota') runState.skipGemini = true; return null; }
+            continue;
+          }
+          const img = await loadImage(raw.dataUrl);
+          const canvas = drawToCanvas(img, { width: img.naturalWidth, height: img.naturalHeight, fit: 'stretch' });
+          const keyed = keyCellWithQuality(canvas, { chroma });
+          const { parts, issue } = extractRigParts(keyed);
+          if (!parts) { report(`[ASSETS] Rig parts sheet rejected (${issue})`); continue; }
+          const { cells, poses, framesMeta } = composeRigFrames(parts);
+          if (!rigSwapsLimbs(poses)) return null;
+          const finished = cells.map((cell) => cleanKeyedEdges(cell, { erode: 1, outline: !!spec.post.outline, despill: chroma }));
+          const strip = composeFilmstrip(finished);
+          const rigReview = await reviewSprite(strip.toDataURL('image/png'), {
+            kind: 'strip', label: 'qa:player_sheet',
+            grid: { frameCount: finished.length, runFrameCount: framesMeta.runFrameCount }
+          });
+          const rigMirrored = !!(rigReview && rigReview.facingRight === false);
+          const rigSheet = await finalizeSheetFrames(finished, activeSpec, { mirror: rigMirrored, framesMeta });
+          if (!rigSheet) continue;
+          return { sheet: rigSheet, review: rigReview, mirrored: rigMirrored, calls: i + 1, model: models[i] };
+        }
+        return null;
+      };
+      if (!rigOff && runState.gameType === 'runner' && baseSrc && gemini.isGeminiConfigured() && !runState.skipGemini) {
+        report('[ASSETS] Building a rigged run cycle (parts sheet)...');
+        const r = await tryRigSheet();
+        if (r) {
+          sheet = r.sheet; review = r.review; mirrored = r.mirrored;
+          provider = 'gemini'; servedModel = r.model; attempts += r.calls; rigged = true;
+        } else {
+          report('[ASSETS] Rigged run cycle unavailable — using the standard sheet pipeline.');
+        }
+      }
       const isRepair = reuseStaticBase && slot === 'player_sheet';
       const tiers = isRepair && gemini.isGeminiConfigured()
         ? [GEMINI_SHEET_MODEL, GEMINI_SHEET_MODEL]
@@ -1560,7 +1619,7 @@ export async function generateAssets({
         provider, attempts, promptUsed: prompt,
         ...(servedModel ? { model: servedModel } : {}),
         qa: review, mirrored, facingVerified: !!review,
-        sheet: true, perFrame, frames: sheet.frames
+        sheet: true, perFrame, ...(rigged ? { rigged: true } : {}), frames: sheet.frames
       };
       delete slotFraction[slot];
       // No doneCount++ here: the static base already counted this slot when it
