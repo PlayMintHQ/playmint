@@ -16,12 +16,13 @@ function devBlobApi(env) {
     apply: 'serve',
     configureServer(server) {
       if ((process.env.PM_DEV_API || env.PM_DEV_API) !== '1') return
-      for (const key of ['BLOB_READ_WRITE_TOKEN', 'BLOB_STORE_ID']) {
+      for (const key of ['BLOB_READ_WRITE_TOKEN', 'BLOB_STORE_ID', 'PIXELLAB_API_KEY']) {
         if (env[key] && !process.env[key]) process.env[key] = env[key]
       }
       const routes = {
         '/api/games/upload': '/api/games/upload.js',
-        '/api/games/list': '/api/games/list.js'
+        '/api/games/list': '/api/games/list.js',
+        '/api/animate': '/api/animate.js'
       }
       let listCache = null // { at, body } — the list fans out to every meta.json
       server.middlewares.use(async (req, res, next) => {

@@ -10,6 +10,8 @@
  */
 import { SLOT_SPECS, BASELINE_SLOTS, GENERATED_SLOTS, GEMINI_SHEET_MODEL, GEMINI_PRO_SHEET_MODEL, PROPS_GRID_SPEC, BG_CLAUSE, GAPS_CLAUSE, RIG_PARTS_PROMPT, GUIDE_SHEET_PREAMBLE, GUIDED_POSES_SENTENCE } from './slotSpecs';
 import { extractRigParts, composeRigFrames, rigSwapsLimbs, renderPoseGuide } from './rig';
+import { animateHeroRun, PixelLabError } from './providers/pixellabAnimation';
+import { finishPixellabSheet } from './pixellabRung';
 import { postProcessAsset, mirrorImage, rotateImageQuarter, drawToCanvas, alphaFraction, borderResidueFraction, topBandOpaqueFraction, brightResidueFraction, contentBoundsOf, processSheet, finalizeSheetFrames, loadImage, keyCellWithQuality, cleanKeyedEdges, alignFrames, maskIoU, composeFilmstrip, lockPalette, sliceRawGrid, removeEnclosedPockets, chromaResidueFraction, isBoxedSprite, sliceSheetFrames, stripFromFrames, whiteBorderFraction, hasEdgeBar, stripEdgeBars, cropCanvasToContent } from './postprocess';
 import { reviewSprite } from './qa';
 import * as gemini from './providers/geminiImage';
@@ -43,6 +45,11 @@ const cancelledError = () => Object.assign(new Error('Generation cancelled'), { 
 // fix since Nov 3 reached only new art, while the client's re-tests replayed the
 // Nov 3 sprites from the cache (shooter `9136bee3` reused `7a0f5208`'s player).
 export const ART_REV = 20261105;
+
+// Set once the animation endpoint proves unavailable this session (no key on the server,
+// provider out of credit, quota, 404 on plain `npm run dev`): later heroes skip the PixelLab
+// rung instead of retrying it on every run.
+let pixellabUnavailable = false;
 
 // The $0 replay harness re-runs the sheet slicer + scorer on captured raws with
 // the CURRENT code — registration (instead of an import in sheetDebug) avoids a
@@ -693,7 +700,10 @@ export async function generateAssets({
   // Repair only: the game already has a good static player — build the sheet from it
   // instead of redrawing the character. A normal restyle must redraw from scratch.
   reuseStaticBase = false,
-  initialPreloadedImages = {}
+  initialPreloadedImages = {},
+  // Designer's description of the hero ("a hooded runner in red boots") — PixelLab needs a
+  // noun phrase of what the character LOOKS like next to the reference frame.
+  playerSubject = ''
 }) {
   const preloadedImages = { ...initialPreloadedImages };
   const meta = {};
@@ -735,7 +745,8 @@ export async function generateAssets({
       player_sheet: localStorage.getItem('PM_MODEL_SHEET') || null
     },
     cancelToken,
-    gameType
+    gameType,
+    playerSubject
   };
   let doneCount = 0;
   // A required slot that dies rejects the whole run — stop idle workers from
@@ -1193,6 +1204,56 @@ export async function generateAssets({
       //        or the call budget is gone — the static base, logged as a FAILURE.
       // Before this the cost defaults stopped at the static player by design and
       // papered over it with a tilt-bob; both are gone.
+      // ---- PixelLab skeleton run cycle (Runner heroes, 2026-11-20) --------------------
+      // The Gemini strip never alternates the arms (a side view hides the near/far swap).
+      // PixelLab redraws OUR static hero in a skeleton pose per frame (runCycle.js), so
+      // arms and legs swap by construction and the art stays crisp pixel art. ~3 PixelLab
+      // generations per hero. Any failure falls through to the Gemini ladder below, so a
+      // missing key / empty credit never makes a game worse than before.
+      // PM_ANIM_PROVIDER='gemini' disables it.
+      const animOff = (() => { try { return localStorage.getItem('PM_ANIM_PROVIDER') === 'gemini'; } catch { return false; } })();
+      let pixellabAnimated = false;
+      const tryPixellabSheet = async () => {
+        for (let attemptNo = 1; attemptNo <= 2; attemptNo++) {
+          if (runState.cancelToken?.cancelled) throw cancelledError();
+          let res;
+          try {
+            res = await animateHeroRun(baseCanvas || baseSrc, {
+              description: runState.playerSubject || 'game hero character',
+              seed: attemptNo === 1 ? 0 : Math.floor(Math.random() * 1e6),
+              onProgress: (text) => report(text),
+              isCancelled: () => !!runState.cancelToken?.cancelled
+            });
+          } catch (err) {
+            if (err?.kind === 'cancelled') throw cancelledError();
+            console.warn(`[AssetPipeline] PixelLab animation failed (${err?.kind || 'error'}): ${err?.message}`);
+            if (['unconfigured', 'quota', 'busy', 'timeout'].includes(err?.kind)) {
+              if (err.kind !== 'quota') pixellabUnavailable = true;
+              return null;
+            }
+            continue;
+          }
+          const done = await finishPixellabSheet(res.cells, { baseCanvas, spec: activeSpec, review: reviewSprite });
+          if (done.issue) { report(`[ASSETS] PixelLab sheet rejected (${done.issue})`); continue; }
+          return { sheet: done.sheet, review: done.review, mirrored: done.mirrored, calls: attemptNo };
+        }
+        return null;
+      };
+      if (!animOff && !pixellabUnavailable && runState.gameType === 'runner' && baseSrc) {
+        try {
+          const r = await tryPixellabSheet();
+          if (r) {
+            sheet = r.sheet; review = r.review; mirrored = r.mirrored;
+            provider = 'pixellab'; servedModel = 'pixellab-animate-with-skeleton-v3'; attempts += r.calls; pixellabAnimated = true;
+          } else {
+            report('[ASSETS] PixelLab animation unavailable — using the standard sheet pipeline.');
+          }
+        } catch (err) {
+          if (err?.cancelled) throw err;
+          console.warn('[AssetPipeline] PixelLab rung crashed:', err);
+          report('[ASSETS] PixelLab animation unavailable — using the standard sheet pipeline.');
+        }
+      }
       // ---- Rigged run cycle (Runner heroes, 2026-11-19) -------------------------
       // The one-call strip copies the reference's arms, so arms/legs never swap. A
       // parts sheet (1 call, ~$0.05) posed in code swaps them by construction and
@@ -1243,7 +1304,7 @@ export async function generateAssets({
         }
         return null;
       };
-      if (!rigOff && runState.gameType === 'runner' && baseSrc && gemini.isGeminiConfigured() && !runState.skipGemini) {
+      if (!sheet && !rigOff && runState.gameType === 'runner' && baseSrc && gemini.isGeminiConfigured() && !runState.skipGemini) {
         report('[ASSETS] Building a rigged run cycle (parts sheet)...');
         const r = await tryRigSheet();
         if (r) {
@@ -1278,9 +1339,9 @@ export async function generateAssets({
         // prompt preamble tells the model the attachment IS the character.
         const useReference = baseSrc && gemini.isGeminiConfigured() && !runState.skipGemini;
         // Runner heroes: attach the stick-figure pose guide as a 2nd reference (see
-        // GUIDE_SHEET_PREAMBLE). PM_POSE_GUIDE='0' disables it.
+        // GUIDE_SHEET_PREAMBLE). OFF by default: PM_POSE_GUIDE='1' enables it.
         const guideOn = useReference && !isRepair && runState.gameType === 'runner' &&
-          !(() => { try { return localStorage.getItem('PM_POSE_GUIDE') === '0'; } catch { return false; } })();
+          (() => { try { return localStorage.getItem('PM_POSE_GUIDE') === '1'; } catch { return false; } })(); // opt-in: live test showed the model repeats right-lead poses and pastes stick figures
         const guideSrc = guideOn ? renderPoseGuide() : null;
         const sheetPrompt = guideOn
           ? GUIDE_SHEET_PREAMBLE + prompt.replace(/Frames 1 to 8 are[\s\S]*?(?=The arms swing opposite)/, GUIDED_POSES_SENTENCE)
@@ -1628,7 +1689,7 @@ export async function generateAssets({
         provider, attempts, promptUsed: prompt,
         ...(servedModel ? { model: servedModel } : {}),
         qa: review, mirrored, facingVerified: !!review,
-        sheet: true, perFrame, ...(rigged ? { rigged: true } : {}), frames: sheet.frames
+        sheet: true, perFrame, ...(rigged ? { rigged: true } : {}), animSource: pixellabAnimated ? 'pixellab' : 'gemini', frames: sheet.frames
       };
       delete slotFraction[slot];
       // No doneCount++ here: the static base already counted this slot when it
@@ -2071,7 +2132,7 @@ export async function generateGameAssets({ config, userPrompt = '', onProgress =
   slots = slots.filter(s => !effectiveSkipSlots.includes(s));
 
   const gridPlan = planPropsGrid(slots, design, namedBySlot, onProgress, config.gameType);
-  const { preloadedImages, meta } = await generateAssets({ finalPrompts, slots, onProgress, cancelToken, gridPlan, gameType: config.gameType });
+  const { preloadedImages, meta } = await generateAssets({ finalPrompts, slots, onProgress, cancelToken, gridPlan, gameType: config.gameType, playerSubject: design.subjects?.player || '' });
   // Which surface the hazard texture shows — the scene only uses it for that kind.
   if (hazardSurface && meta.hazard) meta.hazard.kind = hazardSurface;
 
@@ -2227,7 +2288,8 @@ export async function regenerateAssetSlots({ config, instruction = '', slots, on
     gameType: config.gameType,
     maxImageCalls,
     reuseStaticBase,
-    initialPreloadedImages: reuseStaticBase ? (config.preloadedImages || {}) : {}
+    initialPreloadedImages: reuseStaticBase ? (config.preloadedImages || {}) : {},
+    playerSubject: design.subjects?.player || ''
   });
   if (redrawSurface && meta.hazard) meta.hazard.kind = redrawSurface;
 

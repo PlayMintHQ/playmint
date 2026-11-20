@@ -189,9 +189,31 @@ function addToSessionSpend(kind, estUsd) {
   try {
     const total = getSessionSpend() || { estUsd: 0, imageCalls: 0, visionCalls: 0, since: new Date().toISOString() };
     total.estUsd = Math.round((total.estUsd + estUsd) * 10000) / 10000;
-    if (kind === 'image') total.imageCalls++; else total.visionCalls++;
+    if (kind === 'image') total.imageCalls++; else if (kind === 'vision') total.visionCalls++; else total.otherCalls = (total.otherCalls || 0) + 1;
     localStorage.setItem('PM_SPEND_TOTAL', JSON.stringify(total));
   } catch { /* localStorage unavailable — session totals are best-effort */ }
+}
+
+/**
+ * Non-Gemini paid call (e.g. PixelLab skeleton animation). Rides the same per-run tally,
+ * so it shows up in assetMeta.cost and the cost report; `estUsd` is an ESTIMATE.
+ */
+export function recordExternalCall({ kind = 'animation', label, model, estUsd = 0, generations = null, elapsedMs = null }) {
+  addToSessionSpend('animation', estUsd);
+  if (!usageTally) return;
+  usageTally.estUsd += estUsd;
+  usageTally.calls.push({
+    at: new Date().toISOString(),
+    kind,
+    ...(label ? { label } : {}),
+    model,
+    ...(generations != null ? { generations } : {}),
+    promptTokens: 0,
+    outputTokens: 0,
+    thoughtsTokens: 0,
+    ...(elapsedMs != null ? { elapsedMs } : {}),
+    estUsd: Math.round(estUsd * 10000) / 10000
+  });
 }
 
 // A call that terminally failed still matters for observability: a broken QA path

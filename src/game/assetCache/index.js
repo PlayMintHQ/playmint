@@ -360,6 +360,9 @@ async function redrawOverEntry({ entry, baseImages, slots, config, userPrompt, p
   }
   // Quick Start pool: a failed redraw must NEVER be stored under the pool key (it would
   // read as "warm" and pin the old art for everyone). The caller serves the base as-is.
+  // A redraw that ended on a STATIC player (animation failed) is not an upgrade either.
+  if (bailOnFail && regen && regenSlots.includes('player_sheet') &&
+      (regen.meta?.player?.animationFailed || !regen.meta?.player?.frames)) return null;
   if (bailOnFail && !regen) return null;
   // The new entry starts from CLEAN base props (divider debris stripped), so a
   // persisted redraw never re-uploads an old bar.
