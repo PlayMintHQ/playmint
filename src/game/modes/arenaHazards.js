@@ -12,19 +12,21 @@
 //          'void'  — a raised platform (rooftop, cliff, sky island…): walking off
 //                    the edge is a fall.
 //          'water' — an island in deep water: walking off the edge is drowning.
-//   hazard 'none' | 'lava' | 'acid' (burn) | 'water' (shallow: slows) | 'pit' (fall)
+//   hazard 'none' | 'lava' | 'fire' | 'acid' (burn) | 'water' (shallow: slows) | 'pit' (fall)
 // Explicit config fields (shooterEdge / shooterHazard / shooterHazardCount) win;
 // games saved before this existed derive them from their sourcePrompt.
 
 export const ARENA_EDGES = ['wall', 'void', 'water'];
-export const ARENA_HAZARDS = ['none', 'lava', 'acid', 'water', 'pit'];
+export const ARENA_HAZARDS = ['none', 'lava', 'fire', 'acid', 'water', 'pit'];
 
 const EDGE_WORDS = {
   void: /\b(roof ?tops?|on (?:the|a) roof|skyscrapers?|cliffs?|cliff ?side|ledges?|floating (?:island|platform|ruins?|rocks?)|sky ?(?:island|platform|ruins?|fortress|temple|city)|above the clouds|in the sky|space ?(?:platform|walk)|asteroid|tower ?top|top of (?:a|the) tower|bridges?|mesa|mountain ?(?:top|peak|summit)|summit|edge of the world|airship deck|abyss edge)\b/,
   water: /\b(islands?|beach(?:es)?|piers?|docks?|harbou?r|raft|atoll|lagoon|sandbar|shipwreck deck)\b/
 };
 const HAZARD_WORDS = {
-  lava: /\b(lava|magma|molten|volcan\w*|inferno|hellfire|caldera)\b/,
+  lava: /\b(lava|magma|molten|volcan\w*|hellfire|caldera)\b/,
+  // Open flames (2026-11-20: "burning rooftop" produced no hazard at all).
+  fire: /\b(burn(?:ing|ed|t)|fires?|flam(?:e|es|ing)|ablaze|blaz(?:e|es|ing)|inferno|bonfires?|wildfires?|on fire|firestorm|scorch\w*|smould?ering|embers?)\b/,
   acid: /\b(acid\w*|toxic|radioactive|nuclear waste|slime|sludge|chemical|biohazard)\b/,
   water: /\b(swamps?|marsh(?:es)?|bogs?|flooded|puddles?|rivers?|streams?|ponds?|wetlands?)\b/,
   pit: /\b(pits?|chasms?|sinkholes?|abyss|craters?|crevasses?|collapsed floor|holes in the floor)\b/
@@ -40,25 +42,117 @@ export function parseArenaHazards(text) {
     else if (EDGE_WORDS.water.test(t)) edge = 'water';
   }
   let hazard = 'none';
-  for (const kind of ['lava', 'acid', 'pit', 'water']) {
+  for (const kind of ['lava', 'fire', 'acid', 'pit', 'water']) {
     if (HAZARD_WORDS[kind].test(t)) { hazard = kind; break; }
   }
   // An island in a lava lake is a lava edge in spirit: keep it as lava pools on a
   // walled arena (a burning edge reads badly from above), and never stack water
   // pools on a water edge.
   if (edge === 'water' && hazard === 'water') hazard = 'none';
-  if (/\bno (?:lava|pits?|acid|water)\b/.test(t)) hazard = 'none';
+  if (/\bno (?:lava|fires?|flames?|pits?|acid|water)\b/.test(t)) hazard = 'none';
   return { edge, hazard };
 }
 
-/** The rules a running game uses: explicit config first, else its prompt. */
+/**
+ * A designer/LLM arena verdict, validated. `src` is the normalized prompt it was
+ * made for: art (and its metadata) is reused across prompts by the asset cache,
+ * and rules belong to the PROMPT, so a verdict only counts for the prompt it
+ * answered.
+ */
+export const normPromptKey = (t) => String(t || '').trim().toLowerCase().replace(/\s+/g, ' ');
+export function normalizeArenaSpec(raw, sourcePrompt) {
+  if (!raw || typeof raw !== 'object') return null;
+  const edge = ARENA_EDGES.includes(raw.edge) ? raw.edge : null;
+  const hazard = ARENA_HAZARDS.includes(raw.hazard) ? raw.hazard : null;
+  const surround = cleanSubject(raw.surround);
+  const rim = cleanSubject(raw.rim);
+  if (!edge && !hazard && !surround && !rim) return null;
+  const finalEdge = edge || 'wall';
+  // Same rule as the keyword path: never stack water pools on a water edge (the island
+  // already IS surrounded by deep water).
+  const finalHazard = finalEdge === 'water' && hazard === 'water' ? 'none' : (hazard || 'none');
+  return { edge: finalEdge, hazard: finalHazard, surround, rim, src: normPromptKey(sourcePrompt) };
+}
+
+// ── Arena Kit subjects (2026-11-20) ──────────────────────────────────────────────────
+// The art director may describe what lies far below the platform ("rain-slicked neon
+// street grid seen from 40 floors up") and what the edge is made of ("weathered concrete
+// parapet with rusted vents"). Free text from an LLM goes into an image prompt, so it is
+// held to short, plain scenery: no people, text, frames or UI words, at most 14 words.
+const BAD_SUBJECT = /\b(people|person|man|woman|character|hero|enemy|enemies|monster|creature|player|soldier|text|logo|letters?|words?|sign|signs|label|watermark|caption|ui|hud|border|frame|frames)\b/i;
+export function cleanSubject(raw, maxWords = 14) {
+  if (typeof raw !== 'string') return null;
+  const t = raw.replace(/["`]/g, '').replace(/\s+/g, ' ').trim();
+  const words = t.split(' ').filter(Boolean);
+  if (words.length < 2 || BAD_SUBJECT.test(t)) return null;
+  return words.slice(0, maxWords).join(' ').replace(/[.,;:]+$/, '');
+}
+
+// Fallbacks when there is no designer verdict (keyless runs, older games), by theme.
+export const SURROUND_DEFAULTS = {
+  city: 'a dense city street grid with rooftops, roads and glowing lights',
+  ice: 'snowfields cut by frozen crevasses and ice ridges',
+  forest: 'a dark dense forest canopy with a winding river',
+  lava: 'cooled black rock cut by rivers of glowing lava',
+  space: 'dark metal station hull plating with small lights',
+  default: 'the distant ground of this same world, in muted tones'
+};
+export const RIM_DEFAULTS = {
+  void: {
+    city: 'a weathered concrete parapet ledge with rusted metal trim',
+    ice: 'a frosted stone ledge with a snow-capped lip',
+    forest: 'a mossy stone ledge lip with roots hanging over the edge',
+    lava: 'a cracked dark basalt ledge with glowing seams',
+    space: 'riveted metal deck plating edge with hazard stripes',
+    default: 'a worn stone ledge lip'
+  },
+  water: { default: 'a sandy shoreline with a white foam edge where the water meets the land' }
+};
+
+/** Spacey worlds keep the code-drawn star field below the platform (no generated drop). */
+export const isStarryWorld = (text) =>
+  /\b(space|stars?|galax\w*|orbit\w*|asteroid|cosmic|nebula|moon)\b/.test(String(text || '').toLowerCase());
+
+/** The designer's verdict, but only when it answered THIS prompt (the cache reuses art across prompts). */
+export function designedArenaSpec(config = {}) {
+  const meta = config.assetMeta?.arena;
+  return meta && meta.src === normPromptKey(config.sourcePrompt || config.gameName || '') ? meta : null;
+}
+
+/**
+ * Which Arena Kit art an arena needs, with its subject text. `surround` = the drop seen
+ * through a void edge or a pit; `rim` = the edge band of a void or water platform. Wall
+ * arenas and star-field worlds need no generated surround.
+ *   → { surround: string|null, rim: string|null }
+ */
+export function arenaKitPlan(rules, { spec = null, themeKey = null, starry = false } = {}) {
+  const theme = SURROUND_DEFAULTS[themeKey] ? themeKey : 'default';
+  const needsSurround = !starry && (rules?.edge === 'void' || rules?.hazard === 'pit');
+  const needsRim = rules?.edge === 'void' || rules?.edge === 'water';
+  const rimTable = RIM_DEFAULTS[rules?.edge] || {};
+  return {
+    surround: needsSurround ? (spec?.surround || SURROUND_DEFAULTS[theme]) : null,
+    rim: needsRim ? (spec?.rim || rimTable[theme] || rimTable.default || null) : null
+  };
+}
+
+/**
+ * The rules a running game uses. Precedence: an EXPLICIT config field (the
+ * Creator Panel / Quick Edit write these, and games saved before 2026-11-20 carry
+ * them) > the designer's verdict for THIS prompt (`assetMeta.arena`, free: it
+ * rides the existing design call) > keywords in the prompt.
+ */
 export function resolveArenaRules(config = {}) {
-  const derived = parseArenaHazards(config.sourcePrompt || config.gameName || '');
-  const edge = ARENA_EDGES.includes(config.shooterEdge) ? config.shooterEdge : derived.edge;
-  const hazard = ARENA_HAZARDS.includes(config.shooterHazard) ? config.shooterHazard : derived.hazard;
+  const text = config.sourcePrompt || config.gameName || '';
+  const derived = parseArenaHazards(text);
+  const meta = config.assetMeta?.arena;
+  const designed = meta && meta.src === normPromptKey(text) ? meta : null;
+  const edge = ARENA_EDGES.includes(config.shooterEdge) ? config.shooterEdge : (designed?.edge || derived.edge);
+  const hazard = ARENA_HAZARDS.includes(config.shooterHazard) ? config.shooterHazard : (designed?.hazard || derived.hazard);
   const rawCount = Number(config.shooterHazardCount);
   const count = hazard === 'none' ? 0
-    : Number.isFinite(rawCount) && rawCount > 0 ? Math.min(4, Math.round(rawCount)) : 3;
+    : Number.isFinite(rawCount) && rawCount > 0 ? Math.min(4, Math.round(rawCount))
+      : (Number(config.difficulty) >= 7 ? 4 : 3);
   return { edge, hazard: count ? hazard : 'none', count };
 }
 
@@ -67,24 +161,63 @@ export const SURFACE = {
   void: { kind: 'fall', lethalAfter: 0 },
   pit: { kind: 'fall', lethalAfter: 0 },
   lava: { kind: 'burn', lethalAfter: 300 },
+  fire: { kind: 'burn', lethalAfter: 400 },
   acid: { kind: 'burn', lethalAfter: 300 },
   deep: { kind: 'drown', lethalAfter: 700, slow: 0.5 },
   water: { kind: 'wade', lethalAfter: null, slow: 0.55 }
 };
 // The surface texture an arena needs drawn (null = none): pool liquid, or the
 // deep water round an island.
-export const arenaSurfaceKind = (rules) => (['lava', 'acid', 'water'].includes(rules?.hazard)
+export const arenaSurfaceKind = (rules) => (['lava', 'fire', 'acid', 'water'].includes(rules?.hazard)
   ? rules.hazard : rules?.edge === 'water' ? 'deep' : null);
 
 // Subjects for the pipeline's `hazard` slot (the world's style guide is added).
 export const HAZARD_SUBJECTS = {
   lava: 'a churning surface of glowing molten lava with dark cooling crust plates and bright orange-yellow cracks',
+  fire: 'scorched black ground covered in burning flames, glowing embers and drifting ash seen from above, bright orange-yellow fire on charred earth',
   acid: 'a bubbling surface of luminous green toxic acid with pale foam swirls',
   water: 'shallow rippling water with soft light caustics',
   deep: 'deep dark rippling water with gentle wave crests'
 };
 
 export const isLethalSurface = (s) => !!s && SURFACE[s]?.lethalAfter != null;
+
+// How far the camera may look PAST the world edge on a void/water arena, so the
+// drop (or the water) is always on screen where the platform ends. surround art
+// and the far-below layer are drawn out to this margin (arenaSurface.js).
+export const ARENA_VIEW_PAD = 260;
+// A walled arena has no drop, but its wall is drawn just OUTSIDE the world edge (so the
+// playfield, physics bounds and spawns stay exactly as they were); the camera may look
+// this far past the world to show it.
+export const WALL_VIEW_PAD = 56;
+export const arenaViewPadFor = (edge) => (edge && edge !== 'wall' ? ARENA_VIEW_PAD : WALL_VIEW_PAD);
+/**
+ * Fixed-arena camera framing — the ONE source of truth (MultiCameraManager calls it,
+ * scripts/test-arena.mjs checks it). COVER zoom: never fit, or Phaser's bounds clamp
+ * shows raw background past the world; the 0.5 floor keeps huge arenas readable on
+ * small screens. Bounds extend ARENA_VIEW_PAD past the world on a void/water edge.
+ */
+export function arenaZoom(viewW, viewH, worldW, worldH) {
+  return Math.max(viewW / worldW, viewH / worldH, 0.5);
+}
+
+export function arenaViewport({ viewW, viewH, worldW, worldH, edge = 'wall' }) {
+  const zoom = arenaZoom(viewW, viewH, worldW, worldH);
+  const pad = arenaViewPadFor(edge);
+  const bounds = { x: -pad, y: -pad, width: worldW + pad * 2, height: worldH + pad * 2 };
+  return { zoom, visW: viewW / zoom, visH: viewH / zoom, bounds };
+}
+
+/**
+ * The world rectangle on screen when the camera is centred on (px, py) and clamped to
+ * the bounds (Phaser's clampX/clampY: a view larger than the bounds is just centred).
+ */
+export function arenaVisibleRect(vp, px, py) {
+  const clampAxis = (c, size, lo, span) => (size >= span ? lo + span / 2 : Math.min(Math.max(c, lo + size / 2), lo + span - size / 2));
+  const cx = clampAxis(px, vp.visW, vp.bounds.x, vp.bounds.width);
+  const cy = clampAxis(py, vp.visH, vp.bounds.y, vp.bounds.height);
+  return { x: cx - vp.visW / 2, y: cy - vp.visH / 2, width: vp.visW, height: vp.visH };
+}
 
 export const EDGE_INSET = 150;     // platform inset from the world bounds (void/water edge)
 export const CENTER_CLEAR = 230;   // no hazard this close to the player's start

@@ -7,6 +7,8 @@
  * transparent margins would inflate hitboxes).
  */
 
+import { tileCanvas } from './tiling.js';
+
 /**
  * Load an image element and resolve once it is decoded.
  */
@@ -2281,8 +2283,13 @@ export async function postProcessAsset(rawSrc, spec, opts = {}) {
   // visible shape and the hitbox drift apart.
   if (spec.post.fillAfterCrop) canvas = drawToCanvas(canvas, { ...spec.canvas, fit: 'stretch' });
   if (spec.post.solidify) solidifyColumns(canvas);
+  // Tiles that repeat (the drop under a platform, the rim strip): measure the wrap-around
+  // seam and cross-blend it away. `post.tileable` is the axis ('x' | 'y' | 'both').
+  let tile = null;
+  if (spec.post.tileable) tile = tileCanvas(canvas, spec.post.tileable === true ? 'both' : spec.post.tileable);
   const out = await loadImage(canvas.toDataURL('image/png'), { crossOrigin: null });
   out.pmBoxed = boxed; // read by the pipeline's boxed-sprite gate
   out.pmEdgeBars = edgeBars; // divider debris removed (logged by the pipeline)
+  out.pmTile = tile; // { before, after, blended, flat } for the pipeline's log line
   return out;
 }

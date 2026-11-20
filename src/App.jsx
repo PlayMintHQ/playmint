@@ -1643,6 +1643,7 @@ function App() {
           score={gameOverData.score}
           themeKey={gameOverData.themeKey}
           gameType={gameOverData.gameType}
+          cause={gameOverData.cause}
           onRestart={handleRestartGame}
           onTweakSettings={handleTweakSettings}
           onMainMenu={handleGoHome}

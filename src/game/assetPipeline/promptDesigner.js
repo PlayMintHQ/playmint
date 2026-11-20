@@ -8,6 +8,7 @@
  */
 import { SLOT_SPECS, BASELINE_SLOTS, BG_CLAUSE, GAPS_CLAUSE, PROPS_GRID_SPEC } from './slotSpecs.js';
 import { isGeminiConfigured, generateJson } from './providers/geminiImage.js';
+import { normalizeArenaSpec } from '../modes/arenaHazards.js';
 
 /**
  * Theme subject tables — the local fallback recipe.
@@ -284,6 +285,16 @@ const DESIGNER_RESPONSE_SCHEMA = {
         projectile: { type: 'STRING' }
       }
     },
+    arena: {
+      type: 'OBJECT',
+      description: 'Top-down shooter only: how the arena boundary and floor hazards behave in THIS world',
+      properties: {
+        edge: { type: 'STRING', enum: ['wall', 'void', 'water'], description: 'wall = enclosed arena with solid boundary; void = raised platform (rooftop, cliff, sky island, bridge, tower top) where walking off is a deadly fall; water = island or pier where walking off drowns' },
+        hazard: { type: 'STRING', enum: ['none', 'lava', 'fire', 'acid', 'water', 'pit'], description: 'floor hazard patches: lava, fire (burning/ablaze/flames), acid (toxic), water (shallow swamp/flood), pit (holes/chasm), none' },
+        surround: { type: 'STRING', description: 'When edge is void: what lies FAR BELOW the platform, seen from high above, max 14 words, scenery only (e.g. "a rain-slicked neon street grid with rooftops and traffic"). Empty string otherwise.' },
+        rim: { type: 'STRING', description: 'When edge is void or water: what the platform EDGE is made of, max 14 words, material only (e.g. "a weathered concrete parapet with rusted vents and neon trim"). Empty string when edge is wall.' }
+      }
+    },
     tags: {
       type: 'ARRAY',
       items: { type: 'STRING' },
@@ -343,6 +354,16 @@ function buildDesignerPrompt(userPrompt, gameType, entities = {}, themeKey = nul
     `- entityNouns: for player/enemy/obstacle/collectible/projectile, the ONE lowercase ` +
     `singular noun (max two words) naming what each depicts — used for cataloguing, ` +
     `not shown to players\n` +
+    (gameType === 'shooter'
+      ? `- arena: how this world's arena behaves. edge: wall (enclosed, solid boundary — the default), ` +
+        `void (a raised platform such as a rooftop, cliff, sky island, bridge or tower top: walking off is a ` +
+        `deadly fall) or water (an island or pier: walking off drowns). hazard: floor patches the request implies ` +
+        `— lava, fire (burning / ablaze / flames), acid (toxic), water (shallow swamp or flood), pit (holes) or none. ` +
+        `Decide from the request's meaning; never add a hazard the request does not imply. ` +
+        `When edge is void: surround = what lies far below the platform seen from high above, and rim = ` +
+        `what the platform's edge is built of (max 14 words each, scenery and materials only — no people, ` +
+        `text or frames); when edge is water: rim = the shoreline. Both must match this world's look.\n`
+      : '') +
     `- tags: 5-10 lowercase search tags for the whole set (art style, mood, era, environment)\n\n` +
     `Rules:\n` +
     (anyNamed
@@ -494,6 +515,19 @@ function styleGuideFromDesignerResult(result) {
  * One Gemini text call when a key is available; local theme tables on any
  * failure or empty prompt.
  */
+// Shooter designs MUST answer the arena question (edge, hazard and the Arena Kit subjects):
+// as optional fields the model skipped surround/rim (and sometimes the whole object)
+// even when the request implied a rooftop or an island. Other modes keep the schema as is.
+function designerSchemaFor(gameType) {
+  if (gameType !== 'shooter') return DESIGNER_RESPONSE_SCHEMA;
+  const arena = DESIGNER_RESPONSE_SCHEMA.properties.arena;
+  return {
+    ...DESIGNER_RESPONSE_SCHEMA,
+    required: [...DESIGNER_RESPONSE_SCHEMA.required, 'arena'],
+    properties: { ...DESIGNER_RESPONSE_SCHEMA.properties, arena: { ...arena, required: ['edge', 'hazard', 'surround', 'rim'] } }
+  };
+}
+
 export async function designAssetPrompts({ userPrompt, gameType, themeKey, assetDesignDirections, timeoutMs = 12000 }) {
   const fallback = () => localDesign({ gameType, themeKey, userPrompt, assetDesignDirections });
 
@@ -505,7 +539,7 @@ export async function designAssetPrompts({ userPrompt, gameType, themeKey, asset
   try {
     const result = await generateJson({
       prompt: buildDesignerPrompt(userPrompt, gameType, entities, themeKey),
-      responseSchema: DESIGNER_RESPONSE_SCHEMA,
+      responseSchema: designerSchemaFor(gameType),
       timeoutMs,
       label: 'design' // cost-report attribution
     });
@@ -516,7 +550,8 @@ export async function designAssetPrompts({ userPrompt, gameType, themeKey, asset
       styleGuide: styleGuideFromDesignerResult(result),
       subjects,
       entities,
-      taxonomy: taxonomyFromDesignerResult(result, entities)
+      taxonomy: taxonomyFromDesignerResult(result, entities),
+      arena: gameType === 'shooter' ? normalizeArenaSpec(result?.arena, userPrompt) : null
     };
   } catch (err) {
     console.warn('[PromptDesigner] Gemini design failed, using local templates:', err.message);
@@ -622,6 +657,18 @@ function slotStyleClauses(slotKey, styleGuide, { userNamed = false } = {}) {
   if (slotKey === 'background_mid' || slotKey === 'background_near') {
     return `color palette ${styleGuide.colorPalette}, very dark near-black ` +
       `silhouette tones, distinctly darker than a distant hazy background`;
+  }
+  if (slotKey === 'surround') {
+    // The drop under a platform: far away, so muted and low-contrast like a distant
+    // layer, but a pixel-native one (dither / clusters, never a smooth painting).
+    return `color palette ${styleGuide.colorPalette}, muted desaturated colors, tiny forms ` +
+      `simplified into clean pixel clusters with fine dithered gradients, gentle contrast, ` +
+      `slightly darker than a ground surface`;
+  }
+  if (slotKey === 'rim') {
+    // The edge band: a built material with a lit lip and a shadowed face.
+    return `color palette ${styleGuide.colorPalette}, medium tones, a clearly lit top ` +
+      `surface and a darker shadowed outer face, crisp readable edge details`;
   }
   // floor, platform — terrain: main palette, readable edges, medium-dark value
   return `color palette ${styleGuide.colorPalette}, medium-dark tones with ` +

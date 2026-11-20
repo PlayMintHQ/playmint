@@ -62,6 +62,9 @@ export const stripForShare = (liveParams, { forRow = false } = {}) => {
       if (Object.keys(entry).length) lite[slot] = entry;
     }
     if (Object.keys(lite).length) config.assetMetaLite = { slots: lite };
+    // The arena verdict is tiny and decides gameplay (rooftop edge, fire pools): it
+    // must survive a link / saved row even when the cached art does not.
+    if (assetMeta?.arena) config.assetMetaLite = { ...(config.assetMetaLite || {}), arena: assetMeta.arena };
   }
   return config;
 };
@@ -101,11 +104,12 @@ export const decodeShareConfig = (encoded) => {
  *                   assetMetaLite where real metadata is absent
  */
 export const hydrateAssetMetaLite = (config) => {
+  const liteArena = config?.assetMetaLite?.arena;
   const lite = config?.assetMetaLite?.slots;
-  if (!lite || typeof lite !== 'object') return config;
+  if ((!lite || typeof lite !== 'object') && !liteArena) return config;
   const slots = { ...(config.assetMeta?.slots || {}) };
   let changed = false;
-  for (const [slot, m] of Object.entries(lite)) {
+  for (const [slot, m] of Object.entries(lite || {})) {
     const existing = slots[slot];
     if (!existing) {
       slots[slot] = { ...m };
@@ -118,7 +122,9 @@ export const hydrateAssetMetaLite = (config) => {
       }
     }
   }
+  const arena = config.assetMeta?.arena || liteArena || undefined;
+  if (liteArena && !config.assetMeta?.arena) changed = true;
   if (!changed) return config;
   const { assetMetaLite: _lite, ...rest } = config;
-  return { ...rest, assetMeta: { ...(config.assetMeta || {}), slots } };
+  return { ...rest, assetMeta: { ...(config.assetMeta || {}), slots, ...(arena ? { arena } : {}) } };
 };

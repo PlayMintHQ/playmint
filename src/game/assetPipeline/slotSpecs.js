@@ -141,6 +141,10 @@ export const SLOT_SPECS = {
     canvas: { width: 2048, height: 1024 },
     gen: { aspectRatio: '16:9', model: GEMINI_SLOT_MODEL },
     post: { fit: 'cover', keying: null, trimBorder: false, crop: false },
+    // The shooter arena is 4:3 (2000×1500): a 2:1 plate was cover-scaled onto it,
+    // throwing away a third of the picture and upscaling the rest ~1.46× (blurry).
+    // A 4:3 plate fills the world at ~1:1. Applied by specForGame().
+    shooter: { canvas: { width: 2048, height: 1536 }, gen: { aspectRatio: '4:3' } },
     scaffold: (subject, style, opts = {}) => opts.gameType === 'shooter'
       // The shooter arena renders this as the GROUND of a top-down arena: no
       // horizon, no sky — a side-view landscape here would show as a wall of sky
@@ -280,6 +284,47 @@ export const SLOT_SPECS = {
       `(top-down bird's-eye view): ${subject}. All four edges match perfectly for ` +
       `tiling in every direction, and the surface fills the whole frame edge to edge — ` +
       `no shore, no border, no objects, no vignette. ${style}`,
+    fallbackSubject: () => null
+  },
+  // Arena Kit (2026-11-20): the two pieces of the arena BOUNDARY that were drawn in code
+  // with hard-coded colours and so never matched the world. Both are shooter-only and
+  // optional: the game draws a palette-aware built-in without them. Code owns the
+  // geometry (arenaSurface.js places them exactly on the platform edge); the art only
+  // supplies material, so they cannot misalign.
+  //  - surround: what lies FAR BELOW a void edge / pit (street, valley, clouds), a
+  //    seamless tile seen from very high above, parallax-scrolled under the platform.
+  //  - rim: the edge band itself, a horizontal strip tiled along each side and rotated
+  //    for the other three. Convention: the OUTER edge is the strip's bottom and the
+  //    platform's edge line is at 50% height.
+  // Generated only when the arena's rules need them (arenaKitPlan); neither is in
+  // GENERATED_SLOTS/BASELINE_SLOTS on purpose (those feed every game mode).
+  surround: {
+    textureKey: 'dyn_surround',
+    canvas: { width: 256, height: 256 },
+    gen: { aspectRatio: '1:1', model: GEMINI_SLOT_MODEL },
+    post: { fit: 'stretch', keying: null, trimBorder: false, crop: false, tileable: 'both' },
+    optional: true,
+    scaffold: (subject, style) =>
+      `Create a seamless tileable texture showing an aerial view from very high above ` +
+      `(top-down, as if seen from an aircraft): ${subject}. Tiny details, muted low-contrast ` +
+      `values, no single focal object, no horizon, no sky, no border and no frame. All four ` +
+      `edges match perfectly for tiling in every direction, and the picture fills the whole ` +
+      `frame edge to edge. ${style}`,
+    fallbackSubject: () => null
+  },
+  rim: {
+    textureKey: 'dyn_rim',
+    canvas: { width: 256, height: 64 },
+    gen: { aspectRatio: '4:1', model: GEMINI_SLOT_MODEL },
+    post: { fit: 'cover', keying: null, trimBorder: false, crop: false, tileable: 'x' },
+    optional: true,
+    scaffold: (subject, style) =>
+      `Create a seamless horizontally tileable border strip for the edge of a top-down ` +
+      `video game arena: ${subject}. Seen from above, the strip runs from left to right: the ` +
+      `upper half is the flat top surface of the edge, in the same material as the arena ` +
+      `floor; the lower half is the outer face of the edge falling away into shadow. The left ` +
+      `and right ends match perfectly for tiling. The strip fills the whole frame edge to edge ` +
+      `— no characters, no text, no sky, no gap and no frame. ${style}`,
     fallbackSubject: () => null
   },
   collectible: {
@@ -453,6 +498,22 @@ export const SLOT_SPECS = {
     fallbackSubject: (d) => d?.hazards
   }
 };
+
+/**
+ * The spec a slot uses for a given game type: SLOT_SPECS[slot] with its optional
+ * `shooter` override merged in (canvas / gen / post) when the game is a shooter.
+ */
+export function specForGame(slot, gameType) {
+  const spec = SLOT_SPECS[slot];
+  const over = gameType === 'shooter' ? spec?.shooter : null;
+  if (!over) return spec;
+  return {
+    ...spec,
+    canvas: over.canvas || spec.canvas,
+    gen: { ...spec.gen, ...(over.gen || {}) },
+    post: { ...spec.post, ...(over.post || {}) }
+  };
+}
 
 // Combined-props call (PM_GRID_PROPS): several small chroma-keyed sprites rendered
 // as ONE grid image, sliced content-aware, each cell then run through its slot's

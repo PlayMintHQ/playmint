@@ -48,7 +48,7 @@ const EDITABLE_FIELDS = {
   shooterEnemiesPerWave: { min: 1, max: 20, int: true, label: 'shooter enemies per wave' },
   // Contextual arena hazards (2026-11-07, modes/arenaHazards.js).
   shooterEdge: { oneOf: ['wall', 'void', 'water'], label: 'shooter arena edge: wall (solid boundary), void (a raised platform/rooftop: walking off kills), water (an island: walking off drowns)' },
-  shooterHazard: { oneOf: ['none', 'lava', 'acid', 'water', 'pit'], label: 'shooter arena hazard pools: none, lava or acid (burn), water (slows), pit (fall)' },
+  shooterHazard: { oneOf: ['none', 'lava', 'fire', 'acid', 'water', 'pit'], label: 'shooter arena hazard pools: none, lava, fire or acid (burn), water (slows), pit (fall)' },
   shooterHazardCount: { min: 0, max: 4, int: true, label: 'shooter number of hazard pools (0 = none)' }
 };
 
@@ -65,7 +65,8 @@ const ASSET_TARGET_SLOTS = {
   obstacle: ['obstacle'],
   projectile: ['projectile'],
   collectibles: ['collectible'],
-  hazards: ['hazard'] // shooter arena lava/acid/water surface
+  hazards: ['hazard'], // shooter arena lava/acid/water surface
+  edge: ['surround', 'rim'] // shooter arena boundary: the drop below the platform + the edge band
 };
 
 /** Map restyle target names to a deduped pipeline slot list for this config. */
@@ -76,11 +77,15 @@ export function resolveAssetTargets(targets, config) {
   // exists in that mode (see generateGameAssets' effectiveSkipSlots). The
   // obstacle slot is the arena's cover prop.
   const SHOOTER_SKIPPED = ['background_mid', 'background_near', 'platform'];
+  // The shooter's ground is background_far; its `floor` slot is no longer drawn (Arena
+  // Kit), so a "floor" edit there redraws the ground plate instead.
   const allSlots = GENERATED_SLOTS
-    .filter(s => !(isShooter && SHOOTER_SKIPPED.includes(s)))
+    .filter(s => !(isShooter && (SHOOTER_SKIPPED.includes(s) || s === 'floor')))
     .map(s => (s === 'player' && !isShooter ? 'player_sheet' : s));
   if (isPlatformer || isShooter) allSlots.push('projectile');
   allSlots.push('collectible');
+  // Arena surfaces: regenerateAssetSlots drops the ones the arena's rules don't need.
+  if (isShooter) allSlots.push('hazard', 'surround', 'rim');
   const slots = new Set();
   for (const target of targets || []) {
     if (target === 'all') {
@@ -89,9 +94,10 @@ export function resolveAssetTargets(targets, config) {
     }
     for (const rawSlot of ASSET_TARGET_SLOTS[target] || []) {
       if (isShooter && SHOOTER_SKIPPED.includes(rawSlot)) continue;
-      const slot = rawSlot === 'player_sheet' && isShooter ? 'player' : rawSlot;
+      let slot = rawSlot === 'player_sheet' && isShooter ? 'player' : rawSlot;
+      if (isShooter && slot === 'floor') slot = 'background_far';
       if (slot === 'projectile' && !isPlatformer && !isShooter) continue; // runners never shoot
-      if (slot === 'hazard' && !isShooter) continue; // arena surfaces exist only in the shooter
+      if ((slot === 'hazard' || slot === 'surround' || slot === 'rim') && !isShooter) continue; // arena surfaces exist only in the shooter
       slots.add(slot);
     }
   }
@@ -108,7 +114,7 @@ const EDITOR_RESPONSE_SCHEMA = {
     },
     assetTargets: {
       type: 'ARRAY',
-      items: { type: 'STRING', enum: ['background', 'foreground', 'floor', 'platforms', 'player', 'enemy', 'obstacle', 'projectile', 'collectibles', 'hazards', 'all'] },
+      items: { type: 'STRING', enum: ['background', 'foreground', 'floor', 'platforms', 'player', 'enemy', 'obstacle', 'projectile', 'collectibles', 'hazards', 'edge', 'all'] },
       description: 'Only for intent=restyle: which elements get new artwork. Use "all" for a whole-look re-theme.'
     },
     summary: { type: 'STRING', description: 'One short line describing what changed, e.g. "runSpeed 400 → 560, enemies 5 → 10". For restyle/regenerate, say what is being redrawn and why.' },
@@ -138,7 +144,7 @@ const EDITOR_RESPONSE_SCHEMA = {
         shooterWaveCount: { type: 'NUMBER' },
         shooterEnemiesPerWave: { type: 'NUMBER' },
         shooterEdge: { type: 'STRING', enum: ['wall', 'void', 'water'] },
-        shooterHazard: { type: 'STRING', enum: ['none', 'lava', 'acid', 'water', 'pit'] },
+        shooterHazard: { type: 'STRING', enum: ['none', 'lava', 'fire', 'acid', 'water', 'pit'] },
         shooterHazardCount: { type: 'NUMBER' }
       }
     }
@@ -226,6 +232,8 @@ export function namedTargets(text) {
   if (/\b(obstacles?|hazards?|traps?|spikes?|cover|crates?|barriers?|walls?)\b/.test(text)) targets.push('obstacle');
   if (/\b(projectiles?|bullets?|bolts?|shots?|arrows?|fireballs?)\b/.test(text)) targets.push('projectile');
   if (/\b(coins?|collectibles?|pickups?|gems?|treasure|rewards?)\b/.test(text)) targets.push('collectibles');
+  // Shooter arena boundary: "make the roof edge stone", "the drop should be a river".
+  if (/\b(edges?|rims?|parapets?|ledges?|the drop|abyss|void)\b/.test(text)) targets.push('edge');
   return targets;
 }
 
@@ -371,11 +379,11 @@ function localInterpret(config, instruction) {
   if (config?.gameType === 'shooter') {
     if (/\b(deadly|lethal|dangerous)\s+edges?\b|\bfall (?:off|from)\b|\bno walls?\b/.test(text)) changes.shooterEdge = 'void';
     else if (/\b(solid|safe)\s+(?:edges?|walls?|boundar\w*)\b|\bwalls? around\b/.test(text)) changes.shooterEdge = 'wall';
-    const pool = text.match(/\b(lava|acid|water|pits?)\b/);
-    if (/\bno (?:hazards?|pools?|lava|acid|pits?)\b|\bremove (?:the )?(?:hazards?|pools?|lava|acid|pits?)\b/.test(text)) {
+    const pool = text.match(/\b(lava|fire|flames?|acid|water|pits?)\b/);
+    if (/\bno (?:hazards?|pools?|lava|fire|flames?|acid|pits?)\b|\bremove (?:the )?(?:hazards?|pools?|lava|fire|flames?|acid|pits?)\b/.test(text)) {
       changes.shooterHazard = 'none';
     } else if (pool && /\b(add|more|with|put|some|pools?)\b/.test(text)) {
-      changes.shooterHazard = pool[1].replace(/s$/, '');
+      changes.shooterHazard = /^flame/.test(pool[1]) ? 'fire' : pool[1].replace(/s$/, '');
       if (!Number.isFinite(config?.shooterHazardCount) || config.shooterHazardCount < 1) changes.shooterHazardCount = 3;
     }
   }

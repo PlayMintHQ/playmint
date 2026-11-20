@@ -16,7 +16,7 @@
 //  - A slot reported as succeeded without an image is an invariant violation —
 //    never registered (a texture key with no backing image).
 
-const WORLD_LAYERS = ['background_mid', 'background_near'];
+const WORLD_LAYERS = ['background_mid', 'background_near', 'surround', 'rim'];
 
 export function mergeRedrawnArt({ baseImages, baseSlots, newImages, newMeta }) {
   const mergedImages = { ...(baseImages || {}) };
@@ -72,7 +72,7 @@ export function mergeDesign(prior, next, redrawnSlots = []) {
   if (!next?.subjects) return prior || null;
   const subjectKey = (slot) => (slot === 'player_sheet' ? 'player' : slot);
   const touched = new Set(redrawnSlots.map(subjectKey));
-  const world = ['background_far', 'floor'].some((s) => touched.has(s));
+  const world = ['background_far', 'floor', 'surround', 'rim'].some((s) => touched.has(s));
   const cast = ['player', 'enemy'].some((s) => touched.has(s));
   if (!prior?.subjects || (world && cast)) {
     return { source: next.source, styleGuide: next.styleGuide, subjects: next.subjects, entities: next.entities || {} };

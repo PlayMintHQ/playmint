@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { getGroundLift } from './uiZones';
+import { resolveArenaRules, arenaViewPadFor, arenaZoom } from './modes/arenaHazards';
 
 /**
  * PlayMint Multi-Camera Manager
@@ -101,6 +102,23 @@ export default class MultiCameraManager {
     camera.centerOn(this.target.x, this.target.y);
   }
 
+  /** Margin the camera may look past the arena edge: the drop/water, or a walled arena's wall. */
+  arenaViewPad() {
+    const cfg = this.scene.gameConfig || {};
+    if (cfg.gameType !== 'shooter') return 0;
+    return arenaViewPadFor(resolveArenaRules(cfg).edge);
+  }
+
+  /** Camera bounds for the fixed arena (re-applied when the edge rule changes live). */
+  applyArenaBounds() {
+    const camera = this.scene.cameras.main;
+    const cfg = this.scene.gameConfig || {};
+    const worldWidth = cfg.worldWidth || 2000;
+    const worldHeight = cfg.worldHeight || 1500;
+    const pad = this.arenaViewPad();
+    camera.setBounds(-pad, -pad, worldWidth + pad * 2, worldHeight + pad * 2);
+  }
+
   configureFixedArena() {
     const camera = this.scene.cameras.main;
     const width = this.scene.scale.width;
@@ -110,7 +128,7 @@ export default class MultiCameraManager {
     const worldWidth = this.scene.gameConfig.worldWidth || 2000;
     const worldHeight = this.scene.gameConfig.worldHeight || 1500;
 
-    camera.setBounds(0, 0, worldWidth, worldHeight);
+    this.applyArenaBounds();
 
     if (this.target) {
       camera.startFollow(this.target, true, 0.1, 0.1);
@@ -123,10 +141,7 @@ export default class MultiCameraManager {
     // region wider/taller than the arena, and Phaser's bounds clamp then shows
     // raw background beyond the world edge. The 0.5 floor keeps huge arenas
     // readable on small screens (the camera follows the player instead).
-    const zoomX = width / worldWidth;
-    const zoomY = height / worldHeight;
-    const zoomRatio = Math.max(zoomX, zoomY, 0.5);
-    camera.setZoom(zoomRatio);
+    camera.setZoom(arenaZoom(width, height, worldWidth, worldHeight));
   }
 
   /**
@@ -157,13 +172,10 @@ export default class MultiCameraManager {
     } else if (this.mode === 'fixed-arena') {
       const worldWidth = this.scene.gameConfig.worldWidth || 2000;
       const worldHeight = this.scene.gameConfig.worldHeight || 1500;
-      camera.setBounds(0, 0, worldWidth, worldHeight);
+      this.applyArenaBounds();
       
       // Cover zoom — must match configureFixedArena (see comment there).
-      const zoomX = width / worldWidth;
-      const zoomY = height / worldHeight;
-      const zoomRatio = Math.max(zoomX, zoomY, 0.5);
-      camera.setZoom(zoomRatio);
+      camera.setZoom(arenaZoom(width, height, worldWidth, worldHeight));
 
       if (this.target) {
         camera.centerOn(this.target.x, this.target.y);

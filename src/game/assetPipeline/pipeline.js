@@ -8,7 +8,7 @@
  * every caller handles it by downgrading to the built-in static theme asset set
  * (ScreenZero's toStaticThemeConfig; App surfaces it in the regen overlay).
  */
-import { SLOT_SPECS, BASELINE_SLOTS, GENERATED_SLOTS, GEMINI_SHEET_MODEL, GEMINI_PRO_SHEET_MODEL, PROPS_GRID_SPEC, BG_CLAUSE, GAPS_CLAUSE, RIG_PARTS_PROMPT, GUIDE_SHEET_PREAMBLE, GUIDED_POSES_SENTENCE } from './slotSpecs';
+import { SLOT_SPECS, specForGame, BASELINE_SLOTS, GENERATED_SLOTS, GEMINI_SHEET_MODEL, GEMINI_PRO_SHEET_MODEL, PROPS_GRID_SPEC, BG_CLAUSE, GAPS_CLAUSE, RIG_PARTS_PROMPT, GUIDE_SHEET_PREAMBLE, GUIDED_POSES_SENTENCE } from './slotSpecs';
 import { extractRigParts, composeRigFrames, rigSwapsLimbs, renderPoseGuide } from './rig';
 import { animateHeroRun, PixelLabError } from './providers/pixellabAnimation';
 import { finishPixellabSheet } from './pixellabRung';
@@ -17,7 +17,7 @@ import { reviewSprite } from './qa';
 import * as gemini from './providers/geminiImage';
 import { designAssetPrompts, buildFinalPrompt, buildPropsGridPrompt, chromaFromPrompt } from './promptDesigner';
 import { parsePromptKeywords } from '../promptUtils';
-import { resolveArenaRules, arenaSurfaceKind, HAZARD_SUBJECTS } from '../modes/arenaHazards';
+import { resolveArenaRules, arenaSurfaceKind, HAZARD_SUBJECTS, arenaKitPlan, isStarryWorld, designedArenaSpec } from '../modes/arenaHazards';
 import { recordSheetAttempt, registerSheetReplayDeps } from './sheetDebug';
 import { recordLayerAttempt, registerLayerReplayDeps } from './layerDebug';
 
@@ -1713,14 +1713,15 @@ export async function generateAssets({
     if (cancelToken?.cancelled) throw cancelledError();
     const prompt = finalPrompts[slot];
     if (!prompt) throw new Error(`No prompt provided for asset slot "${slot}".`);
-    const spec = SLOT_SPECS[slot];
+    // specForGame: the shooter's ground plate is 4:3 (a per-game override of the base spec).
+    const spec = specForGame(slot, runState.gameType);
     if (spec.frames) return runSheetSlot(slot, spec, prompt);
     // Probe override (PM_MODEL_PLAYER) / demo mode (pro tier on every slot): swap
     // the generation model+size for this slot only — post-processing/QA read the
     // unchanged contract fields. resolveGenSpec returns `spec` itself when neither
     // applies, so genSpec stays null and generateSlotImage falls back to SLOT_SPECS.
     const resolved = resolveGenSpec(spec, slot, runState);
-    const genSpec = resolved !== spec ? resolved : null;
+    const genSpec = resolved !== spec ? resolved : (spec !== SLOT_SPECS[slot] ? spec : null);
     report(`[ASSETS] Generating ${slot}...`);
     const onAttempt = attemptTicker(slot);
     try {
@@ -1755,6 +1756,14 @@ export async function generateAssets({
         const chroma = chromaFromPrompt(attemptPrompt);
         let img = await postProcessAsset(raw.dataUrl, spec, { chroma });
         if (img.pmEdgeBars) report(`[QA] ${slot}: removed ${img.pmEdgeBars} stray divider line(s) beside the sprite.`);
+        if (img.pmTile) {
+          // Repeating tiles (Arena Kit): the seam measurement is free and always logged.
+          const t = img.pmTile;
+          report(`[QA] ${slot}: tile seam ${t.before.toFixed(1)} → ${t.after.toFixed(1)}${t.blended ? ' (cross-blended)' : ''}${t.after > 1.8 ? ' — still visible' : ''}`);
+          // A dead-uniform tile carries no art: dropping it (no retry, no extra call) lets
+          // the game draw its palette-aware built-in instead.
+          if (t.flat) throw new Error('generated tile is flat (no detail to show)');
+        }
         img = await enforceKeyQuality(slot, spec, raw, img, chroma);
         const { img: finalImg, outcome } = await applyQualityAssurance(slot, spec, raw, img, attemptPrompt);
         if (spec.qa?.clean) {
@@ -1991,7 +2000,7 @@ const compactDesign = (design) => (design ? {
   entities: design.entities || {}
 } : null);
 
-const WORLD_SLOT_SET = new Set(['background_far', 'background_mid', 'background_near', 'floor']);
+const WORLD_SLOT_SET = new Set(['background_far', 'background_mid', 'background_near', 'floor', 'surround', 'rim']);
 const CAST_SLOT_SET = new Set(['player', 'player_sheet', 'enemy']);
 const THEME_WORLD_WORDS = { ice: 'an icy frozen world', lava: 'a volcanic lava world', forest: 'a lush forest world', city: 'a city world', space: 'an outer-space world' };
 
@@ -2063,6 +2072,34 @@ function assertSlotCompleteness(slots, preloadedImages, meta) {
   }
 }
 
+// Arena Kit kill switch (project pattern: a localStorage PM_* flag read at run start).
+// '0' = the pre-kit behaviour: the shooter generates `floor` and draws the drop and rim
+// from code only.
+const arenaKitEnabled = () => {
+  try { return localStorage.getItem('PM_ARENA_KIT') !== '0'; } catch { return true; }
+};
+
+/**
+ * Prompts for the shooter's Arena Kit slots (surround = the drop below the platform,
+ * rim = its edge band) when the arena's rules need them. `spec` is the designer's
+ * verdict for THIS prompt (carries the subject text); `edit` is an optional restyle
+ * instruction ("make the drop a river") appended to the subject.
+ *   → { slots: ['surround','rim'], prompts: {…}, kinds: {surround:'void', rim:'void'|'water'} }
+ */
+function planArenaKit({ config, design, rules, spec, styleGuide, edit = '', only = null }) {
+  const starry = isStarryWorld(`${config.sourcePrompt || ''} ${config.gameName || ''}`);
+  const plan = arenaKitPlan(rules, { spec, themeKey: config.themeKey, starry });
+  const tail = edit ? `; adjusted for this change: ${String(edit).replace(/\s+/g, ' ').slice(0, 120)}` : '';
+  const out = { slots: [], prompts: {}, kinds: {} };
+  for (const slot of ['surround', 'rim']) {
+    if (!plan[slot] || (only && !only.includes(slot))) continue;
+    out.slots.push(slot);
+    out.prompts[slot] = buildFinalPrompt(slot, { ...design.subjects, [slot]: `${plan[slot]}${tail}` }, styleGuide, { gameType: config.gameType });
+    out.kinds[slot] = slot === 'surround' ? 'void' : rules.edge;
+  }
+  return out;
+}
+
 /**
  * Full generation for a game config: design prompts (LLM or local), then generate
  * all baseline assets. The ONE call every UI path uses.
@@ -2124,10 +2161,23 @@ export async function generateGameAssets({ config, userPrompt = '', onProgress =
   // Shooter arenas with a surface hazard (lava / acid / water pools, or an island
   // in deep water) get the surface drawn in the world's style — one lite call,
   // optional (the game paints a built-in surface without it).
-  const hazardSurface = config.gameType === 'shooter' ? arenaSurfaceKind(resolveArenaRules(config)) : null;
+  const arenaRulesNow = config.gameType === 'shooter'
+    ? resolveArenaRules({ ...config, assetMeta: { ...(config.assetMeta || {}), arena: design.arena || config.assetMeta?.arena } })
+    : null;
+  const hazardSurface = arenaRulesNow ? arenaSurfaceKind(arenaRulesNow) : null;
   if (hazardSurface) {
     finalPrompts.hazard = buildFinalPrompt('hazard', { ...design.subjects, hazard: HAZARD_SUBJECTS[hazardSurface] }, design.styleGuide, { gameType: config.gameType });
     slots.push('hazard');
+  }
+  // Arena Kit: the shooter's `floor` was only ever the haze under the platform (the ground
+  // is background_far), so that call becomes the `surround` (the drop, when the arena has
+  // one) and the edge gets its own `rim` strip. A wall arena with no pits needs neither.
+  let kit = null;
+  if (config.gameType === 'shooter' && arenaKitEnabled()) {
+    kit = planArenaKit({ config, design, rules: arenaRulesNow, spec: design.arena || designedArenaSpec(config), styleGuide: design.styleGuide });
+    slots = slots.filter((s) => s !== 'floor');
+    for (const slot of kit.slots) { finalPrompts[slot] = kit.prompts[slot]; slots.push(slot); }
+    if (kit.slots.length) onProgress(`[ASSETS] Arena kit: ${kit.slots.join(' + ')} (edge ${arenaRulesNow.edge})`, null);
   }
   slots = slots.filter(s => !effectiveSkipSlots.includes(s));
 
@@ -2135,6 +2185,8 @@ export async function generateGameAssets({ config, userPrompt = '', onProgress =
   const { preloadedImages, meta } = await generateAssets({ finalPrompts, slots, onProgress, cancelToken, gridPlan, gameType: config.gameType, playerSubject: design.subjects?.player || '' });
   // Which surface the hazard texture shows — the scene only uses it for that kind.
   if (hazardSurface && meta.hazard) meta.hazard.kind = hazardSurface;
+  // Which edge kind the kit art was drawn for: the scene only uses it while the rules still match.
+  if (kit) for (const slot of kit.slots) if (meta[slot]) meta[slot].kind = kit.kinds[slot];
 
   const generated = Object.values(meta).filter(m => !m.dropped).length;
   onProgress(
@@ -2155,6 +2207,9 @@ export async function generateGameAssets({ config, userPrompt = '', onProgress =
     artRev: ART_REV,
     designSource: design.source,
     design: compactDesign(design),
+    // The art director's verdict on this prompt's arena rules (shooter only; the
+    // runtime guards it with `src` so cache reuse across prompts can't inherit it).
+    ...(design.arena ? { arena: design.arena } : {}),
     // Perspective the art was drawn for. Shooter Arena stamps 'topdown'; every
     // other mode is side-view. The cache matcher refuses to reuse across views
     // (a profile sprite is unusable from above).
@@ -2266,7 +2321,19 @@ export async function regenerateAssetSlots({ config, instruction = '', slots, on
   const redrawSurface = slots.includes('hazard') ? arenaSurfaceKind(resolveArenaRules(config)) : null;
   if (slots.includes('hazard') && !redrawSurface) slots = slots.filter((s) => s !== 'hazard');
   const subjectsFor = redrawSurface ? { ...design.subjects, hazard: HAZARD_SUBJECTS[redrawSurface] } : design.subjects;
+  // Arena Kit redraws ("make the drop a river"): only when the arena still has such an
+  // edge, with the edit text steering the subject; a slot the rules don't need is dropped.
+  let kit = null;
+  if (config.gameType === 'shooter' && slots.some((s) => s === 'surround' || s === 'rim')) {
+    kit = planArenaKit({
+      config, design, rules: resolveArenaRules(config), spec: designedArenaSpec(config),
+      styleGuide: design.styleGuide, edit: instruction, only: slots.filter((s) => s === 'surround' || s === 'rim')
+    });
+    slots = slots.filter((s) => (s !== 'surround' && s !== 'rim') || kit.slots.includes(s));
+    for (const slot of kit.slots) finalPrompts[slot] = kit.prompts[slot];
+  }
   for (const slot of slots) {
+    if (finalPrompts[slot]) continue; // kit prompts are already composed
     finalPrompts[slot] = buildFinalPrompt(slot, subjectsFor, design.styleGuide,
       { userNamed: !!namedBySlot[slot], gameType: config.gameType });
     // Sheet slots fall back to their static slot on gate failure — that fallback
@@ -2292,6 +2359,7 @@ export async function regenerateAssetSlots({ config, instruction = '', slots, on
     playerSubject: design.subjects?.player || ''
   });
   if (redrawSurface && meta.hazard) meta.hazard.kind = redrawSurface;
+  if (kit) for (const slot of kit.slots) if (meta[slot]) meta[slot].kind = kit.kinds[slot];
 
   const updated = Object.values(meta).filter(m => !m.dropped).length;
   onProgress(

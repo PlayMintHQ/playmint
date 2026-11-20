@@ -44,7 +44,15 @@ const ScoreTicker = ({ targetScore }) => {
   return <span>{count}</span>;
 };
 
-const GameOverOverlay = ({ isWin, score, themeKey, gameType, onRestart, onTweakSettings, onRemix, onMainMenu }) => {
+// Shooter Arena: why the run ended. Only the hazards say anything; an enemy hit is
+// the obvious default and every other mode passes no cause.
+const CAUSE_LINES = {
+  fall: 'You fell off the edge',
+  burn: 'You burned',
+  drown: 'You drowned'
+};
+
+const GameOverOverlay = ({ isWin, score, themeKey, gameType, cause, onRestart, onTweakSettings, onRemix, onMainMenu }) => {
   const [isBtnHovered, setIsBtnHovered] = useState(false);
   const [isTweakHovered, setIsTweakHovered] = useState(false);
   const [isRemixHovered, setIsRemixHovered] = useState(false);
@@ -171,6 +179,13 @@ const GameOverOverlay = ({ isWin, score, themeKey, gameType, onRestart, onTweakS
           text-shadow: 0 0 20px ${isWin ? 'rgba(0, 255, 153, 0.45)' : 'rgba(255, 75, 75, 0.45)'};
           margin: 0;
           text-transform: uppercase;
+        }
+
+        .go-cause {
+          margin: 10px 0 0 0;
+          font-size: 14px;
+          letter-spacing: 1px;
+          color: rgba(255, 255, 255, 0.72);
         }
 
         .go-separator {
@@ -309,6 +324,7 @@ const GameOverOverlay = ({ isWin, score, themeKey, gameType, onRestart, onTweakS
           <h1 className="go-title">
             {isWin ? 'YOU WIN!' : 'GAME OVER'}
           </h1>
+          {!isWin && CAUSE_LINES[cause] && <p className="go-cause">{CAUSE_LINES[cause]}</p>}
           <div className="go-separator" />
         </div>
 

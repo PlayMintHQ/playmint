@@ -137,7 +137,10 @@ export default class GameManagerScene extends Phaser.Scene {
         obstacle: 'dyn_obstacle',
         projectile: 'dyn_projectile',
         collectible: 'dyn_collectible',
-        hazard: 'dyn_hazard'
+        hazard: 'dyn_hazard',
+        // Arena Kit (shooter): the drop under a void edge and the edge band.
+        surround: 'dyn_surround',
+        rim: 'dyn_rim'
       };
 
       Object.entries(preloaded).forEach(([key, img]) => {
@@ -193,10 +196,11 @@ export default class GameManagerScene extends Phaser.Scene {
     // keys — missing textures render as green boxes. Downgrade to built-in theme
     // art instead (mirrors ScreenZero's toStaticThemeConfig).
     if (this.gameConfig.dynamicAssetUrls && !this.gameConfig.preloadedImages) {
-      const required = ['dyn_bg_far', 'dyn_floor', 'dyn_player', 'dyn_enemy',
-        // Shooter never generates the obstacle/cover-prop slot — requiring it
-        // would falsely downgrade an otherwise-successful run to static art.
-        ...(this.gameConfig.gameType === 'shooter' ? [] : ['dyn_obstacle']),
+      const required = ['dyn_bg_far', 'dyn_player', 'dyn_enemy',
+        // The shooter's ground is dyn_bg_far; its `floor` slot is no longer generated
+        // (Arena Kit: that call became the `surround`), and its cover prop is optional
+        // for older sets — requiring either would falsely downgrade a good run.
+        ...(this.gameConfig.gameType === 'shooter' ? [] : ['dyn_floor', 'dyn_obstacle']),
         ...(this.gameConfig.gameType === 'platformer' ? ['dyn_platform'] : [])];
       const missing = required.filter(key => !this.textures.exists(key));
       if (missing.length > 0) {
@@ -206,6 +210,7 @@ export default class GameManagerScene extends Phaser.Scene {
     }
 
     this.isGameOver = false;
+    this.deathCause = null;
     window.dispatchEvent(new CustomEvent('game-reset'));
     this.score = 0;
     window.dispatchEvent(new CustomEvent('update-score', { detail: this.score }));
@@ -1099,15 +1104,20 @@ export default class GameManagerScene extends Phaser.Scene {
         isWin,
         score: this.score,
         themeKey: this.gameConfig.themeKey || 'default',
-        gameType: this.gameConfig.gameType || 'runner'
+        gameType: this.gameConfig.gameType || 'runner',
+        // Why the run ended (shooter hazards: 'fall' | 'burn' | 'drown'; 'hit' for
+        // an enemy). null for modes that don't say — the overlay then shows nothing.
+        cause: isWin ? null : (this.deathCause || null)
       }
     }));
   }
 
-  hitObstacle() {
+  // `cause` is optional: only the shooter's environment deaths pass one.
+  hitObstacle(_player, _other, cause = null) {
     if (this.isGameOver) return;
 
     this.isGameOver = true;
+    this.deathCause = cause;
 
     this.physics.pause();
     this.player.anims.stop();

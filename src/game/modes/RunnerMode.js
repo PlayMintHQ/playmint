@@ -23,6 +23,9 @@ const OBSTACLE_CLEARANCE_S = 0.25;
 // react to the environment, and position their fingers on the Jump button.
 const FIRST_OBSTACLE_DELAY_MS = 2800;
 
+// Scroll speed (px/s) at which the run cycle plays at its authored frame rate.
+const RUN_CADENCE_REF = 480;
+
 export default class RunnerMode extends BaseMode {
   init() {
     const theme = this.scene.activeTheme || {};
@@ -317,10 +320,11 @@ export default class RunnerMode extends BaseMode {
         this.scene.fx?.pulse(player, 1.16, 0.84, 90);
       }
       this.scene.playPlayerAnim('run');
-      // Tie playback rate to actual speed. The run cycle is authored at one
-      // fixed frame rate, so as speedIncrement ramps the feet visibly skate.
+      // Cadence follows the ABSOLUTE scroll speed. The cycle is authored at one
+      // frame rate for RUN_CADENCE_REF px/s; scaling against the configured
+      // speed made a 780 run look like a 480 one (world faster, legs not).
       if (player.anims && player.anims.isPlaying) {
-        player.anims.timeScale = Phaser.Math.Clamp(this.runSpeed / (this.baseSpeed || 1), 0.6, 1.5);
+        player.anims.timeScale = Phaser.Math.Clamp(this.runSpeed / RUN_CADENCE_REF, 0.4, 2.6);
       }
     }
     this.wasGrounded = grounded;

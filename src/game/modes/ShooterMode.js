@@ -2,8 +2,9 @@ import Phaser from 'phaser';
 import BaseMode from './BaseMode';
 import Projectile from '../objects/Projectile';
 import { buildNavGrid, computeFlowField, cellOf, steerPoint } from './arenaNav';
-import { COVER_BLOCK_PX, layoutArenaCover, resolveArenaRules, layoutArenaHazards, surfaceAt, navBlockRects, spawnRimPoints, SURFACE, isLethalSurface, arenaSurfaceKind } from './arenaHazards';
+import { COVER_BLOCK_PX, layoutArenaCover, resolveArenaRules, layoutArenaHazards, surfaceAt, navBlockRects, spawnRimPoints, SURFACE, isLethalSurface, arenaSurfaceKind, isStarryWorld } from './arenaHazards';
 import { drawArenaSurface } from './arenaSurface';
+import { installArenaDebug } from './arenaDebug';
 
 // AIM ASSIST is the default; the config flag (or the localStorage dev override,
 // same shape as the other PM_* switches) turns on the manual twin-stick scheme.
@@ -133,6 +134,8 @@ export default class ShooterMode extends BaseMode {
     this.buildArena();
     this.buildCover();
     this.buildNav();
+    // Dev builds only: the no-spend arena harness (arenaDebug.js).
+    if (import.meta.env.DEV) this.removeArenaDebug = installArenaDebug(this);
     if (this.cover) {
       scene.physics.add.collider(player, this.cover);
       scene.physics.add.collider(this.enemies, this.cover);
@@ -287,14 +290,20 @@ export default class ShooterMode extends BaseMode {
     const cfg = scene.gameConfig || {};
     const rnd = new Phaser.Math.RandomDataGenerator([`${cfg.layoutSeed || cfg.gameId || cfg.gameName || 'arena'}|hazards`]);
     this.arena = layoutArenaHazards({ width: this.worldWidth, height: this.worldHeight, ...this.rules, rnd: () => rnd.frac(), avoid });
-    if (this.arena.edge === 'wall' && !this.arena.pools.length) return;
     const words = `${cfg.sourcePrompt || ''} ${cfg.gameName || ''}`.toLowerCase();
-    const hazardKind = cfg.assetMeta?.slots?.hazard?.kind || null;
+    const slots = cfg.assetMeta?.slots || {};
+    const hazardKind = slots.hazard?.kind || null;
+    const hasPits = this.arena.pools.some((pool) => pool.kind === 'pit');
     this.arenaView = drawArenaSurface(scene, this.arena, {
       width: this.worldWidth,
       height: this.worldHeight,
-      starry: /\b(space|stars?|galax\w*|orbit\w*|asteroid|cosmic|nebula|moon)\b/.test(words),
-      hazardKind: hazardKind && hazardKind === arenaSurfaceKind(this.rules) ? hazardKind : null
+      starry: isStarryWorld(words),
+      hazardKind: hazardKind && hazardKind === arenaSurfaceKind(this.rules) ? hazardKind : null,
+      // Arena Kit art (generated surround + rim), used only while it still fits the
+      // CURRENT rules: a live edge change must never put a city street under water or
+      // a rooftop parapet on an island's shore. Old sets simply have neither.
+      useSurround: !!slots.surround && !slots.surround.dropped && (this.arena.edge === 'void' || hasPits),
+      useRim: !!slots.rim && !slots.rim.dropped && slots.rim.kind === this.arena.edge
     });
     console.info(`[Shooter] arena rules: edge=${this.arena.edge}, hazard=${this.arena.hazard} ×${this.arena.pools.length}`);
   }
@@ -319,6 +328,7 @@ export default class ShooterMode extends BaseMode {
     }
     this.buildNav();
     this.hazardGraceUntil = scene.time.now + 1500;
+    scene.cameraManager?.applyArenaBounds?.();
   }
 
   // Off the roof / into a pit: the player drops away, then the run ends.
@@ -337,7 +347,7 @@ export default class ShooterMode extends BaseMode {
       angle: player.angle + 220,
       duration: 450,
       ease: 'Quad.easeIn',
-      onComplete: () => scene.hitObstacle(player, null)
+      onComplete: () => scene.hitObstacle(player, null, 'fall')
     });
   }
 
@@ -348,7 +358,7 @@ export default class ShooterMode extends BaseMode {
     scene.fx?.burst?.(player.x, player.y, {
       color: kind === 'drown' ? 0x8fd8ff : 0xff7a1a, count: 16, speed: 180, gravityY: 0, scale: 1
     });
-    scene.hitObstacle(player, null);
+    scene.hitObstacle(player, null, kind === 'drown' ? 'drown' : 'burn');
   }
 
   // An enemy pushed onto a lethal surface is lost to it (the player scores).
@@ -756,7 +766,7 @@ export default class ShooterMode extends BaseMode {
 
   handlePlayerEnemyCollision(player, enemy) {
     if (enemy._dying) return;
-    this.scene.hitObstacle(player, enemy);
+    this.scene.hitObstacle(player, enemy, 'hit');
   }
 
   onConfigUpdate(newConfig) {
@@ -785,6 +795,7 @@ export default class ShooterMode extends BaseMode {
   }
 
   cleanup() {
+    if (this.removeArenaDebug) { this.removeArenaDebug(); this.removeArenaDebug = null; }
     if (this.resizeTimeout) clearTimeout(this.resizeTimeout);
     if (this.resizeListener) this.scene.scale.off('resize', this.resizeListener, this);
     if (this.pointerMoveHandler && this.scene?.input) {

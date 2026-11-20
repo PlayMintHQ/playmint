@@ -192,6 +192,7 @@ const ArenaRuleControls = ({ liveParams, onSliderChange }) => {
         <select id="pm-arena-hazard" name="shooterHazard" value={rules.hazard} onChange={onSliderChange} style={selectStyle}>
           <option value="none">None</option>
           <option value="lava">Lava (burns)</option>
+          <option value="fire">Fire (burns)</option>
           <option value="acid">Acid (burns)</option>
           <option value="water">Shallow water (slows)</option>
           <option value="pit">Pits (fall)</option>

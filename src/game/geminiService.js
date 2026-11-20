@@ -2,7 +2,6 @@ import { parsePromptKeywords, generateTitle, generateProceduralLayout, generateW
 import { generateAssetDirections } from './assetPipeline/promptDesigner';
 import { isGeminiConfigured } from './assetPipeline/providers/geminiImage';
 import { ACTION_WALK_SPEED_DEFAULT } from '../gameConfig';
-import { parseArenaHazards } from './modes/arenaHazards';
 
 /**
  * PlayMint Local Generation Service
@@ -200,12 +199,11 @@ export async function generateGameConfig(promptText, onProgress = () => {}, opti
       // to the nearest enemy in range and fires on the cooldown, so the only
       // input is "move". `true` restores the manual twin-stick/mouse scheme.
       shooterManualAim: false,
-      // Arena rules from the world (2026-11-07): a rooftop has deadly edges, a
-      // volcano lava pools, an enclosed arena solid walls. Shooter only.
-      ...(gameType === 'shooter' ? (() => {
-        const arena = parseArenaHazards(promptText);
-        return { shooterEdge: arena.edge, shooterHazard: arena.hazard, shooterHazardCount: arena.hazard === 'none' ? 0 : (difficulty >= 7 ? 4 : 3) };
-      })() : {}),
+      // Arena rules (edge / hazard pools) are NOT stamped here (2026-11-20). They
+      // resolve at runtime from: explicit edits > the art director's verdict for
+      // this prompt (assetMeta.arena, free: same design call) > prompt keywords
+      // (resolveArenaRules). Stamping the keyword result here made it an
+      // "explicit" value that the designer's verdict could never override.
       worldWidth: gameType === 'shooter' ? shooterWorldWidth : worldWidth,
       worldHeight: gameType === 'shooter' ? shooterWorldHeight : 1500,
       layoutArray,
