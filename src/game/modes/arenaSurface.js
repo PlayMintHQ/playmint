@@ -11,7 +11,7 @@
 // this kind, else a small built-in texture painted here once.
 import Phaser from 'phaser';
 import { arenaViewPadFor, WALL_VIEW_PAD } from './arenaHazards';
-import { paletteOfSource, stripHalves, tileCanvas, mixRgb, scaleRgb, toHex } from '../assetPipeline/tiling';
+import { stripHalves, tileCanvas, mixRgb, scaleRgb, toHex } from '../assetPipeline/tiling';
 
 const PALETTE = {
   lava: { base: '#b3300b', light: ['#ff8a1a', '#ffc53a'], dark: '#4a1206', crust: 0x2a0d06, glow: 0xff7a1a },
@@ -59,13 +59,11 @@ function paintSurface(scene, kind) {
 const DEFAULT_PLATE = { avg: { r: 70, g: 74, b: 86 }, light: { r: 150, g: 156, b: 170 }, dark: { r: 18, g: 22, b: 32 } };
 const rgbaOf = (c, a) => `rgba(${c.r},${c.g},${c.b},${a})`;
 
-// The arena ground's colours (generated plate; or the flat static-art fill; or a neutral grey).
+// The arena ground's colours: whatever buildArenaGround actually drew (arenaGround.js). Never the
+// raw `dyn_bg_far`, which on older sets is a SCENE (skyline, sky) and would tint the edge with it.
 function platePalette(scene) {
+  if (scene.arenaGroundPalette) return scene.arenaGroundPalette;
   try {
-    if (scene.textures.exists('dyn_bg_far')) {
-      const pal = paletteOfSource(scene.textures.get('dyn_bg_far').getSourceImage());
-      if (pal) return pal;
-    }
     const fill = scene.arenaFloor?.fillColor;
     if (typeof fill === 'number') {
       const avg = { r: (fill >> 16) & 255, g: (fill >> 8) & 255, b: fill & 255 };

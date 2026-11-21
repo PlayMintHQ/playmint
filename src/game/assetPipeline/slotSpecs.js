@@ -144,17 +144,22 @@ export const SLOT_SPECS = {
     // The shooter arena is 4:3 (2000×1500): a 2:1 plate was cover-scaled onto it,
     // throwing away a third of the picture and upscaling the rest ~1.46× (blurry).
     // A 4:3 plate fills the world at ~1:1. Applied by specForGame().
-    shooter: { canvas: { width: 2048, height: 1536 }, gen: { aspectRatio: '4:3' } },
+    // 2K is requested here (the comment above promised it, the spec never set it). NO `tileable`:
+    // the picture is cover-scaled once, never tiled, and a smooth dark ground would trip the
+    // flat-tile drop (pipeline.js) and kill this REQUIRED slot. `qa.ground` runs the fail-closed
+    // ground gate (qa.js / pipeline.js applyGroundGate): a picture is drawn as ground only when it
+    // passes (role 'ground'), otherwise the slot ships a floor-tile bake or a procedural ground.
+    shooter: { canvas: { width: 2048, height: 1536 }, gen: { aspectRatio: '4:3', imageSize: '2K' }, qa: { ground: true } },
     scaffold: (subject, style, opts = {}) => opts.gameType === 'shooter'
       // The shooter arena renders this as the GROUND of a top-down arena: no
       // horizon, no sky — a side-view landscape here would show as a wall of sky
       // laid flat under the player.
-      ? `Paint the ground of a top-down video game arena seen from directly above: ${subject}. ` +
-        `The whole frame is ground surface in bird's-eye view — scattered terrain details, ` +
-        `markings and props lie flat on it. Every part of the frame is solid walkable ground, edge to ` +
-        `edge — no ledges, cliffs, drop-offs, open sky, clouds, chasms or open water around or across ` +
-        `it (the game draws the arena's edges and hazards itself). No horizon, no characters, no ` +
-        `text, no logo. ${style}`
+      ? `Create a seamless tileable ground texture, viewed from directly above (the camera points ` +
+        `straight down): ${subject}. The whole frame is ONE continuous flat surface from edge to edge ` +
+        `with even detail density and no single focal feature. There is no frame, border, wall, ledge, ` +
+        `parapet, building, skyline, horizon, sky, clouds, water edge, void or any surroundings, and ` +
+        `no perspective or vertical surfaces: markings, cracks, stains, grates and debris lie flat in ` +
+        `the surface. No characters, no text, no logo. ${style}`
       : `Paint a wide side-scrolling video game background: ${subject}. Distant landscape ` +
         `scenery fills the entire frame — no characters, no text, no logo. ${style}`,
     fallbackSubject: (d) => d?.backgrounds
@@ -207,6 +212,9 @@ export const SLOT_SPECS = {
     canvas: { width: 128, height: 128 },
     gen: { aspectRatio: '1:1', model: GEMINI_SLOT_MODEL },
     post: { fit: 'stretch', keying: null, trimBorder: true, crop: false },
+    // Shooter: the floor tile is the fail-closed ground's source (stochastic bake). A bigger tile
+    // carries more detail, and the seam blend + flat check keep it truly seamless.
+    shooter: { canvas: { width: 256, height: 256 }, post: { tileable: 'both' } },
     scaffold: (subject, style, { gameType } = {}) =>
       gameType === 'shooter'
         ? `Create a seamless tileable ground texture, viewed from directly above ` +
@@ -511,7 +519,9 @@ export function specForGame(slot, gameType) {
     ...spec,
     canvas: over.canvas || spec.canvas,
     gen: { ...spec.gen, ...(over.gen || {}) },
-    post: { ...spec.post, ...(over.post || {}) }
+    post: { ...spec.post, ...(over.post || {}) },
+    ...(over.qa ? { qa: { ...(spec.qa || {}), ...over.qa } } : {}),
+    ...(over.optional != null ? { optional: over.optional } : {})
   };
 }
 

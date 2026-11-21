@@ -174,3 +174,156 @@ export function stripHalves(source) {
     bottom: samplePalette(data.subarray(half), w, h / 2, 1)
   };
 }
+
+// ── Ground synthesis (2026-11-21, ground-as-material) ───────────────────────────────────
+// The shooter's ground must be a MATERIAL: it may never encode geometry (walls, an edge, a
+// skyline), because the walkable region is defined by code. These pure functions build a
+// full-arena ground from a small seamless tile (`bakeStochastic`) or from nothing at all
+// (`proceduralGround`), deterministically from a seed, so the result is identical on every
+// device and testable in node.
+
+/** FNV-1a string hash → 32-bit seed. */
+export function hashSeed(str) {
+  let h = 2166136261;
+  const s = String(str ?? '');
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+
+/** mulberry32 PRNG → () => [0,1). */
+export function rng(seed) {
+  let a = (seed >>> 0) || 1;
+  return () => {
+    a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// Smooth value noise in [-1, 1] on a coarse lattice (`wave` px between lattice points).
+function makeValueNoise(w, h, wave, rand) {
+  const cols = Math.ceil(w / wave) + 3, rows = Math.ceil(h / wave) + 3;
+  const lat = new Float32Array(cols * rows);
+  for (let i = 0; i < lat.length; i++) lat[i] = rand() * 2 - 1;
+  return (x, y) => {
+    const fx = x / wave, fy = y / wave;
+    const x0 = Math.floor(fx), y0 = Math.floor(fy);
+    const tx = fx - x0, ty = fy - y0;
+    const sx = tx * tx * (3 - 2 * tx), sy = ty * ty * (3 - 2 * ty);
+    const a = lat[y0 * cols + x0], b = lat[y0 * cols + x0 + 1];
+    const c = lat[(y0 + 1) * cols + x0], d = lat[(y0 + 1) * cols + x0 + 1];
+    return (a + (b - a) * sx) * (1 - sy) + (c + (d - c) * sx) * sy;
+  };
+}
+
+// 4×4 Bayer ordered-dither thresholds in (0,1): crisp joins between tile cells, no ghosting.
+const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map((v) => (v + 0.5) / 16);
+
+/**
+ * Fill outW×outH from a small SEAMLESS tile without a visible repeat: staggered cells, each
+ * with a random wrap offset and one of 4 flip orientations (no 90° turns: a directional ground
+ * such as diagonal stripes or panels would otherwise show patches of rotated pattern), joined by an ordered-dither
+ * band, then a faint low-frequency tint so the periodicity cue disappears.
+ * @param tile  {data: Uint8ClampedArray (RGBA), w, h}
+ * @returns Uint8ClampedArray RGBA, outW*outH*4
+ */
+export function bakeStochastic(tile, outW, outH, seed, { cell = 288, join = 14, tint = 0.05 } = {}) {
+  const { data: td, w: tw, h: th } = tile;
+  const rand = rng(seed);
+  const cols = Math.ceil(outW / cell) + 3, rows = Math.ceil(outH / cell) + 3;
+  const cellParams = new Array(cols * rows);
+  for (let i = 0; i < cellParams.length; i++) {
+    cellParams[i] = { dx: Math.floor(rand() * tw), dy: Math.floor(rand() * th), o: Math.floor(rand() * 4) };
+  }
+  const stagger = (r) => ((r & 1) ? cell >> 1 : 0);
+  const rowCol = (x, r) => {
+    const xo = stagger(r);
+    const c = Math.floor((x - xo) / cell);
+    return { c, u: (x - xo) - c * cell };
+  };
+  const param = (r, c) => cellParams[Math.max(0, Math.min(rows - 1, r + 1)) * cols + Math.max(0, Math.min(cols - 1, c + 1))];
+  // Coordinates may run past a cell's edge (u or v outside [0, cell)): sample() wraps through
+  // the seamless tile, so a neighbour cell simply continues into its neighbour's area.
+  const sample = (p, u, v, out, oi) => {
+    let px = u, py = v;
+    if (p.o & 1) px = cell - 1 - px;
+    if (p.o & 2) py = cell - 1 - py;
+    const tx = (((px + p.dx) % tw) + tw) % tw, ty = (((py + p.dy) % th) + th) % th;
+    const ti = ((ty | 0) * tw + (tx | 0)) * 4;
+    out[oi] = td[ti]; out[oi + 1] = td[ti + 1]; out[oi + 2] = td[ti + 2]; out[oi + 3] = 255;
+  };
+  const noise = makeValueNoise(outW, outH, 700, rand);
+  const out = new Uint8ClampedArray(outW * outH * 4);
+  for (let y = 0; y < outH; y++) {
+    const r0 = Math.floor(y / cell);
+    const v0 = y - r0 * cell;
+    for (let x = 0; x < outW; x++) {
+      const { c: c0, u: u0 } = rowCol(x, r0);
+      let r = r0, c = c0, u = u0, v = v0;
+      // join with the left neighbour (ordered dither over `join` px), then with the row above
+      if (u0 < join && BAYER[((y & 3) << 2) | (x & 3)] >= 0.5 + 0.5 * (u0 / join)) { c = c0 - 1; u = u0 + cell; }
+      if (v0 < join && BAYER[((x & 3) << 2) | (y & 3)] >= 0.5 + 0.5 * (v0 / join)) {
+        r = r0 - 1;
+        const rc = rowCol(x, r);
+        c = rc.c; u = rc.u; v = v0 + cell;
+      }
+      const oi = (y * outW + x) * 4;
+      sample(param(r, c), u, v, out, oi);
+      const k = 1 + noise(x, y) * tint;
+      out[oi] *= k; out[oi + 1] *= k; out[oi + 2] *= k;
+    }
+  }
+  return out;
+}
+
+/**
+ * A ground with NO source image: panelled concrete/metal in the given palette — the last rung
+ * of the fallback ladder, so a ground always exists and can never contain geometry.
+ * @param palette {avg, light, dark} (rgb objects)
+ */
+export function proceduralGround(outW, outH, palette, seed) {
+  const rand = rng(seed);
+  const lo = makeValueNoise(outW, outH, 520, rand);
+  const mid = makeValueNoise(outW, outH, 150, rand);
+  const base = palette?.avg || { r: 70, g: 74, b: 84 };
+  const dark = palette?.dark || { r: base.r * 0.5, g: base.g * 0.5, b: base.b * 0.5 };
+  const light = palette?.light || { r: Math.min(255, base.r * 1.4), g: Math.min(255, base.g * 1.4), b: Math.min(255, base.b * 1.4) };
+  // Panel grid with jittered pitch: thin darker seams + a slight per-panel value shift.
+  const pitch = 128 + Math.floor(rand() * 48);
+  const panelShift = new Float32Array(64 * 64);
+  for (let i = 0; i < panelShift.length; i++) panelShift[i] = (rand() - 0.5) * 0.10;
+  const out = new Uint8ClampedArray(outW * outH * 4);
+  for (let y = 0; y < outH; y++) {
+    for (let x = 0; x < outW; x++) {
+      const px = Math.floor(x / pitch), py = Math.floor(y / pitch);
+      const shift = panelShift[((py & 63) << 6) | (px & 63)];
+      const gx = x - px * pitch, gy = y - py * pitch;
+      const seam = (gx < 2 || gy < 2) ? 1 : 0;
+      const hi = (gx === 2 || gy === 2) ? 1 : 0; // a 1px highlight beside the seam
+      let k = 1 + lo(x, y) * 0.08 + mid(x, y) * 0.05 + shift;
+      const speck = ((hashSeed(`${x},${y}`) & 1023) < 3) ? (rand() < 0.5 ? 0.82 : 1.15) : 1;
+      k *= speck;
+      let r = base.r * k, g = base.g * k, b = base.b * k;
+      if (seam) { r = dark.r; g = dark.g; b = dark.b; }
+      else if (hi) { r = r * 0.7 + light.r * 0.3; g = g * 0.7 + light.g * 0.3; b = b * 0.7 + light.b * 0.3; }
+      const oi = (y * outW + x) * 4;
+      out[oi] = r; out[oi + 1] = g; out[oi + 2] = b; out[oi + 3] = 255;
+    }
+  }
+  return out;
+}
+
+/** Palette of the CENTRE of an image (the plate's skyline lives at its edges). Browser only. */
+export function paletteOfCenter(source, frac = 0.4, maxSide = 64) {
+  const sw = source.width || source.naturalWidth, sh = source.height || source.naturalHeight;
+  if (!sw || !sh) return null;
+  const cw = sw * frac, ch = sh * frac;
+  const k = Math.min(1, maxSide / Math.max(cw, ch));
+  const w = Math.max(1, Math.round(cw * k)), h = Math.max(1, Math.round(ch * k));
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(source, (sw - cw) / 2, (sh - ch) / 2, cw, ch, 0, 0, w, h);
+  return samplePalette(ctx.getImageData(0, 0, w, h).data, w, h, 1);
+}

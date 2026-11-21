@@ -59,6 +59,9 @@ export const stripForShare = (liveParams, { forRow = false } = {}) => {
       if (m?.frames) entry.frames = m.frames;
       if (m?.facingVerified != null) entry.facingVerified = m.facingVerified;
       if (m?.dropped) entry.dropped = true;
+      // NOTE: the ground gate's `role` stamp is deliberately NOT carried here. It matters only when
+      // art is present, and art always restores with its full meta (cache / store meta.json);
+      // letting a link assert it would let a crafted link promote a scene plate to "ground".
       if (Object.keys(entry).length) lite[slot] = entry;
     }
     if (Object.keys(lite).length) config.assetMetaLite = { slots: lite };

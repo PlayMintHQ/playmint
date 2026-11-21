@@ -624,7 +624,7 @@ export function chromaFromPrompt(prompt) {
 // (which states the base once for all cells). Keeping this in one place is what
 // preserves the readability buckets (gameplay accent vs user-named natural colors
 // vs collectible gold vs terrain palette) on every path.
-function slotStyleClauses(slotKey, styleGuide, { userNamed = false } = {}) {
+function slotStyleClauses(slotKey, styleGuide, { userNamed = false, gameType = null } = {}) {
   const accent = styleGuide.accentPalette || DEFAULT_ACCENT;
   if (GAMEPLAY_SLOTS.has(slotKey)) {
     // Accent-as-dominant is the readability rule for designer-invented sprites —
@@ -643,6 +643,14 @@ function slotStyleClauses(slotKey, styleGuide, { userNamed = false } = {}) {
     // must look like a coin) — unless the designer's subject says otherwise.
     return `bright iconic colors with a metallic gold default, glowing ` +
       `highlight, bold dark outline, instantly readable at very small size`;
+  }
+  // Shooter ground surfaces (ground / floor / hazard tiles): a flat material seen from above. The
+  // terrain default below ("a clearly defined lighter top edge") is for side-view platforms and
+  // baked a lighter band into every tile that then repeated as a stripe; the distant-haze language
+  // of background_far would turn the ground into a hazy scene.
+  if (gameType === 'shooter' && (slotKey === 'background_far' || slotKey === 'floor' || slotKey === 'hazard')) {
+    return `color palette ${styleGuide.colorPalette}, medium-dark tones, even detail density across the ` +
+      `whole surface with no single focal feature, crisp pixel-native detail, flat top-down material`;
   }
   if (slotKey === 'background_far') {
     // No soft-edge vocabulary here: "soft atmospheric haze" trailed the SNES-era
@@ -685,8 +693,13 @@ const styleBase = (styleGuide) =>
 
 export function buildFinalPrompt(slotKey, subjects, styleGuide, { userNamed = false, gameType = null } = {}) {
   const spec = SLOT_SPECS[slotKey];
-  const subject = subjects[slotKey] ?? (spec.subjectKey ? subjects[spec.subjectKey] : undefined);
-  const style = `${styleBase(styleGuide)}, ${slotStyleClauses(slotKey, styleGuide, { userNamed })}`;
+  // Shooter ground: the subject is the designed GROUND SURFACE (`floor`), never the distant
+  // scenery text of `background_far` ("night skyline, neon signs…"), which made the model paint
+  // a whole city around the arena.
+  const subject = (gameType === 'shooter' && slotKey === 'background_far' && subjects.floor)
+    ? subjects.floor
+    : (subjects[slotKey] ?? (spec.subjectKey ? subjects[spec.subjectKey] : undefined));
+  const style = `${styleBase(styleGuide)}, ${slotStyleClauses(slotKey, styleGuide, { userNamed, gameType })}`;
   const chroma = CHARACTER_SLOTS.has(slotKey)
     ? pickCharacterChroma(subject || '')
     : KEYED_SPRITE_SLOTS.has(slotKey)

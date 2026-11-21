@@ -7,10 +7,13 @@
 //   __PM_ARENA_DEBUG.setRules('void','fire')  change edge / hazard live (like the Creator Panel)
 //   __PM_ARENA_DEBUG.teleport(x, y)         put the player somewhere (grace on, enemies cleared)
 //   __PM_ARENA_DEBUG.corner('tl'|'tr'|'bl'|'br'|'t'|'b'|'l'|'r')  stand at a platform corner/side
+//   __PM_ARENA_DEBUG.sweep()                where the fall rule flips vs the platform edge (+ which ground is drawn)
 //
 // The synthetic art is deliberately ASYMMETRIC (the rim's outer face is dark and its lip
 // bright; the surround has a bright grid) so a wrong rotation or a misplaced edge line is
 // obvious in a screenshot.
+
+import { surfaceAt } from './arenaHazards';
 
 function paintSurround(scene) {
   const key = 'dyn_surround';
@@ -93,6 +96,29 @@ export function installArenaDebug(mode) {
       const ys = { t: p.y + m, b: p.y + p.height - m, c: p.y + p.height / 2 };
       const spot = { tl: [xs.l, ys.t], tr: [xs.r, ys.t], bl: [xs.l, ys.b], br: [xs.r, ys.b], t: [xs.c, ys.t], b: [xs.c, ys.b], l: [xs.l, ys.c], r: [xs.r, ys.c] }[where];
       return spot ? api.teleport(spot[0], spot[1]) : 'unknown corner';
+    },
+    // Where does the rule flip from ground to void, per side? ShooterMode fires 6px past the platform
+    // edge (surfaceAt shrink 6); the painted rim is centred on that same edge, so the fall must
+    // happen at the rim line +6px, and NOTHING inside the platform may read as void.
+    sweep() {
+      const a = mode.arena, p = a.platform;
+      const flip = (axis, fixed, edge, dir) => {
+        for (let d = -20; d <= 20; d++) {
+          const t = edge + dir * d;
+          const x = axis === 'x' ? t : fixed, y = axis === 'x' ? fixed : t;
+          if (surfaceAt(a, x, y, 6) === 'void' || surfaceAt(a, x, y, 6) === 'deep') return d;
+        }
+        return null;
+      };
+      const mx = p.x + p.width / 2, my = p.y + p.height / 2;
+      const sides = {
+        left: flip('x', my, p.x, -1), right: flip('x', my, p.x + p.width, 1),
+        top: flip('y', mx, p.y, -1), bottom: flip('y', mx, p.y + p.height, 1)
+      };
+      let interiorVoid = 0;
+      for (let x = p.x + 8; x < p.x + p.width - 8; x += 40) for (let y = p.y + 8; y < p.y + p.height - 8; y += 40) if (surfaceAt(a, x, y, 6) === 'void' || surfaceAt(a, x, y, 6) === 'deep') interiorVoid++;
+      const ok = a.edge === 'wall' || (Object.values(sides).every((d) => d != null && d >= 5 && d <= 8) && interiorVoid === 0);
+      return { edge: a.edge, flipPxPastEdge: sides, interiorVoid, ok, groundSource: scene.arenaGroundSource };
     },
     // Wait for the camera to settle (it follows with a lerp), then report what is on screen.
     view() {

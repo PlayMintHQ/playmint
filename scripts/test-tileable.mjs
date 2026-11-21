@@ -4,7 +4,7 @@
 //
 // Usage: node scripts/test-tileable.mjs
 
-import { seamScore, makeTileable, samplePalette, mixRgb, scaleRgb, toHex } from '../src/game/assetPipeline/tiling.js';
+import { seamScore, makeTileable, samplePalette, mixRgb, scaleRgb, toHex, bakeStochastic, proceduralGround, hashSeed, rng } from '../src/game/assetPipeline/tiling.js';
 
 let failures = 0;
 const check = (name, ok, detail = '') => {
@@ -94,6 +94,56 @@ check('flat tile has ~no spread', samplePalette(flat, W, H, 1).spread < 4);
 check('mixRgb endpoints', JSON.stringify(mixRgb({ r: 0, g: 0, b: 0 }, { r: 200, g: 100, b: 50 }, 0.5)) === JSON.stringify({ r: 100, g: 50, b: 25 }));
 check('scaleRgb clamps', scaleRgb({ r: 200, g: 100, b: 10 }, 2).r === 255);
 check('toHex packs', toHex({ r: 1, g: 2, b: 3 }) === 0x010203);
+
+// 9. Ground synthesis: stochastic bake of a seamless tile + procedural ground ---------------
+const lum = (d, i) => 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+const OW = 640, OH = 480;
+// A pixel-art-like seamless ground tile: 8px blocks of value noise (wrap-safe by construction),
+// panel seams every 64px and a few bright rivets. Real floor tiles are this busy; the smooth
+// sinusoid tile above is the unrealistic worst case for a dithered join.
+const gtile = (() => {
+  const r = rng(99), blocks = 16, v = Array.from({ length: blocks * blocks }, () => 70 + Math.floor(r() * 70));
+  return make(W, H, (x, y) => {
+    let c = v[((y >> 3) % blocks) * blocks + ((x >> 3) % blocks)];
+    if (x % 64 === 0 || y % 64 === 0) c *= 0.55;
+    if ((x % 64 === 10 || x % 64 === 54) && (y % 64 === 10 || y % 64 === 54)) c = 200;
+    return [c, c * 0.95, c * 0.85];
+  });
+})();
+const baked = bakeStochastic({ data: gtile, w: W, h: H }, OW, OH, hashSeed('arena-1'));
+const baked2 = bakeStochastic({ data: gtile, w: W, h: H }, OW, OH, hashSeed('arena-1'));
+const bakedOther = bakeStochastic({ data: gtile, w: W, h: H }, OW, OH, hashSeed('arena-2'));
+check('bake is deterministic for a seed', baked.every((v, i) => v === baked2[i]));
+check('bake differs for another seed', baked.some((v, i) => v !== bakedOther[i]));
+check('bake output is opaque RGBA of the right size', baked.length === OW * OH * 4 && baked.every((v, i) => (i % 4 !== 3) || v === 255));
+// Repetition cue: normalised horizontal autocorrelation of luminance at the TILE period.
+// A plain repeat of a periodic tile scores ~1.0; the stochastic bake must be clearly lower.
+const autocorr = (d, w, h, lag) => {
+  let sxy = 0, sxx = 0, syy = 0, n = 0, mean = 0;
+  for (let y = 0; y < h; y += 2) for (let x = 0; x < w; x += 2) mean += lum(d, (y * w + x) * 4);
+  mean /= Math.ceil(w / 2) * Math.ceil(h / 2);
+  for (let y = 0; y < h; y += 2) for (let x = 0; x + lag < w; x += 2) {
+    const a = lum(d, (y * w + x) * 4) - mean, b = lum(d, (y * w + x + lag) * 4) - mean;
+    sxy += a * b; sxx += a * a; syy += b * b; n++;
+  }
+  return sxy / Math.sqrt(sxx * syy || 1);
+};
+const plainTiled = new Uint8ClampedArray(OW * OH * 4);
+for (let y = 0; y < OH; y++) for (let x = 0; x < OW; x++) { const si = ((y % H) * W + (x % W)) * 4, oi = (y * OW + x) * 4; for (let c = 0; c < 4; c++) plainTiled[oi + c] = gtile[si + c]; }
+const acPlain = autocorr(plainTiled, OW, OH, W), acBaked = autocorr(baked, OW, OH, W);
+check('plain tiling repeats at the tile period (control)', acPlain > 0.9, `r ${acPlain.toFixed(2)}`);
+check('stochastic bake hides the tile period', acBaked < 0.6, `r ${acBaked.toFixed(2)}`);
+// colours stay inside the source tile's colour range (±tint)
+let tMin = 255, tMax = 0; for (let i = 0; i < gtile.length; i += 4) { tMin = Math.min(tMin, gtile[i]); tMax = Math.max(tMax, gtile[i]); }
+let bMin = 255, bMax = 0; for (let i = 0; i < baked.length; i += 4) { bMin = Math.min(bMin, baked[i]); bMax = Math.max(bMax, baked[i]); }
+check('bake keeps the tile palette (±6 %)', bMin >= tMin * 0.9 && bMax <= tMax * 1.1 + 1, `tile ${tMin | 0}-${tMax | 0} bake ${bMin | 0}-${bMax | 0}`);
+const gpal = { avg: { r: 90, g: 80, b: 70 }, light: { r: 140, g: 130, b: 120 }, dark: { r: 30, g: 28, b: 26 } };
+const proc = proceduralGround(OW, OH, gpal, hashSeed('p1')), proc2 = proceduralGround(OW, OH, gpal, hashSeed('p1'));
+check('procedural ground is deterministic', proc.every((v, i) => v === proc2[i]));
+const pp = samplePalette(proc, OW, OH, 2);
+check('procedural ground follows the palette', Math.abs(pp.avg.r - 90) < 18 && Math.abs(pp.avg.b - 70) < 18, JSON.stringify(pp.avg));
+check('procedural ground has texture (not flat)', pp.spread > 4, `spread ${pp.spread.toFixed(1)}`);
+check('rng is in [0,1) and seeded', (() => { const a = rng(5), b = rng(5); for (let i = 0; i < 50; i++) { const x = a(); if (x < 0 || x >= 1 || x !== b()) return false; } return true; })());
 
 console.log(failures ? `\n✗ ${failures} check(s) failed` : '\n✓ tiling helpers pass');
 process.exit(failures ? 1 : 0);

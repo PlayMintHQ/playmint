@@ -17,6 +17,9 @@ import {
   isLethalSurface, CENTER_CLEAR, arenaViewport, arenaVisibleRect, ARENA_VIEW_PAD, EDGE_INSET,
   arenaKitPlan, cleanSubject, normalizeArenaSpec, WALL_VIEW_PAD, arenaViewPadFor
 } from '../src/game/modes/arenaHazards.js';
+import { chooseGroundSource } from '../src/game/modes/arenaGround.js';
+import { groundVerdict, runGroundLadder } from '../src/game/assetPipeline/groundGate.js';
+import fs from 'node:fs';
 
 const SEEDS = Number(process.argv[2]) || 100;
 const SPAWNS = Number(process.argv[3]) || 12;
@@ -146,6 +149,78 @@ expect('a verdict never stacks water pools on a water edge', normalizeArenaSpec(
 expect('a walled arena still has a wall pad (its wall is drawn outside the world)', WALL_VIEW_PAD > 0 && arenaViewPadFor('wall') === WALL_VIEW_PAD && arenaViewPadFor('void') === ARENA_VIEW_PAD);
 const wallVp = arenaViewport({ viewW: 1280, viewH: 720, worldW: W, worldH: H, edge: 'wall' });
 expect('wall arena: the wall is reachable on screen at the world edge', arenaVisibleRect(wallVp, 20, 20).x <= -WALL_VIEW_PAD + 1);
+// 7. The ground can never be a scene: which source each situation gets (pure table), and that no
+// source file reads the raw legacy plate (`dyn_bg_far`) except the allow-listed ones.
+const gs = (o) => chooseGroundSource({ dynamic: true, hasPlate: false, role: undefined, hasFloorTile: false, ...o });
+expect('gate-approved plate (role ground) is drawn', gs({ hasPlate: true, role: 'ground' }) === 'plate');
+expect('a legacy plate (no role) is NEVER drawn, even with no floor tile', gs({ hasPlate: true }) !== 'plate' && gs({ hasPlate: true }) === 'procedural');
+expect('a legacy plate with a floor tile gets the baked floor', gs({ hasPlate: true, hasFloorTile: true }) === 'floor');
+expect('a plate with a different role is not drawn', gs({ hasPlate: true, role: 'scene' }) !== 'plate');
+expect('no art at all: procedural', gs({}) === 'procedural');
+expect('static boots (no dynamic art) are handled separately', chooseGroundSource({ dynamic: false, hasPlate: true, role: 'ground', hasFloorTile: true }) === 'static');
+expect('kill switch restores the old behaviour (plate whatever its role)', chooseGroundSource({ dynamic: true, hasPlate: true, role: undefined, hasFloorTile: true, killSwitch: true }) === 'plate');
+const READERS_OK = new Set(['src/game/modes/arenaGround.js', 'src/game/modes/arenaSurface.js', 'src/game/GameManagerScene.js', 'src/game/savedGames/thumbnail.js']);
+const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(`${dir}/${e.name}`) : [`${dir}/${e.name}`]);
+const readers = walk('src').filter((f) => /\.(js|jsx)$/.test(f) && /dyn_bg_far/.test(fs.readFileSync(f, 'utf8'))).filter((f) => !f.includes('assetPipeline/'));
+expect('only allow-listed files read dyn_bg_far', readers.every((f) => READERS_OK.has(f)), readers.join(', '));
+const sceneSrc = fs.readFileSync('src/game/GameManagerScene.js', 'utf8');
+expect('the scene never draws dyn_bg_far itself (only through arenaGround)', !/add\.image\([^)]*['"]dyn_bg_far['"]/.test(sceneSrc));
+// 8. The ground gate: acceptance rule + the fail-closed ladder with injected reviews (no network).
+const PURE = { inventory: 'cracked concrete everywhere', groundMaterial: 'cracked concrete with hazard stripes', defects: [], pureGround: true };
+const SCENE = { inventory: 'a skyline along the top', groundMaterial: 'rooftop with city', defects: ['skyline', 'frame_border'], pureGround: false };
+expect('verdict: pure ground passes', groundVerdict(PURE).ok);
+expect('verdict: a missing review FAILS (fail-closed)', !groundVerdict(null).ok && !groundVerdict(undefined).ok);
+expect('verdict: pureGround true but a defect listed fails', !groundVerdict({ ...PURE, defects: ['wall'] }).ok);
+expect('verdict: pureGround true but a scenery material label fails', !groundVerdict({ ...PURE, groundMaterial: 'night skyline of neon towers' }).ok);
+expect('verdict: malformed review fails', !groundVerdict({ pureGround: true }).ok && !groundVerdict({ pureGround: 'yes', defects: [] }).ok);
+expect('verdict: puddles, grates and hazard stripes are fine', groundVerdict({ ...PURE, groundMaterial: 'wet asphalt with puddles and grates' }).ok);
+const mk = (over) => {
+  const calls = [];
+  return {
+    calls,
+    deps: {
+      reviewPicture: async () => { calls.push('reviewPicture'); return PURE; },
+      makeFloor: async () => { calls.push('makeFloor'); return { floor: true }; },
+      reviewFloor: async () => { calls.push('reviewFloor'); return PURE; },
+      bakeFloor: async () => { calls.push('bakeFloor'); return 'BAKED'; },
+      makeProcedural: async () => { calls.push('procedural'); return 'PROC'; },
+      ...over(calls)
+    }
+  };
+};
+{
+  const t = mk(() => ({})); const r = await runGroundLadder(t.deps);
+  expect('ladder: pure picture ships, no floor call', r.source === 'picture' && t.calls.join() === 'reviewPicture');
+}
+{
+  const t = mk((c) => ({ reviewPicture: async () => { c.push('reviewPicture'); return SCENE; } })); const r = await runGroundLadder(t.deps);
+  expect('ladder: scene picture -> floor texture -> bake', r.source === 'floor-bake' && r.result === 'BAKED' && t.calls.join() === 'reviewPicture,makeFloor,reviewFloor,bakeFloor');
+}
+{
+  const t = mk((c) => ({ reviewPicture: async () => { c.push('reviewPicture'); return SCENE; }, reviewFloor: async () => { c.push('reviewFloor'); return SCENE; } })); const r = await runGroundLadder(t.deps);
+  expect('ladder: floor rejected too -> procedural', r.source === 'procedural' && r.result === 'PROC' && !t.calls.includes('bakeFloor'));
+}
+{
+  const t = mk((c) => ({ reviewPicture: async () => { c.push('reviewPicture'); return null; } })); const r = await runGroundLadder(t.deps);
+  expect('ladder: NO review -> procedural WITHOUT spending a floor call (fail-closed)', r.source === 'procedural' && !t.calls.includes('makeFloor'));
+}
+{
+  const t = mk((c) => ({ reviewPicture: async () => { c.push('reviewPicture'); return SCENE; }, makeFloor: async () => { c.push('makeFloor'); throw new Error('quota'); } })); const r = await runGroundLadder(t.deps);
+  expect('ladder: floor call throws -> procedural, never rejects', r.source === 'procedural' && /quota/.test(r.issue));
+}
+{
+  const t = mk((c) => ({ reviewPicture: async () => { c.push('reviewPicture'); return SCENE; }, makeFloor: async () => { c.push('makeFloor'); return null; } })); const r = await runGroundLadder(t.deps);
+  expect('ladder: floor unavailable (null) -> procedural', r.source === 'procedural');
+}
+{
+  const t = mk((c) => ({ reviewPicture: async () => { c.push('reviewPicture'); return SCENE; }, makeFloor: async () => { throw Object.assign(new Error('x'), { cancelled: true }); } }));
+  let threw = false; try { await runGroundLadder(t.deps); } catch (e) { threw = !!e.cancelled; }
+  expect('ladder: a cancelled run propagates', threw);
+}
+{
+  const t = mk((c) => ({ reviewPicture: async () => { c.push('reviewPicture'); return SCENE; }, bakeFloor: async () => { throw new Error('bake'); } })); const r = await runGroundLadder(t.deps);
+  expect('ladder: a failure while baking also falls to procedural', r.source === 'procedural' && /bake/.test(r.issue));
+}
 console.table(checks);
 // sanity: the old straight chase on an empty walled arena still works
 console.log(segmentClear(0, 0, 10, 10, []) ? '' : 'segmentClear broken');

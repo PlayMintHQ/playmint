@@ -1,0 +1,82 @@
+[
+ {
+  "file": "plate_rooftop_new.jpg",
+  "expect": "reject",
+  "note": "real stored scene plate (frame/skyline/clouds/volcanoes)"
+ },
+ {
+  "file": "plate_rooftop_old.jpg",
+  "expect": "reject",
+  "note": "real stored scene plate (frame/skyline/clouds/volcanoes)"
+ },
+ {
+  "file": "plate_sky_ruins.jpg",
+  "expect": "reject",
+  "note": "real stored scene plate (frame/skyline/clouds/volcanoes)"
+ },
+ {
+  "file": "plate_lava_fortress.jpg",
+  "expect": "reject",
+  "note": "real stored scene plate (frame/skyline/clouds/volcanoes)"
+ },
+ {
+  "file": "floor_rooftop.jpg",
+  "expect": "pass",
+  "note": "real seamless floor tile, tiled 4x4"
+ },
+ {
+  "file": "floor_sky.jpg",
+  "expect": "pass",
+  "note": "real seamless floor tile, tiled 4x4"
+ },
+ {
+  "file": "floor_lava.jpg",
+  "expect": "pass",
+  "note": "real seamless floor tile, tiled 4x4"
+ },
+ {
+  "file": "inside_rooftop_old_centre.jpg",
+  "expect": "pass",
+  "note": "crop fully inside the painted floor: markings, grates, cracks (allowed)"
+ },
+ {
+  "file": "inside_rooftop_new_centre.jpg",
+  "expect": "pass",
+  "note": "crop fully inside the painted floor: markings, grates, cracks (allowed)"
+ },
+ {
+  "file": "inside_lava_centre.jpg",
+  "expect": "pass",
+  "note": "crop fully inside the painted floor: markings, grates, cracks (allowed)"
+ },
+ {
+  "file": "inside_sky_medallion.jpg",
+  "expect": "pass",
+  "note": "crop fully inside the painted floor: markings, grates, cracks (allowed)"
+ },
+ {
+  "file": "neg_sky_band.jpg",
+  "expect": "reject",
+  "note": "synthetic: sky band composited onto real floor"
+ },
+ {
+  "file": "neg_dark_frame.jpg",
+  "expect": "reject",
+  "note": "synthetic: dark frame composited onto real floor"
+ },
+ {
+  "file": "neg_parapet_strip.jpg",
+  "expect": "reject",
+  "note": "synthetic: parapet strip composited onto real floor"
+ },
+ {
+  "file": "neg_void_rectangle.jpg",
+  "expect": "reject",
+  "note": "synthetic: void rectangle composited onto real floor"
+ },
+ {
+  "file": "neg_cloud_patch.jpg",
+  "expect": "reject",
+  "note": "synthetic: cloud patch composited onto real floor"
+ }
+]

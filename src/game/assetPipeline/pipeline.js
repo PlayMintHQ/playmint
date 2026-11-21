@@ -13,7 +13,9 @@ import { extractRigParts, composeRigFrames, rigSwapsLimbs, renderPoseGuide } fro
 import { animateHeroRun, PixelLabError } from './providers/pixellabAnimation';
 import { finishPixellabSheet } from './pixellabRung';
 import { postProcessAsset, mirrorImage, rotateImageQuarter, drawToCanvas, alphaFraction, borderResidueFraction, topBandOpaqueFraction, brightResidueFraction, contentBoundsOf, processSheet, finalizeSheetFrames, loadImage, keyCellWithQuality, cleanKeyedEdges, alignFrames, maskIoU, composeFilmstrip, lockPalette, sliceRawGrid, removeEnclosedPockets, chromaResidueFraction, isBoxedSprite, sliceSheetFrames, stripFromFrames, whiteBorderFraction, hasEdgeBar, stripEdgeBars, cropCanvasToContent } from './postprocess';
-import { reviewSprite } from './qa';
+import { reviewSprite, reviewGround } from './qa';
+import { runGroundLadder } from './groundGate';
+import { bakeStochastic, proceduralGround, hashSeed, paletteOfCenter } from './tiling';
 import * as gemini from './providers/geminiImage';
 import { designAssetPrompts, buildFinalPrompt, buildPropsGridPrompt, chromaFromPrompt } from './promptDesigner';
 import { parsePromptKeywords } from '../promptUtils';
@@ -855,6 +857,13 @@ export async function generateAssets({
     // provider (weaker facing/pose adherence) but vision review still works.
     if (!spec.qa || !gemini.isGeminiConfigured()) return { img, outcome };
 
+    // The shooter's ground picture: fail-closed gate (below). Never the sprite verdicts.
+    if (spec.qa.ground) {
+      let off = false;
+      try { off = localStorage.getItem('PM_ARENA_GROUND') === '0'; } catch { /* gate stays on */ }
+      return off ? { img, outcome } : applyGroundGate(slot, spec, raw, img, prompt, outcome);
+    }
+
     const chroma = chromaFromPrompt(prompt);
     // Shooter characters: overhead view + facing right (see qa.js TOPDOWN_SCHEMA).
     if (runState.gameType === 'shooter' && spec.qa.facing) {
@@ -956,6 +965,59 @@ export async function generateAssets({
     outcome.qa = review;
     outcome.facingVerified = !!review && review.facing !== 'unclear';
     return { img: oriented, outcome };
+  };
+
+  // Shooter GROUND gate (2026-11-21). The walkable region is defined by code, so the ground must be
+  // ONLY a flat surface: the generator used to paint whole scenes (a rooftop with a skyline around
+  // it, floating islands in clouds) and players walked over the painted walls. Ladder, FAIL-CLOSED
+  // and always satisfying the REQUIRED slot (so a failed gate never kills the run):
+  //   1. the picture passes the vision review          -> ship it            (role 'ground')
+  //   2. it does not -> the proven seamless `floor` texture (one call, reviewed too) baked into a
+  //      full-arena ground with the stochastic bake       (role 'ground', groundSource floor-bake)
+  //   3. anything else (rejected again, no review, error) -> a procedural ground in the world's
+  //      palette, no image at all, so it cannot contain geometry (groundSource procedural)
+  // A missing review is NOT a pass. The scene (arenaGround.js) draws the picture only with role
+  // 'ground'; sets without it (every older set) get the safe ground instead.
+  const GROUND_BAKE = { w: 1000, h: 750 }; // half the 2000x1500 arena; the scene draws it at 2x
+  const canvasToImage = (c) => loadImage(c.toDataURL('image/png'), { crossOrigin: null });
+  const groundFromPixels = async (rgba) => {
+    const c = document.createElement('canvas');
+    c.width = GROUND_BAKE.w; c.height = GROUND_BAKE.h;
+    c.getContext('2d').putImageData(new ImageData(rgba, GROUND_BAKE.w, GROUND_BAKE.h), 0, 0);
+    return canvasToImage(c);
+  };
+  const applyGroundGate = async (slot, spec, raw, img, prompt, outcome) => {
+    const gseed = hashSeed(`ground|${seed}`);
+    const floorSpec = specForGame('floor', runState.gameType);
+    const ladder = await runGroundLadder({
+      reviewPicture: () => reviewGround(img.src, { label: `qa:${slot}` }),
+      makeFloor: async () => {
+        if (!finalPrompts.floor) return null;
+        report(`[ASSETS] QA: ${slot} is not a pure ground — building it from the floor texture...`);
+        const strict = `${finalPrompts.floor} IMPORTANT: a macro photograph of the floor surface only; nothing else is visible anywhere in the frame.`;
+        const floorRaw = await generateSlotImage('floor', strict, seed + 13, report, maxAttemptsPerProvider, runState, () => {}, null, floorSpec);
+        const floorImg = await postProcessAsset(floorRaw.dataUrl, floorSpec, {});
+        if (floorImg.pmTile?.flat) throw new Error('floor texture is flat');
+        outcome.floorModel = floorRaw.model || null;
+        return floorImg;
+      },
+      reviewFloor: (floorImg) => reviewGround(floorImg.src, { label: 'qa:ground-floor' }),
+      bakeFloor: async (floorImg) => {
+        const c = document.createElement('canvas');
+        c.width = floorImg.naturalWidth; c.height = floorImg.naturalHeight;
+        const ctx = c.getContext('2d', { willReadFrequently: true });
+        ctx.drawImage(floorImg, 0, 0);
+        const data = ctx.getImageData(0, 0, c.width, c.height).data;
+        return groundFromPixels(bakeStochastic({ data, w: c.width, h: c.height }, GROUND_BAKE.w, GROUND_BAKE.h, gseed));
+      },
+      makeProcedural: async () => groundFromPixels(proceduralGround(GROUND_BAKE.w, GROUND_BAKE.h, paletteOfCenter(img) || undefined, gseed))
+    });
+    outcome.qa = ladder.review;
+    outcome.role = 'ground';
+    outcome.groundSource = ladder.source;
+    if (ladder.issue) outcome.groundIssue = ladder.issue;
+    if (ladder.source !== 'picture') report(`[ASSETS] ${slot}: shipped a ${ladder.source} ground (${ladder.issue}).`);
+    return { img: ladder.result || img, outcome };
   };
 
   // Sprite-sheet slots walk the normal Gemini ladder and fall back to their static
@@ -2345,6 +2407,11 @@ export async function regenerateAssetSlots({ config, instruction = '', slots, on
     }
   }
 
+  // The shooter ground's fail-closed ladder falls back to the floor texture: it needs that prompt
+  // even when only the ground is being redrawn (the slot list does not include `floor`).
+  if (config.gameType === 'shooter' && slots.includes('background_far') && !finalPrompts.floor) {
+    finalPrompts.floor = buildFinalPrompt('floor', subjectsFor, design.styleGuide, { gameType: config.gameType });
+  }
   const gridPlan = planPropsGrid(slots, design, namedBySlot, onProgress, config.gameType);
   const { preloadedImages, meta } = await generateAssets({
     finalPrompts,

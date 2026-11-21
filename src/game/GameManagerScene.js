@@ -8,6 +8,7 @@ import MultiCameraManager from './MultiCameraManager';
 import ParallaxGroundSystem from './ParallaxGroundSystem';
 import SpriteAlignmentManager from './SpriteAlignmentManager';
 import HitFx from './fx/HitFx';
+import { buildArenaGround } from './modes/arenaGround';
 
 
 export default class GameManagerScene extends Phaser.Scene {
@@ -262,45 +263,12 @@ export default class GameManagerScene extends Phaser.Scene {
       const arenaHeight = this.gameConfig.worldHeight || 1500;
       this.physics.world.setBounds(0, 0, arenaWidth, arenaHeight);
 
-      // Visual-only tiled ground fill covering the whole arena (no physics body —
-      // the world bounds above are the only collision surface). Depth -1 sits
-      // below the player/enemies (default depth 0) and above background_far
-      // (depth -5), same relative ordering as the side-scroll floor.
-      const floorTexture = this.gameConfig.dynamicAssetUrls ? 'dyn_floor' : (this.secondaryTheme?.floorTexture || this.activeTheme.floorTexture || 'ground');
-      if (this.gameConfig.dynamicAssetUrls && this.textures.exists('dyn_bg_far')) {
-        // The generated top-down ground picture, cover-scaled over the whole arena.
-        // (It used to sit at depth -5 behind an opaque floor tile and was never
-        // visible, so every arena read as one repeated 128px tile.)
-        const src = this.textures.get('dyn_bg_far').getSourceImage();
-        const tw = src?.width || 2048;
-        const th = src?.height || 1024;
-        const cover = Math.max(arenaWidth / tw, arenaHeight / th);
-        const cropW = Math.min(tw, arenaWidth / cover);
-        const cropH = Math.min(th, arenaHeight / cover);
-        this.arenaFloor = this.add.image(0, 0, 'dyn_bg_far')
-          .setOrigin(0, 0)
-          .setCrop((tw - cropW) / 2, (th - cropH) / 2, cropW, cropH)
-          .setScale(cover)
-          .setDepth(-1);
-        // setCrop keeps the image's own origin: shift so the cropped region starts at (0,0).
-        this.arenaFloor.setPosition(-((tw - cropW) / 2) * cover, -((th - cropH) / 2) * cover);
-      } else if (this.gameConfig.dynamicAssetUrls && this.textures.exists(floorTexture)) {
-        // Generated dyn_floor art is designed to tile at 1:1.
-        this.arenaFloor = this.add.tileSprite(0, 0, arenaWidth, arenaHeight, floorTexture)
-          .setOrigin(0, 0)
-          .setDepth(-1);
-      } else {
-        // Static/theme fallback: a small ground tile (winter_ground_1 is 16×16)
-        // repeated thousands of times across a 2000px arena aliases into visible
-        // moire noise under the fixed-arena camera's zoom, even with floorTileScale
-        // applied. A flat, opaque, average-color fill sidesteps the tiling
-        // artifact entirely — good enough for testing gameplay without needing
-        // generated art.
-        const fillColor = this.textures.exists(floorTexture) ? this.sampleFloorAverage(floorTexture) : 0x3a3a46;
-        this.arenaFloor = this.add.rectangle(0, 0, arenaWidth, arenaHeight, fillColor)
-          .setOrigin(0, 0)
-          .setDepth(-1);
-      }
+      // Visual-only ground covering the whole arena (no physics body: the world bounds above
+      // are the only collision surface), depth -1. The ground is a MATERIAL, never a scene
+      // (arenaGround.js): a picture is drawn only when the pipeline's ground gate approved it
+      // (role 'ground'); every older set and every failed gate gets a baked floor tile or a
+      // procedural ground, so the art can never contradict the walkable region.
+      buildArenaGround(this, arenaWidth, arenaHeight);
     } else {
       // The platformer's floor spans the LEVEL, not a fixed 4000: a
       // "mega level" prompt (worldWidth 8000) otherwise ran out of floor
@@ -863,7 +831,10 @@ export default class GameManagerScene extends Phaser.Scene {
         { key: 'dyn_bg_far', speed: 0.02, scale: 1 },
         { key: 'dyn_bg_mid', speed: 0.08, tile: true, heightFrac: 0.55 },
         { key: 'dyn_bg_near', speed: 0.18, tile: true, heightFrac: 0.35 }
-      ].filter((layer) => this.textures.exists(layer.key));
+      ].filter((layer) => this.textures.exists(layer.key))
+        // The shooter has no parallax: its `dyn_bg_far` is the GROUND picture, drawn (or not) by
+        // buildArenaGround. A pinned copy here would show a legacy scene plate behind the arena.
+        .filter(() => this.gameConfig.gameType !== 'shooter');
     }
 
     layers.forEach((layer) => {

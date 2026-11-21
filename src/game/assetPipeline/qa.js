@@ -9,6 +9,7 @@
  * pipeline proceeds unverified (the in-game pixel heuristic keeps working as before).
  */
 import { generateJson, isGeminiConfigured } from './providers/geminiImage';
+import { GROUND_DEFECTS } from './groundGate';
 
 const SPRITE_SCHEMA = {
   type: 'OBJECT',
@@ -73,6 +74,23 @@ const TOPDOWN_SCHEMA = {
     lyingDown: { type: 'BOOLEAN', description: 'Does it look like a full-length figure LYING on the ground (whole body stretched out, legs visible) instead of a standing figure seen from above?' }
   },
   required: ['overhead', 'facing', 'backgroundClean', 'lyingDown']
+};
+
+// Shooter Arena GROUND gate (2026-11-21). The walkable region is defined by code, so the ground
+// picture must be ONLY a flat surface: the generator used to paint whole scenes (a rooftop with a
+// skyline around it, floating islands in clouds), letting players walk over painted walls onto
+// painted "abyss". Property order matters: the text model runs with no thinking budget, so the
+// `inventory` sentence (look at each edge band first) is what makes the verdict careful.
+const GROUND_SCHEMA = {
+  type: 'OBJECT',
+  propertyOrdering: ['inventory', 'groundMaterial', 'defects', 'pureGround'],
+  properties: {
+    inventory: { type: 'STRING', description: 'ONE sentence: what is visible along the top band, the bottom band, the left band, the right band and in the centre of the image.' },
+    groundMaterial: { type: 'STRING', description: 'The ground material, at most 6 words (e.g. "cracked concrete with hazard stripes").' },
+    defects: { type: 'ARRAY', items: { type: 'STRING', enum: GROUND_DEFECTS }, description: 'Every defect present. Empty ONLY if the whole image is flat ground surface.' },
+    pureGround: { type: 'BOOLEAN', description: 'true ONLY if the ENTIRE image, edge to edge, is just flat ground surface seen from above with no surroundings.' }
+  },
+  required: ['inventory', 'groundMaterial', 'defects', 'pureGround']
 };
 
 const SHEET_SCHEMA = {
@@ -141,6 +159,26 @@ function buildPrompt(kind, grid) {
       'out, legs and feet visible) rather than a standing figure seen from above?'
     );
   }
+  if (kind === 'ground') {
+    return (
+      'This image must be ONLY the flat ground surface of a top-down game arena, seen from straight ' +
+      'above, filling the whole frame edge to edge. Judge it strictly. Look at the four edge bands ' +
+      'first, then the centre, and answer:\n' +
+      '- inventory: ONE sentence on what you see along the top, bottom, left and right bands and in the centre.\n' +
+      '- groundMaterial: the ground material in at most 6 words.\n' +
+      '- defects: list EVERY problem. wall / parapet / ledge: any wall, raised edge, curb or railing; ' +
+      'building / skyline: any building, tower, skyscraper or city skyline, signs or billboards; ' +
+      'sky_clouds: sky, clouds, fog banks, horizon or distance haze; liquid_body: a lake, sea, river or ' +
+      'pool of water, lava or acid as a large body; void_hole: a chasm, hole, abyss or space; ' +
+      'frame_border: a frame, border, slab edge or the ground being a smaller object inside a larger ' +
+      'picture; vignette: a dark or light edge falloff; vertical_surface: any wall or object seen from ' +
+      'the side instead of from above; text_logo: readable text or a logo.\n' +
+      '- pureGround: true ONLY if the entire image is just ground.\n' +
+      'These are ALLOWED and are NOT defects: cracks, stains, puddles, grates, vents, hazard stripes, ' +
+      'painted lines, arrows, numbers painted on the floor, panel seams, rivets, scattered debris, ' +
+      'cables lying on the floor, small flat markings, scorch marks.'
+    );
+  }
   if (kind === 'layer') {
     return (
       'This image should be a decorative parallax strip for a side-scrolling game: only ' +
@@ -176,6 +214,7 @@ export async function reviewSprite(dataUrl, { kind = 'sprite', grid = null, labe
       : kind === 'strip' ? STRIP_SCHEMA
       : kind === 'layer' ? LAYER_SCHEMA
       : kind === 'topdown' ? TOPDOWN_SCHEMA
+      : kind === 'ground' ? GROUND_SCHEMA
       : SPRITE_SCHEMA;
     const result = await generateJson({
       prompt: buildPrompt(kind, grid),
@@ -187,6 +226,7 @@ export async function reviewSprite(dataUrl, { kind = 'sprite', grid = null, labe
       if (typeof result?.facingRight !== 'boolean' || typeof result?.sameCharacter !== 'boolean') return null;
       return result;
     }
+    if (kind === 'ground') return typeof result?.pureGround === 'boolean' && Array.isArray(result?.defects) ? result : null;
     if (typeof result?.backgroundClean !== 'boolean') return null;
     if (kind === 'topdown') return typeof result?.overhead === 'boolean' ? result : null;
     if (kind !== 'layer' && typeof result?.facingRight !== 'boolean') return null;
@@ -195,4 +235,39 @@ export async function reviewSprite(dataUrl, { kind = 'sprite', grid = null, labe
     console.warn('[AssetQA] Vision review failed, proceeding unverified:', err.message);
     return null;
   }
+}
+
+
+/**
+ * Downscale an image data URL (JPEG, <= maxSide px) for the vision call: the review payload goes
+ * through /api/generate (no size guard, Vercel body limit), and a 413 would read as a null review,
+ * which the fail-closed ground gate treats as a rejection. The whole image is sent (the model must
+ * see the edge bands); the outer ~7-10 % of the plate is hidden under the arena's surround ring
+ * anyway, so no inset crop is needed.
+ */
+async function shrinkForReview(dataUrl, maxSide = 768) {
+  const img = await new Promise((resolve, reject) => {
+    const i = new Image();
+    i.onload = () => resolve(i);
+    i.onerror = () => reject(new Error('review image failed to decode'));
+    i.src = dataUrl;
+  });
+  const k = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+  const w = Math.max(1, Math.round(img.naturalWidth * k)), h = Math.max(1, Math.round(img.naturalHeight * k));
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  c.getContext('2d').drawImage(img, 0, 0, w, h);
+  return c.toDataURL('image/jpeg', 0.85);
+}
+
+/**
+ * Review a generated ground. Retries once when the verdict is missing (a vision hiccup must not
+ * silently downgrade every ground). Returns the raw review or null.
+ */
+export async function reviewGround(dataUrl, { label = 'qa:ground' } = {}) {
+  let small;
+  try { small = await shrinkForReview(dataUrl); } catch { return null; }
+  let review = await reviewSprite(small, { kind: 'ground', label });
+  if (!review) review = await reviewSprite(small, { kind: 'ground', label });
+  return review;
 }
