@@ -666,6 +666,12 @@ function slotStyleClauses(slotKey, styleGuide, { userNamed = false, gameType = n
     return `color palette ${styleGuide.colorPalette}, very dark near-black ` +
       `silhouette tones, distinctly darker than a distant hazy background`;
   }
+  if (slotKey === 'cover') {
+    // The top-face material of cover blocks: a calm, evenly lit swatch. The slab painter adds the
+    // outline / bevel / contrast, so the material stays subdued and flat.
+    return `color palette ${styleGuide.colorPalette}, medium tones, evenly lit, flat material, ` +
+      `fine grain and subtle wear, no strong highlights or deep shadows`;
+  }
   if (slotKey === 'surround') {
     // The drop under a platform: far away, so muted and low-contrast like a distant
     // layer, but a pixel-native one (dither / clusters, never a smooth painting).

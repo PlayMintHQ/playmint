@@ -66,7 +66,7 @@ const ASSET_TARGET_SLOTS = {
   projectile: ['projectile'],
   collectibles: ['collectible'],
   hazards: ['hazard'], // shooter arena lava/acid/water surface
-  edge: ['surround', 'rim'] // shooter arena boundary: the drop below the platform + the edge band
+  edge: ['surround'] // shooter arena boundary: the drop below the platform (the edge band itself is code-drawn)
 };
 
 /** Map restyle target names to a deduped pipeline slot list for this config. */
@@ -80,12 +80,12 @@ export function resolveAssetTargets(targets, config) {
   // The shooter's ground is background_far; its `floor` slot is no longer drawn (Arena
   // Kit), so a "floor" edit there redraws the ground plate instead.
   const allSlots = GENERATED_SLOTS
-    .filter(s => !(isShooter && (SHOOTER_SKIPPED.includes(s) || s === 'floor')))
+    .filter(s => !(isShooter && (SHOOTER_SKIPPED.includes(s) || s === 'floor' || s === 'obstacle')))
     .map(s => (s === 'player' && !isShooter ? 'player_sheet' : s));
   if (isPlatformer || isShooter) allSlots.push('projectile');
-  allSlots.push('collectible');
+  if (!isShooter) allSlots.push('collectible'); // the shooter never spawns pickups (no wasted call)
   // Arena surfaces: regenerateAssetSlots drops the ones the arena's rules don't need.
-  if (isShooter) allSlots.push('hazard', 'surround', 'rim');
+  if (isShooter) allSlots.push('hazard', 'surround', 'cover');
   const slots = new Set();
   for (const target of targets || []) {
     if (target === 'all') {
@@ -97,7 +97,8 @@ export function resolveAssetTargets(targets, config) {
       let slot = rawSlot === 'player_sheet' && isShooter ? 'player' : rawSlot;
       if (isShooter && slot === 'floor') slot = 'background_far';
       if (slot === 'projectile' && !isPlatformer && !isShooter) continue; // runners never shoot
-      if ((slot === 'hazard' || slot === 'surround' || slot === 'rim') && !isShooter) continue; // arena surfaces exist only in the shooter
+      if (isShooter && slot === 'obstacle') slot = 'cover'; // the shooter's cover is a generated MATERIAL now
+      if ((slot === 'hazard' || slot === 'surround' || slot === 'rim' || slot === 'cover') && !isShooter) continue; // arena surfaces exist only in the shooter
       slots.add(slot);
     }
   }

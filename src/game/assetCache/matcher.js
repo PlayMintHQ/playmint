@@ -93,7 +93,7 @@ export function validateSemanticMatch({ userPrompt = '', candidate, replaceSlots
   }
 
   // 3. World slot clash barrier:
-  const WORLD_SLOTS = ['background_far', 'background_mid', 'background_near', 'floor', 'surround', 'rim'];
+  const WORLD_SLOTS = ['background_far', 'background_mid', 'background_near', 'floor', 'surround', 'rim', 'cover'];
   const worldClashes = replaceSlots.filter((s) => WORLD_SLOTS.includes(s)).length;
   // ANY redrawn backdrop/floor slot means the cached world is the wrong world.
   if (worldClashes >= 1) {

@@ -14,7 +14,7 @@ import { animateHeroRun, PixelLabError } from './providers/pixellabAnimation';
 import { finishPixellabSheet } from './pixellabRung';
 import { postProcessAsset, mirrorImage, rotateImageQuarter, drawToCanvas, alphaFraction, borderResidueFraction, topBandOpaqueFraction, brightResidueFraction, contentBoundsOf, processSheet, finalizeSheetFrames, loadImage, keyCellWithQuality, cleanKeyedEdges, alignFrames, maskIoU, composeFilmstrip, lockPalette, sliceRawGrid, removeEnclosedPockets, chromaResidueFraction, isBoxedSprite, sliceSheetFrames, stripFromFrames, whiteBorderFraction, hasEdgeBar, stripEdgeBars, cropCanvasToContent } from './postprocess';
 import { reviewSprite, reviewGround } from './qa';
-import { runGroundLadder } from './groundGate';
+import { runGroundLadder, groundVerdict } from './groundGate';
 import { bakeStochastic, proceduralGround, hashSeed, paletteOfCenter } from './tiling';
 import * as gemini from './providers/geminiImage';
 import { designAssetPrompts, buildFinalPrompt, buildPropsGridPrompt, chromaFromPrompt } from './promptDesigner';
@@ -856,6 +856,17 @@ export async function generateAssets({
     // This is exactly the run where QA matters most — images fell back to the free
     // provider (weaker facing/pose adherence) but vision review still works.
     if (!spec.qa || !gemini.isGeminiConfigured()) return { img, outcome };
+
+    // The shooter's cover MATERIAL swatch: it must be a flat material, not a crate / block / scene. A
+    // rejected or unreviewable swatch is reported as `coverIssue`, which feeds the optional-slot
+    // retry-then-drop ladder (the game then draws a procedural slab, so nothing can look wrong).
+    if (spec.qa.cover) {
+      const review = await reviewGround(img.src, { label: `qa:${slot}` });
+      const verdict = groundVerdict(review);
+      outcome.qa = review;
+      outcome.coverIssue = verdict.ok ? null : `cover swatch is not a flat material (${verdict.reason})`;
+      return { img, outcome };
+    }
 
     // The shooter's ground picture: fail-closed gate (below). Never the sprite verdicts.
     if (spec.qa.ground) {
@@ -1878,7 +1889,8 @@ export async function generateAssets({
 
       // Vision verdict "not cutout shapes" (vignette panels) is as disqualifying for a
       // layer as failed keying — both feed the same retry-then-drop ladder.
-      const layerIssue = (res) => checkTransparency(res.finalImg) ||
+      const layerIssue = (res) => (spec.qa?.cover ? null : checkTransparency(res.finalImg)) ||
+        res.outcome.coverIssue ||
         (spec.optional && res.outcome.qa?.cutoutShapes === false
           ? 'layer is picture panels, not cutout shapes (vision QA)'
           : null);
@@ -1914,7 +1926,10 @@ export async function generateAssets({
       if (qualityIssue && spec.optional) {
         report(`[ASSETS] Retrying ${slot} (${qualityIssue})...`);
         // Harsher variant: the model painted a full scene — demand cutouts explicitly
-        const strictPrompt = prompt +
+        const strictPrompt = spec.qa?.cover
+          ? prompt + ', IMPORTANT: a macro photograph of the surface material only; nothing but the flat ' +
+            'material fills the frame, with no object, no edge, no border and no perspective anywhere'
+          : prompt +
           ', IMPORTANT: only flat solid silhouette cutout shapes on an empty pure white background, ' +
           'like paper cutouts, at least the upper half of the image must be completely blank white, ' +
           'absolutely no rectangular panels, no framed pictures, no scenery patches';
@@ -2099,7 +2114,7 @@ const compactDesign = (design) => (design ? {
   entities: design.entities || {}
 } : null);
 
-const WORLD_SLOT_SET = new Set(['background_far', 'background_mid', 'background_near', 'floor', 'surround', 'rim']);
+const WORLD_SLOT_SET = new Set(['background_far', 'background_mid', 'background_near', 'floor', 'surround', 'rim', 'cover']);
 const CAST_SLOT_SET = new Set(['player', 'player_sheet', 'enemy']);
 const THEME_WORLD_WORDS = { ice: 'an icy frozen world', lava: 'a volcanic lava world', forest: 'a lush forest world', city: 'a city world', space: 'an outer-space world' };
 
@@ -2179,6 +2194,17 @@ const arenaKitEnabled = () => {
 };
 
 /**
+ * The subject of the shooter's cover MATERIAL swatch: the world's own solid, hard-wearing surface (what
+ * its cover blocks are made of), never an object. Built from the designed ground so the two belong together.
+ */
+function coverMaterialSubject(design) {
+  const world = String(design.subjects?.floor || design.subjects?.background_far || '').replace(/\s+/g, ' ').slice(0, 90);
+  return `the hard surface material that solid cover blocks in this world are made of ` +
+    `(for example riveted metal plate, rough stone slab, scorched concrete, hammered alloy or weathered wood), ` +
+    `matching the world of: ${world || 'this game world'}`;
+}
+
+/**
  * Prompts for the shooter's Arena Kit slots (surround = the drop below the platform,
  * rim = its edge band) when the arena's rules need them. `spec` is the designer's
  * verdict for THIS prompt (carries the subject text); `edit` is an optional restyle
@@ -2190,7 +2216,7 @@ function planArenaKit({ config, design, rules, spec, styleGuide, edit = '', only
   const plan = arenaKitPlan(rules, { spec, themeKey: config.themeKey, starry });
   const tail = edit ? `; adjusted for this change: ${String(edit).replace(/\s+/g, ' ').slice(0, 120)}` : '';
   const out = { slots: [], prompts: {}, kinds: {} };
-  for (const slot of ['surround', 'rim']) {
+  for (const slot of ['surround']) { // the rim is drawn by code now (Readability Contract): no generated strip
     if (!plan[slot] || (only && !only.includes(slot))) continue;
     out.slots.push(slot);
     out.prompts[slot] = buildFinalPrompt(slot, { ...design.subjects, [slot]: `${plan[slot]}${tail}` }, styleGuide, { gameType: config.gameType });
@@ -2235,7 +2261,7 @@ export async function generateGameAssets({ config, userPrompt = '', onProgress =
   // platforms — skip those slots regardless of what the caller passed. The
   // obstacle slot IS generated since 2026-11-04: it is the arena's cover prop.
   const effectiveSkipSlots = config.gameType === 'shooter'
-    ? [...new Set([...skipSlots, 'background_mid', 'background_near', 'platform'])]
+    ? [...new Set([...skipSlots, 'background_mid', 'background_near', 'platform', 'obstacle', 'collectible'])]
     : skipSlots;
 
   // The player is always attempted as an animated sprite sheet (stored under the
@@ -2277,6 +2303,11 @@ export async function generateGameAssets({ config, userPrompt = '', onProgress =
     slots = slots.filter((s) => s !== 'floor');
     for (const slot of kit.slots) { finalPrompts[slot] = kit.prompts[slot]; slots.push(slot); }
     if (kit.slots.length) onProgress(`[ASSETS] Arena kit: ${kit.slots.join(' + ')} (edge ${arenaRulesNow.edge})`, null);
+  }
+  // Shooter cover material (optional, gated): code draws the blocks, the picture is only the grain.
+  if (config.gameType === 'shooter' && arenaKitEnabled()) {
+    finalPrompts.cover = buildFinalPrompt('cover', { ...design.subjects, cover: coverMaterialSubject(design) }, design.styleGuide, { gameType: config.gameType });
+    slots.push('cover');
   }
   slots = slots.filter(s => !effectiveSkipSlots.includes(s));
 
@@ -2423,6 +2454,9 @@ export async function regenerateAssetSlots({ config, instruction = '', slots, on
   // Arena Kit redraws ("make the drop a river"): only when the arena still has such an
   // edge, with the edit text steering the subject; a slot the rules don't need is dropped.
   let kit = null;
+  if (config.gameType === 'shooter' && slots.includes('cover')) {
+    finalPrompts.cover = buildFinalPrompt('cover', { ...design.subjects, cover: `${coverMaterialSubject(design)}${instruction ? `; adjusted for this change: ${String(instruction).replace(/\s+/g, ' ').slice(0, 120)}` : ''}` }, design.styleGuide, { gameType: config.gameType });
+  }
   if (config.gameType === 'shooter' && slots.some((s) => s === 'surround' || s === 'rim')) {
     kit = planArenaKit({
       config, design, rules: resolveArenaRules(config), spec: designedArenaSpec(config),

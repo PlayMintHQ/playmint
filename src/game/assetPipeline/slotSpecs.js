@@ -339,6 +339,25 @@ export const SLOT_SPECS = {
       `— no characters, no text, no sky, no gap and no frame. ${style}`,
     fallbackSubject: () => null
   },
+  // Arena COVER MATERIAL (2026-11-21, Readability Contract): the flat top-face material of the arena's
+  // solid cover blocks. Code draws the block (arenaArt.paintCoverSlab: outline, bevel, shadow) and the
+  // picture only supplies the grain, so a wrong perspective is impossible by construction. The
+  // generated crate sprites (`obstacle`) came out 3/4 isometric and are no longer generated for the
+  // shooter. Optional + gated (qa.cover): a rejected or missing swatch gives a procedural slab.
+  cover: {
+    textureKey: 'dyn_cover',
+    canvas: { width: 256, height: 256 },
+    gen: { aspectRatio: '1:1', model: GEMINI_SLOT_MODEL },
+    post: { fit: 'stretch', keying: null, trimBorder: false, crop: false },
+    qa: { cover: true },
+    optional: true,
+    scaffold: (subject, style) =>
+      `Create a flat swatch of surface material, a macro view from directly above: ${subject}. ` +
+      `The whole frame is ONE continuous flat surface from edge to edge with fine, even detail ` +
+      `and no single focal feature. It is only a material: no object, no crate, no block, no edge, ` +
+      `no border, no frame, no bevel, no perspective, no shadow, no scene and no text. ${style}`,
+    fallbackSubject: () => null
+  },
   collectible: {
     textureKey: 'dyn_collectible',
     canvas: { width: 128, height: 128 },

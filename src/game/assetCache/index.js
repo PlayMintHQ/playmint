@@ -38,7 +38,7 @@ const isRestorable = (entry) => !!entry && RESTORABLE_SCHEMAS.has(entry.schemaVe
 // they stay under ~60% of that. WORLD_SLOTS guard the semantic (not economic)
 // boundary: a match whose backdrop largely clashes is a different world — fresh
 // generation gives better coherence than restyling the scenery around a match.
-const WORLD_SLOTS = ['background_far', 'background_mid', 'background_near', 'floor', 'surround', 'rim'];
+const WORLD_SLOTS = ['background_far', 'background_mid', 'background_near', 'floor', 'surround', 'rim', 'cover'];
 const PLAYER_REDRAW_WEIGHT = 3;
 const MAX_REDRAW_WEIGHT = 5;
 

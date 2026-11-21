@@ -4,7 +4,7 @@ import Projectile from '../objects/Projectile';
 import { buildNavGrid, computeFlowField, cellOf, steerPoint } from './arenaNav';
 import { COVER_BLOCK_PX, layoutArenaCover, resolveArenaRules, layoutArenaHazards, surfaceAt, navBlockRects, spawnRimPoints, SURFACE, isLethalSurface, arenaSurfaceKind, isStarryWorld } from './arenaHazards';
 import { drawArenaSurface, getArenaArtPlan } from './arenaSurface';
-import { planArenaArt, paintCoverSlab } from '../assetPipeline/arenaArt';
+import { planArenaArt, paintCoverSlab, tonemapCover, relLum, proceduralCoverMaterial } from '../assetPipeline/arenaArt';
 import { installArenaDebug } from './arenaDebug';
 
 // AIM ASSIST is the default; the config flag (or the localStorage dev override,
@@ -258,7 +258,24 @@ export default class ShooterMode extends BaseMode {
     const key = 'pm_cover_slab';
     if (scene.textures.exists(key)) scene.textures.remove(key);
     const tex = scene.textures.createCanvas(key, SLAB_PX, SLAB_PX);
-    tex.getContext().putImageData(new ImageData(paintCoverSlab(SLAB_PX, plan.cover), SLAB_PX, SLAB_PX), 0, 0);
+    // The generated cover MATERIAL (slot `cover`, gated) supplies the grain, tone-mapped to the plan's
+    // cover luminance so the contrast contract holds whatever the model drew; without one (older sets,
+    // a rejected swatch) a procedural grain in the plan's colour is used.
+    let material = null;
+    try {
+      if (cfg.dynamicAssetUrls && scene.textures.exists('dyn_cover')) {
+        const src = scene.textures.get('dyn_cover').getSourceImage();
+        const side = 64;
+        const c = document.createElement('canvas');
+        c.width = side; c.height = side;
+        const cx = c.getContext('2d', { willReadFrequently: true });
+        cx.drawImage(src, 0, 0, side, side);
+        const px = cx.getImageData(0, 0, side, side).data;
+        material = { data: tonemapCover(px, side, side, relLum(plan.cover.top)), w: side, h: side };
+      }
+    } catch { material = null; }
+    if (!material) material = proceduralCoverMaterial(16, plan.cover);
+    tex.getContext().putImageData(new ImageData(paintCoverSlab(SLAB_PX, plan.cover, material), SLAB_PX, SLAB_PX), 0, 0);
     tex.refresh();
     this.cover = scene.physics.add.staticGroup();
     for (const p of placements) {

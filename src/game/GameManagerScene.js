@@ -141,6 +141,7 @@ export default class GameManagerScene extends Phaser.Scene {
         hazard: 'dyn_hazard',
         // Arena Kit (shooter): the drop under a void edge and the edge band.
         surround: 'dyn_surround',
+        cover: 'dyn_cover',
         rim: 'dyn_rim'
       };
 
