@@ -14,7 +14,8 @@
 import { buildNavGrid, computeFlowField, steerPoint, segmentClear } from '../src/game/modes/arenaNav.js';
 import {
   layoutArenaHazards, layoutArenaCover, COVER_BLOCK_PX, navBlockRects, surfaceAt, spawnRimPoints,
-  isLethalSurface, CENTER_CLEAR
+  isLethalSurface, CENTER_CLEAR, arenaViewport, arenaVisibleRect, ARENA_VIEW_PAD, EDGE_INSET,
+  arenaKitPlan, cleanSubject, normalizeArenaSpec, WALL_VIEW_PAD, arenaViewPadFor
 } from '../src/game/modes/arenaHazards.js';
 
 const SEEDS = Number(process.argv[2]) || 100;
@@ -36,7 +37,7 @@ const hitsAny = (x, y, rects) => rects.some((r) =>
 const results = [];
 let failures = 0;
 for (const edge of ['wall', 'void', 'water']) {
-  for (const hazard of ['none', 'lava', 'acid', 'water', 'pit']) {
+  for (const hazard of ['none', 'lava', 'fire', 'acid', 'water', 'pit']) {
     let chases = 0, reached = 0, slowest = 0, lethalSteps = 0, badStart = 0, coverInPool = 0, pocketed = 0, poolsMade = 0;
     for (let seed = 1; seed <= SEEDS; seed++) {
       const rnd = mulberry(seed * 7919 + edge.length * 31 + hazard.length);
@@ -93,6 +94,59 @@ for (const edge of ['wall', 'void', 'water']) {
   }
 }
 console.table(results);
+
+// 5. The edge is on screen: whatever the window shape, a player standing at ANY point of
+// a void/water platform's edge sees a drop of at least MIN_DROP beyond it, and the player
+// themself is on screen. (Pure camera math shared with MultiCameraManager.)
+const MIN_DROP = 200;
+const VIEWPORTS = [[390, 844], [844, 390], [360, 640], [1024, 768], [1280, 720], [1920, 1080], [3440, 1440], [5120, 1440]];
+const viewRows = [];
+let viewFailures = 0;
+for (const [vw, vh] of VIEWPORTS) {
+  const vp = arenaViewport({ viewW: vw, viewH: vh, worldW: W, worldH: H, edge: 'void' });
+  const left = EDGE_INSET, right = W - EDGE_INSET, top = EDGE_INSET, bottom = H - EDGE_INSET;
+  let worst = Infinity, playerOff = 0;
+  // The player at every corner and edge midpoint (the extremes of each edge).
+  for (const px of [left, W / 2, right]) {
+    for (const py of [top, H / 2, bottom]) {
+      const r = arenaVisibleRect(vp, px, py);
+      if (px - 30 < r.x || px + 30 > r.x + r.width || py - 30 < r.y || py + 30 > r.y + r.height) playerOff++;
+      // drop visible beyond whichever edge the player is on
+      if (px === left) worst = Math.min(worst, left - r.x);
+      if (px === right) worst = Math.min(worst, r.x + r.width - right);
+      if (py === top) worst = Math.min(worst, top - r.y);
+      if (py === bottom) worst = Math.min(worst, r.y + r.height - bottom);
+    }
+  }
+  const ok = worst >= MIN_DROP && !playerOff;
+  if (!ok) viewFailures++;
+  viewRows.push({ view: `${vw}x${vh}`, zoom: vp.zoom.toFixed(2), sees: `${Math.round(vp.visW)}x${Math.round(vp.visH)}`, minDropPx: Math.round(worst), playerOffScreen: playerOff, ok: ok ? 'yes' : 'NO' });
+}
+console.table(viewRows);
+if (viewFailures) failures += viewFailures;
+
+// 6. Arena Kit planning (pure): which generated pieces an arena needs, and that designer
+// text is held to plain scenery before it reaches an image prompt.
+const checks = [];
+const expect = (name, ok) => { checks.push({ check: name, ok: ok ? 'yes' : 'NO' }); if (!ok) failures++; };
+const planOf = (edge, hazard, o = {}) => arenaKitPlan({ edge, hazard }, o);
+expect('void rooftop needs surround + rim', !!planOf('void', 'none', { themeKey: 'city' }).surround && !!planOf('void', 'none', { themeKey: 'city' }).rim);
+expect('water island needs a rim, no surround', !planOf('water', 'none').surround && !!planOf('water', 'none').rim);
+expect('walled arena needs neither', !planOf('wall', 'none').surround && !planOf('wall', 'none').rim);
+expect('walled arena with pits needs the drop (surround) only', !!planOf('wall', 'pit').surround && !planOf('wall', 'pit').rim);
+expect('star-field worlds keep the code stars (no surround)', !planOf('void', 'none', { starry: true }).surround && !!planOf('void', 'none', { starry: true }).rim);
+expect('designer subjects win over defaults', planOf('void', 'none', { spec: { surround: 'a neon street grid far below', rim: 'rusted parapet' } }).surround === 'a neon street grid far below');
+expect('cleanSubject rejects people / text / frames', !cleanSubject('people walking in a street') && !cleanSubject('a stone frame with text') && !cleanSubject('x'));
+expect('cleanSubject caps at 14 words', cleanSubject('a b c d e f g h i j k l m n o p q').split(' ').length === 14);
+expect('normalizeArenaSpec keeps clean subjects, drops dirty ones', (() => {
+  const n = normalizeArenaSpec({ edge: 'void', hazard: 'fire', surround: 'a rain slicked street grid', rim: 'a hero statue' }, 'Burning Roof');
+  return n.surround === 'a rain slicked street grid' && n.rim === null && n.src === 'burning roof';
+})());
+expect('a verdict never stacks water pools on a water edge', normalizeArenaSpec({ edge: 'water', hazard: 'water' }, 'x').hazard === 'none');
+expect('a walled arena still has a wall pad (its wall is drawn outside the world)', WALL_VIEW_PAD > 0 && arenaViewPadFor('wall') === WALL_VIEW_PAD && arenaViewPadFor('void') === ARENA_VIEW_PAD);
+const wallVp = arenaViewport({ viewW: 1280, viewH: 720, worldW: W, worldH: H, edge: 'wall' });
+expect('wall arena: the wall is reachable on screen at the world edge', arenaVisibleRect(wallVp, 20, 20).x <= -WALL_VIEW_PAD + 1);
+console.table(checks);
 // sanity: the old straight chase on an empty walled arena still works
 console.log(segmentClear(0, 0, 10, 10, []) ? '' : 'segmentClear broken');
 console.log(failures ? `✗ ${failures} combination(s) failed` : '✓ every arena is fair');

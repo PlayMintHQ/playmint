@@ -116,6 +116,39 @@ export const hasGame = async (id) => {
   }
 };
 
+// Upload budget (client side). The token endpoint refuses files over 4MB (api/games/upload.js),
+// and one refused file used to take the WHOLE set down: meta.json (the "entry complete" marker)
+// is uploaded last, so a 403 on any image meant the game was never listed and shared links lost
+// their art (2026-11-20: the 4:3 shooter ground plate, 2048x1536, crossed 4MB). The standard fix
+// is to enforce the budget where the bytes are made: an over-budget PNG is progressively
+// downscaled (x0.85 per step, smooth resample) until it fits, instead of being sent to fail.
+// The scene reads each texture's real size, so a smaller plate is only slightly softer.
+export const UPLOAD_BUDGET_BYTES = 3.6 * 1024 * 1024;
+export async function fitForUpload(blob, budget = UPLOAD_BUDGET_BYTES) {
+  if (!blob || blob.size <= budget || typeof createImageBitmap !== 'function') return blob;
+  try {
+    const bmp = await createImageBitmap(blob);
+    let scale = 1;
+    let out = blob;
+    for (let i = 0; i < 8 && out.size > budget; i++) {
+      scale *= 0.85;
+      const w = Math.max(64, Math.round(bmp.width * scale));
+      const h = Math.max(64, Math.round(bmp.height * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(bmp, 0, 0, w, h);
+      out = await new Promise((resolve) => canvas.toBlob((b) => resolve(b || out), 'image/png'));
+    }
+    bmp.close?.();
+    return out;
+  } catch {
+    return blob; // never worse than before: send the original
+  }
+}
+
 export const putGame = async (entry) => {
   if (!entry?.id || !entry.config) return null;
   if (!(await resolveBase())) return null; // no store reachable — stay local-only
@@ -128,7 +161,7 @@ export const putGame = async (entry) => {
     // success here.
     const put = (path, body, contentType) => upload(path, body, { ...opts, contentType })
       .catch((err) => { if (!/already exists/i.test(err?.message || '')) throw err; });
-    await Promise.all(slots.map((slot) => put(`games/${entry.id}/${slot}.png`, entry.images[slot], 'image/png')));
+    await Promise.all(slots.map(async (slot) => put(`games/${entry.id}/${slot}.png`, await fitForUpload(entry.images[slot]), 'image/png')));
     // meta.json goes LAST: its presence is the "entry complete" marker the read
     // path and hasGame() key on, so a half-finished upload never looks whole.
     const meta = {
