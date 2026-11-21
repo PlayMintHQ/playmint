@@ -58,7 +58,7 @@ for (const [name, rgb] of [['dark', { r: 30, g: 30, b: 36 }], ['light', { r: 235
   for (let p = 0; p < 32 * 32; p++) { const j = (rnd() - 0.5) * 30; tile[p * 4] = rgb.r + j; tile[p * 4 + 1] = rgb.g + j; tile[p * 4 + 2] = rgb.b + j; tile[p * 4 + 3] = 255; }
   const out = tonemapCover(tile, 32, 32, 0.3);
   ok(near(relLum(meanColor(out, 32, 32, 1)), 0.3, 0.04), `tonemapCover (${name}) lands on the target luminance`);
-  ok(saturationOf(meanColor(out, 32, 32, 1)) <= 0.45, `tonemapCover (${name}) caps saturation`);
+  ok(saturationOf(meanColor(out, 32, 32, 1)) <= 0.58, `tonemapCover (${name}) caps saturation`);
 }
 
 // ── the plan meets the contract for any ground ──────────────────────────────────────

@@ -607,6 +607,14 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
     }
   };
 
+  // Resolves after the browser has PAINTED the current React state. Generation
+  // starts with synchronous work (prompt parsing) or a slow lookup; without this
+  // yield the compile screen only appeared after that work finished.
+  const nextPaint = () => new Promise((resolve) => {
+    if (typeof requestAnimationFrame !== 'function') { setTimeout(resolve, 0); return; }
+    requestAnimationFrame(() => setTimeout(resolve, 0));
+  });
+
   const processPrompt = async (input) => {
     const text = input.trim();
     // A pasted link is not a game description.
@@ -650,6 +658,7 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
         `[ASSETS] Starting asset generation via ${isGeminiConfigured() ? 'Gemini AI' : 'built-in theme artwork (no API key)'}...`
       ]);
       setProgress(5);
+      await nextPaint();
       let overlayConfig = null;
       try {
         const result = await generateGameConfig(text, (logText, progressVal) => {
@@ -714,6 +723,8 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
     setTerminalLogs([]);
     setProgress(0);
     setPhaserLoaded(false);
+    setTerminalLogs([`[PROMPT] Input -> "${text.substring(0, 32)}"`, '[SYSTEM] Initializing local game generation...']);
+    await nextPaint(); // show the compile screen NOW, before config work blocks the thread
 
     // Hoisted so the catch can downgrade to static art once a config exists
     let generatedConfig = null;
@@ -806,6 +817,13 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
     // The pool lookup runs before the compile screen appears — ignore repeat clicks.
     if (quickStartBusyRef.current) return;
     quickStartBusyRef.current = true;
+    // Immediate feedback: the pool lookup below (IndexedDB + server) can take
+    // seconds, and the compile screen used to wait for it.
+    setIsGenerating(true);
+    setTransitionPhase('compiling');
+    setPhaserLoaded(false);
+    setTerminalLogs(['[SYSTEM] Booting PlayMint Generative Engine v2.0...', '[PROMPT] Input -> Quick Start Preset']);
+    setProgress(5);
     try {
       await runQuickStart();
     } catch (err) {

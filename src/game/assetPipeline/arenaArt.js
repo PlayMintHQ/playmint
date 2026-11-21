@@ -162,7 +162,7 @@ export function meanColor(rgba, w, h, step = 2) {
  * Remap a cover MATERIAL tile so its mean relative luminance is `targetL`, with its detail damped
  * (a top face is flat: the slab painter adds the bevel, the material only supplies the grain).
  */
-export function tonemapCover(rgba, w, h, targetL, { kDetail = 0.6, maxSat = 0.4 } = {}) {
+export function tonemapCover(rgba, w, h, targetL, { kDetail = 0.95, maxSat = 0.55 } = {}) {
   const n = w * h;
   const mean = meanColor(rgba, w, h, 1);
   const base = withLuminance(capSaturation(mean, maxSat), targetL);

@@ -19,10 +19,12 @@ function slabPreview(src) {
       try {
         const ground = { r: 52, g: 60, b: 66 };
         const plan = planArenaArt({ ground });
-        const side = 64;
+        const side = 44; // the slab's own size, as in the game (ShooterMode.buildCover)
         const c = document.createElement('canvas');
         c.width = side; c.height = side;
         const cx = c.getContext('2d', { willReadFrequently: true });
+        cx.imageSmoothingEnabled = true;
+        cx.imageSmoothingQuality = 'high';
         cx.drawImage(img, 0, 0, side, side);
         const mat = { data: tonemapCover(cx.getImageData(0, 0, side, side).data, side, side, relLum(plan.cover.top)), w: side, h: side };
         const slab = paintCoverSlab(44, plan.cover, mat);

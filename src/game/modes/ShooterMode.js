@@ -265,10 +265,13 @@ export default class ShooterMode extends BaseMode {
     try {
       if (cfg.dynamicAssetUrls && scene.textures.exists('dyn_cover')) {
         const src = scene.textures.get('dyn_cover').getSourceImage();
-        const side = 64;
+        // Sampled at the slab's own size, area-averaged by the browser (no nearest-pixel blotches).
+        const side = SLAB_PX;
         const c = document.createElement('canvas');
         c.width = side; c.height = side;
         const cx = c.getContext('2d', { willReadFrequently: true });
+        cx.imageSmoothingEnabled = true;
+        cx.imageSmoothingQuality = 'high';
         cx.drawImage(src, 0, 0, side, side);
         const px = cx.getImageData(0, 0, side, side).data;
         material = { data: tonemapCover(px, side, side, relLum(plan.cover.top)), w: side, h: side };
