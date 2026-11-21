@@ -997,7 +997,25 @@ export async function generateAssets({
     } catch { /* debug only */ }
   };
 
-  const applyGroundGate = async (slot, spec, raw, img, prompt, outcome) => {
+  // The model's one persistent habit on a ground request is a thin band of machinery / wall /
+  // ledge hugging an outer edge (measured live: ~4 % of the top edge on the rooftop plate). The
+  // ground is only a cover-scaled material, so the margin is trimmed BEFORE the gate sees it and
+  // the trimmed picture is what ships: deterministic, free, and no geometry depends on the image.
+  const GROUND_EDGE_TRIM = 0.07;
+  const trimGroundEdges = async (image) => {
+    try {
+      const w = image.naturalWidth, h = image.naturalHeight;
+      const dx = Math.round(w * GROUND_EDGE_TRIM), dy = Math.round(h * GROUND_EDGE_TRIM);
+      if (w - 2 * dx < 256 || h - 2 * dy < 256) return image;
+      const c = document.createElement('canvas');
+      c.width = w - 2 * dx; c.height = h - 2 * dy;
+      c.getContext('2d').drawImage(image, dx, dy, c.width, c.height, 0, 0, c.width, c.height);
+      return await canvasToImage(c);
+    } catch { return image; }
+  };
+
+  const applyGroundGate = async (slot, spec, raw, rawImg, prompt, outcome) => {
+    const img = await trimGroundEdges(rawImg);
     const gseed = hashSeed(`ground|${seed}`);
     const floorSpec = specForGame('floor', runState.gameType);
     const ladder = await runGroundLadder({
@@ -1009,7 +1027,7 @@ export async function generateAssets({
       makeFloor: async () => {
         if (!finalPrompts.floor) return null;
         report(`[ASSETS] QA: ${slot} is not a pure ground — building it from the floor texture...`);
-        const strict = `${finalPrompts.floor} IMPORTANT: a macro photograph of the floor surface only; nothing else is visible anywhere in the frame.`;
+        const strict = `${finalPrompts.floor} IMPORTANT: a macro photograph of the floor surface only; nothing else is visible anywhere in the frame, and no band, strip, rail or ledge runs along any side of the image.`;
         const floorRaw = await generateSlotImage('floor', strict, seed + 13, report, maxAttemptsPerProvider, runState, () => {}, null, floorSpec);
         const floorImg = await postProcessAsset(floorRaw.dataUrl, floorSpec, {});
         if (floorImg.pmTile?.flat) throw new Error('floor texture is flat');
