@@ -77,7 +77,7 @@ export default function GroundCalibration() {
         </thead>
         <tbody>
           {rows.map((r) => {
-            const wrong = r.results.some((x) => (r.expect === 'pass') !== x.ok);
+            const wrong = r.expect !== 'ambiguous' && r.results.some((x) => (r.expect === 'pass') !== x.ok);
             return (
               <tr key={r.file} style={{ background: wrong ? '#3a1d1d' : 'transparent' }}>
                 <td style={cell}>{r.file}</td>

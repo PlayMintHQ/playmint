@@ -15,6 +15,11 @@ const AUTH_CALLBACK_TIMEOUT_MS = 6000
 async function boot() {
   // Developer tool: /?calibrate=ground runs the real ground-gate review on labelled fixtures.
   // It is a separate root (no app, no auth) and spends vision calls only when its button is pressed.
+  if (new URLSearchParams(window.location.search).get('calibrate') === 'ground-gen') {
+    const { default: GroundGen } = await import('./devtools/GroundGen.jsx')
+    createRoot(document.getElementById('root')).render(<GroundGen />)
+    return
+  }
   if (new URLSearchParams(window.location.search).get('calibrate') === 'ground') {
     const { default: GroundCalibration } = await import('./devtools/GroundCalibration.jsx')
     createRoot(document.getElementById('root')).render(<GroundCalibration />)

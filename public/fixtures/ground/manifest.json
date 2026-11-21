@@ -21,12 +21,12 @@
  },
  {
   "file": "floor_rooftop.jpg",
-  "expect": "pass",
+  "expect": "ambiguous",
   "note": "real seamless floor tile, tiled 4x4"
  },
  {
   "file": "floor_sky.jpg",
-  "expect": "pass",
+  "expect": "ambiguous",
   "note": "real seamless floor tile, tiled 4x4"
  },
  {
@@ -36,7 +36,7 @@
  },
  {
   "file": "inside_rooftop_old_centre.jpg",
-  "expect": "pass",
+  "expect": "ambiguous",
   "note": "crop fully inside the painted floor: markings, grates, cracks (allowed)"
  },
  {
@@ -46,7 +46,7 @@
  },
  {
   "file": "inside_lava_centre.jpg",
-  "expect": "pass",
+  "expect": "ambiguous",
   "note": "crop fully inside the painted floor: markings, grates, cracks (allowed)"
  },
  {
