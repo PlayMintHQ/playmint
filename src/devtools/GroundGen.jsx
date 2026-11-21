@@ -26,6 +26,7 @@ export default function GroundGen() {
     setBusy(prompt);
     setResults((r) => ({ ...r, [prompt]: { status: 'running' } }));
     const logs = [];
+    window.__PM_GROUND_DEBUG = [];
     try {
       const config = {
         gameType: 'shooter',
@@ -49,6 +50,7 @@ export default function GroundGen() {
           groundIssue: meta.groundIssue || '',
           cost: out.cost?.estUsd ?? null,
           subject: out.design?.subjects?.floor || out.design?.subjects?.background_far || '',
+          seen: (window.__PM_GROUND_DEBUG || []).map((d) => ({ kind: d.kind, src: d.src, inventory: d.review?.inventory || '', material: d.review?.groundMaterial || '', defects: d.review?.defects || [], pure: d.review?.pureGround })),
           logs: logs.filter((l) => /ground|GATE|QA|COST/i.test(l)).slice(-12),
         },
       }));
@@ -86,6 +88,13 @@ export default function GroundGen() {
                     <div>source: <b>{r.groundSource}</b> · role: <b>{r.role}</b> · {r.size}{r.cost != null ? ` · ≈$${Number(r.cost).toFixed(3)}` : ''}</div>
                     {r.groundIssue && <div style={{ color: '#ffcc80' }}>gate: {r.groundIssue}</div>}
                     <div style={{ opacity: 0.7 }}>subject: {r.subject}</div>
+                    {r.seen?.map((d, i) => (
+                      <div key={i} style={{ marginTop: 8, borderTop: '1px solid #333', paddingTop: 6 }}>
+                        <div>gate saw <b>{d.kind}</b>: {d.pure ? 'pure' : 'rejected'} {d.defects.join(', ')}</div>
+                        <img src={d.src} alt={d.kind} style={{ width: '100%', borderRadius: 4, background: '#000' }} />
+                        <div style={{ opacity: 0.7 }}>{d.inventory} ({d.material})</div>
+                      </div>
+                    ))}
                     {r.logs?.length > 0 && <pre style={{ whiteSpace: 'pre-wrap', fontSize: 11, opacity: 0.7 }}>{r.logs.join('\n')}</pre>}
                   </div>
                 </>

@@ -986,11 +986,26 @@ export async function generateAssets({
     c.getContext('2d').putImageData(new ImageData(rgba, GROUND_BAKE.w, GROUND_BAKE.h), 0, 0);
     return canvasToImage(c);
   };
+  // In-memory record of every ground picture the gate saw (accepted or not) with the model's
+  // verdict, for the dev lab (/?calibrate=ground-gen) and console inspection. Never persisted.
+  const captureGroundDebug = (kind, src, review) => {
+    try {
+      if (typeof window === 'undefined') return;
+      const list = (window.__PM_GROUND_DEBUG = window.__PM_GROUND_DEBUG || []);
+      list.push({ at: Date.now(), kind, src, review });
+      if (list.length > 12) list.shift();
+    } catch { /* debug only */ }
+  };
+
   const applyGroundGate = async (slot, spec, raw, img, prompt, outcome) => {
     const gseed = hashSeed(`ground|${seed}`);
     const floorSpec = specForGame('floor', runState.gameType);
     const ladder = await runGroundLadder({
-      reviewPicture: () => reviewGround(img.src, { label: `qa:${slot}` }),
+      reviewPicture: async () => {
+        const review = await reviewGround(img.src, { label: `qa:${slot}` });
+        captureGroundDebug('plate', img.src, review);
+        return review;
+      },
       makeFloor: async () => {
         if (!finalPrompts.floor) return null;
         report(`[ASSETS] QA: ${slot} is not a pure ground — building it from the floor texture...`);
@@ -1001,7 +1016,11 @@ export async function generateAssets({
         outcome.floorModel = floorRaw.model || null;
         return floorImg;
       },
-      reviewFloor: (floorImg) => reviewGround(floorImg.src, { label: 'qa:ground-floor' }),
+      reviewFloor: async (floorImg) => {
+        const review = await reviewGround(floorImg.src, { label: 'qa:ground-floor' });
+        captureGroundDebug('floor', floorImg.src, review);
+        return review;
+      },
       bakeFloor: async (floorImg) => {
         const c = document.createElement('canvas');
         c.width = floorImg.naturalWidth; c.height = floorImg.naturalHeight;
