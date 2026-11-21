@@ -8,7 +8,8 @@
 // `assetMeta.slots.background_far.role === 'ground'`. Everything else (every older set, a failed
 // gate) is replaced by a ground that cannot contain geometry: the set's seamless floor tile baked
 // stochastically, or a procedural ground in the world's palette.
-import { tileCanvas, bakeStochastic, proceduralGround, hashSeed, paletteOfSource, paletteOfCenter } from '../assetPipeline/tiling.js';
+import { tileCanvas, bakeStochastic, proceduralGround, hashSeed, samplePalette, paletteOfCenter } from '../assetPipeline/tiling.js';
+import { calmGround, localContrast } from '../assetPipeline/arenaArt.js';
 
 /** Which ground a game gets. Pure (node-tested); the scene wrapper below does the drawing. */
 export function chooseGroundSource({ dynamic, hasPlate, role, hasFloorTile, killSwitch = false }) {
@@ -60,18 +61,26 @@ export function buildArenaGround(scene, width, height) {
   const bw = Math.ceil(width / BAKE_SCALE), bh = Math.ceil(height / BAKE_SCALE);
   let palette = DEFAULT_PALETTE;
   let image = null;
+  let calmSigma = null;
 
   try {
     if (source === 'plate') {
-      // A gate-approved ground picture (role 'ground'), cover-scaled over the arena.
+      // A gate-approved ground picture (role 'ground'), cover-cropped to the arena and baked through
+      // the CALM pass (arenaArt.js): the picture's broad shape and colour stay, the detail that reads
+      // as objects (pipes, grates, conduits: none of it collides) is pulled down.
       const src = scene.textures.get('dyn_bg_far').getSourceImage();
-      const tw = src?.width || 2048, th = src?.height || 1024;
-      const cover = Math.max(width / tw, height / th);
-      const cropW = Math.min(tw, width / cover), cropH = Math.min(th, height / cover);
-      image = scene.add.image(0, 0, 'dyn_bg_far').setOrigin(0, 0)
-        .setCrop((tw - cropW) / 2, (th - cropH) / 2, cropW, cropH).setScale(cover).setDepth(-1);
-      image.setPosition(-((tw - cropW) / 2) * cover, -((th - cropH) / 2) * cover);
-      palette = paletteOfSource(src) || palette;
+      const tw = src?.width || 2048, th = src?.height || 1536;
+      const cover = Math.max(bw / tw, bh / th);
+      const cw = bw / cover, ch = bh / cover;
+      const c = document.createElement('canvas');
+      c.width = bw; c.height = bh;
+      const ctx = c.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(src, (tw - cw) / 2, (th - ch) / 2, cw, ch, 0, 0, bw, bh);
+      const rgba = calmGround(ctx.getImageData(0, 0, bw, bh).data, bw, bh);
+      putCanvasTexture(scene, 'pm_arena_ground', rgba, bw, bh);
+      image = scene.add.image(0, 0, 'pm_arena_ground').setOrigin(0, 0).setScale(BAKE_SCALE).setDepth(-1);
+      palette = samplePalette(rgba, bw, bh, 4);
+      calmSigma = localContrast(rgba, bw, bh);
     } else if (source === 'floor') {
       const src = scene.textures.get('dyn_floor').getSourceImage();
       const c = document.createElement('canvas');
@@ -80,10 +89,11 @@ export function buildArenaGround(scene, width, height) {
       ctx.drawImage(src, 0, 0);
       try { tileCanvas(c, 'both'); } catch { /* seam fix is cosmetic */ }
       const data = ctx.getImageData(0, 0, c.width, c.height).data;
-      const rgba = bakeStochastic({ data, w: c.width, h: c.height }, bw, bh, seed);
+      const rgba = calmGround(bakeStochastic({ data, w: c.width, h: c.height }, bw, bh, seed), bw, bh);
       putCanvasTexture(scene, 'pm_arena_ground', rgba, bw, bh);
       image = scene.add.image(0, 0, 'pm_arena_ground').setOrigin(0, 0).setScale(BAKE_SCALE).setDepth(-1);
-      palette = paletteOfSource(c) || palette;
+      palette = samplePalette(rgba, bw, bh, 4);
+      calmSigma = localContrast(rgba, bw, bh);
     }
   } catch (err) {
     console.warn('[ArenaGround] source failed, falling back to the procedural ground:', err?.message);
@@ -108,6 +118,7 @@ export function buildArenaGround(scene, width, height) {
   scene.arenaFloor = image;
   scene.arenaGroundPalette = palette;
   scene.arenaGroundSource = source;
+  scene.arenaGroundSigma = calmSigma; // local contrast after the calm pass (contract: <= CONTRACT.groundSigmaMax)
   console.info(`[ArenaGround] source=${source}${slots.background_far?.role ? ' (role ground)' : ''}`);
   return { source, palette };
 }

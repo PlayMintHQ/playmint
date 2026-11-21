@@ -11,7 +11,8 @@
 // this kind, else a small built-in texture painted here once.
 import Phaser from 'phaser';
 import { arenaViewPadFor, WALL_VIEW_PAD } from './arenaHazards';
-import { stripHalves, tileCanvas, mixRgb, scaleRgb, toHex } from '../assetPipeline/tiling';
+import { tileCanvas, mixRgb, scaleRgb, toHex, paletteOfSource } from '../assetPipeline/tiling';
+import { planArenaArt, paintChevronTile } from '../assetPipeline/arenaArt';
 
 const PALETTE = {
   lava: { base: '#b3300b', light: ['#ff8a1a', '#ffc53a'], dark: '#4a1206', crust: 0x2a0d06, glow: 0xff7a1a },
@@ -121,6 +122,46 @@ function paintFarBelow(scene, starry, pal) {
   return key;
 }
 
+
+const hexToRgb = (h) => { const n = parseInt(String(h).replace('#', ''), 16); return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 }; };
+
+/**
+ * The arena's Readability Contract plan (assetPipeline/arenaArt.js): role colours for the ground, the
+ * cover slabs, the edge band, the lethal pools and the receding drop, all measured against what the
+ * ground ACTUALLY looks like. Cached on the scene (the cover slabs read it too); `key` invalidates it
+ * when a live edit changes the edge or the hazard.
+ */
+export function getArenaArtPlan(scene, arena, { hazardKind = null, useSurround = false, starry = false } = {}) {
+  const key = `${arena.edge}|${hazardKind || arena.hazard || ''}|${useSurround ? 's' : '-'}`;
+  if (scene.arenaArt && scene.arenaArt.key === key) return scene.arenaArt;
+  const pal = platePalette(scene);
+  let coverBase = null;
+  try {
+    if (scene.textures.exists('dyn_obstacle')) coverBase = paletteOfSource(scene.textures.get('dyn_obstacle').getSourceImage())?.avg || null;
+  } catch { /* the hue hint is optional */ }
+  let outsideAvg = null;
+  try {
+    if (useSurround && scene.textures.exists('dyn_surround')) outsideAvg = paletteOfSource(scene.textures.get('dyn_surround').getSourceImage())?.avg || null;
+    else outsideAvg = starry ? { r: 6, g: 8, b: 16 } : mixRgb(scaleRgb(pal.avg, 0.7), hazeOf(pal), 0.62);
+  } catch { /* defaults */ }
+  const lethalKind = hazardKind || (arena.hazard && arena.hazard !== 'none' ? arena.hazard : null);
+  const lethal = lethalKind && PALETTE[lethalKind] ? hexToRgb(PALETTE[lethalKind].light[0]) : null;
+  const plan = planArenaArt({ ground: pal.avg, coverBase, edgeKind: arena.edge, lethal, outsideAvg });
+  plan.key = key;
+  scene.arenaArt = plan;
+  return plan;
+}
+
+// The hazard-stripe tile along a void edge: one 16px texture, rebuilt when the plan changes.
+function chevronTexture(scene, plan) {
+  const key = 'pm_edge_chevron';
+  if (scene.textures.exists(key)) scene.textures.remove(key);
+  const tex = scene.textures.createCanvas(key, 16, 16);
+  tex.getContext().putImageData(new ImageData(paintChevronTile(16, 16, plan.edge.stripe, plan.edge.dark), 16, 16), 0, 0);
+  tex.refresh();
+  return key;
+}
+
 const expand = (r, by) => ({ x: r.x - by, y: r.y - by, width: r.width + by * 2, height: r.height + by * 2 });
 
 // Canvas 2D rounded-rect path (ctx.roundRect is not available on every browser we ship to).
@@ -138,8 +179,9 @@ function roundRectPath(ctx, x, y, w, h, r) {
 /**
  * @returns {{ update(time:number, camera):void, destroy():void, warn(level:number):void }}
  */
-export function drawArenaSurface(scene, arena, { width, height, starry = false, hazardKind = null, useSurround = false, useRim = false } = {}) {
+export function drawArenaSurface(scene, arena, { width, height, starry = false, hazardKind = null, useSurround = false } = {}) {
   const pal = platePalette(scene);
+  const plan = getArenaArtPlan(scene, arena, { hazardKind, useSurround, starry });
   const objects = [];
   const tweens = [];
   const drifting = [];
@@ -194,6 +236,12 @@ export function drawArenaSurface(scene, arena, { width, height, starry = false, 
       haze.fillRect(-PAD, -PAD, width + PAD * 2, height + PAD * 2);
       haze.setMask(dropMask);
     }
+    // The drop must RECEDE (contract: darker + calmer than the ground): a black veil over it, sized by
+    // the plan so the drop is at least OUTSIDE_DY darker than the ground whatever the art looks like.
+    const veil = add(scene.add.graphics().setDepth(-0.935));
+    veil.fillStyle(0x000000, plan.outsideAlpha);
+    veil.fillRect(-PAD, -PAD, width + PAD * 2, height + PAD * 2);
+    veil.setMask(dropMask);
   }
   if (arena.edge === 'water') {
     const water = add(scene.add.tileSprite(-PAD, -PAD, width + PAD * 2, height + PAD * 2, surfaceKey('deep')).setOrigin(0, 0).setDepth(-0.95));
@@ -201,59 +249,38 @@ export function drawArenaSurface(scene, arena, { width, height, starry = false, 
     drifting.push({ sprite: water, vx: 9, vy: 4 });
   }
 
-  // ── The platform rim ─────────────────────────────────────────────────────────
-  // Generated `rim` strip when the game has one (a parapet / cliff lip / shoreline in the
-  // world's own style); else a band coloured from the ground plate's palette. Either way
-  // it is CENTRED on the platform edge the rules use, so what you see is where you fall.
+  // ── The platform edge: THE END, the strongest element in the arena ───────────────
+  // Drawn entirely by code from the plan (the generated rim strip is no longer used: it came out
+  // off-style and spiky). A void edge is a dark face dropping away outside a band of amber hazard
+  // chevrons, finished with a light lip; a water edge is a bright foam line. Both sit ON the platform
+  // edge the rules use, so what you see is where you fall.
   let rimWarn = null;
-  const RIM_T = 64; // texture height: the outer half hangs over the drop
   if (arena.edge !== 'wall') {
     if (arena.edge === 'void') {
       const shadow = add(scene.add.graphics().setDepth(-0.91));
       for (let i = 0; i < 6; i++) { shadow.lineStyle(5, 0x000000, 0.16 - i * 0.025); const e = expand(p, 3 + i * 5); shadow.strokeRect(e.x, e.y, e.width, e.height); }
-    }
-    const rimKey = useRim && scene.textures.exists('dyn_rim') ? 'dyn_rim' : null;
-    if (rimKey) {
-      // The strip's OUTER edge is its bottom: rotate each copy so "bottom" points away
-      // from the platform (top ← 180°, left ← +90°, right ← −90°, bottom ← 0°).
-      const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
-      const strip = (x, y, len, rot) => add(scene.add.tileSprite(x, y, len, RIM_T, rimKey).setRotation(rot).setDepth(-0.9));
-      strip(cx, p.y, p.width, Math.PI);
-      strip(cx, p.y + p.height, p.width, 0);
-      strip(p.x, cy, p.height, Math.PI / 2);
-      strip(p.x + p.width, cy, p.height, -Math.PI / 2);
-      // Corner posts hide where the four strips meet, in the strip's own colours.
-      const halves = (() => { try { return stripHalves(scene.textures.get(rimKey).getSourceImage()); } catch { return null; } })();
-      const topC = halves?.top.avg || mixRgb(pal.avg, pal.light, 0.4);
-      const faceC = halves?.bottom.avg || scaleRgb(pal.dark, 0.6);
-      const posts = add(scene.add.graphics().setDepth(-0.895));
-      for (const [px, py] of [[p.x, p.y], [p.x + p.width, p.y], [p.x, p.y + p.height], [p.x + p.width, p.y + p.height]]) {
-        posts.fillStyle(toHex(topC), 1);
-        posts.fillRect(px - RIM_T / 2, py - RIM_T / 2, RIM_T, RIM_T);
-        posts.fillStyle(toHex(faceC), 0.55);
-        posts.fillRect(px - RIM_T / 2, py + RIM_T / 2 - 12, RIM_T, 12);
-        posts.fillRect(px + RIM_T / 2 - 12, py - RIM_T / 2, 12, RIM_T);
-        posts.fillStyle(toHex(mixRgb(topC, { r: 255, g: 255, b: 255 }, 0.4)), 0.7);
-        posts.fillRect(px - RIM_T / 2 + 4, py - RIM_T / 2 + 4, RIM_T - 24, 4);
-      }
+      const BAND = 16, FACE = 14;
+      const face = add(scene.add.graphics().setDepth(-0.9));
+      face.fillStyle(toHex(plan.edge.face), 0.97);
+      face.fillRect(p.x - FACE, p.y - FACE, p.width + FACE * 2, FACE);               // north face
+      face.fillRect(p.x - FACE, p.y + p.height, p.width + FACE * 2, FACE);           // south face
+      face.fillRect(p.x - FACE, p.y, FACE, p.height);                                // west face
+      face.fillRect(p.x + p.width, p.y, FACE, p.height);                             // east face
+      const chevron = chevronTexture(scene, plan);
+      const band = (x, y, w, h) => add(scene.add.tileSprite(x, y, w, h, chevron).setOrigin(0, 0).setDepth(-0.895));
+      band(p.x, p.y, p.width, BAND);                                                 // inside the edge, all four sides
+      band(p.x, p.y + p.height - BAND, p.width, BAND);
+      band(p.x, p.y + BAND, BAND, p.height - BAND * 2);
+      band(p.x + p.width - BAND, p.y + BAND, BAND, p.height - BAND * 2);
+      const lip = add(scene.add.graphics().setDepth(-0.894));
+      lip.lineStyle(2, toHex(plan.edge.dark), 1);                                    // dark keyline on the very edge
+      lip.strokeRect(p.x, p.y, p.width, p.height);
+      lip.lineStyle(3, toHex(plan.edge.lip), 1);                                     // light lip on the inner side of the band
+      lip.strokeRect(p.x + BAND, p.y + BAND, p.width - BAND * 2, p.height - BAND * 2);
     } else {
-      const rim = add(scene.add.graphics().setDepth(-0.9));
-      if (arena.edge === 'void') {
-        // Parapet from the plate's palette: a dark face dropping away outside a light
-        // band that runs INSIDE the edge on all four sides.
-        const coping = mixRgb(pal.light, { r: 205, g: 210, b: 220 }, 0.35);
-        rim.fillStyle(toHex(scaleRgb(pal.dark, 0.45)), 0.97);
-        rim.fillRect(p.x, p.y + p.height, p.width, 34);          // wall face below the near edge
-        rim.fillRect(p.x - 12, p.y - 12, 12, p.height + 24);     // left face
-        rim.fillRect(p.x + p.width, p.y - 12, 12, p.height + 24); // right face
-        rim.lineStyle(14, toHex(coping), 0.6);                    // parapet band
-        rim.strokeRect(p.x + 7, p.y + 7, p.width - 14, p.height - 14);
-        rim.lineStyle(3, toHex(mixRgb(coping, { r: 255, g: 255, b: 255 }, 0.55)), 0.7); // ledge lip
-        rim.strokeRect(p.x + 1, p.y + 1, p.width - 2, p.height - 2);
-      } else {
-        rim.lineStyle(6, 0xd8f4ff, 0.45); // foam
-        rim.strokeRect(p.x - 2, p.y - 2, p.width + 4, p.height + 4);
-      }
+      const foam = add(scene.add.graphics().setDepth(-0.9));
+      foam.lineStyle(7, toHex(plan.edge.stripe), 0.9); // foam
+      foam.strokeRect(p.x - 2, p.y - 2, p.width + 4, p.height + 4);
     }
     rimWarn = add(scene.add.graphics().setDepth(-0.89));
   } else {

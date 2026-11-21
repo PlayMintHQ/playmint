@@ -144,6 +144,8 @@ export const SLOT_SPECS = {
     // The shooter arena is 4:3 (2000×1500): a 2:1 plate was cover-scaled onto it,
     // throwing away a third of the picture and upscaling the rest ~1.46× (blurry).
     // A 4:3 plate fills the world at ~1:1. Applied by specForGame().
+    // The scaffold asks for ONE continuous surface, not a "tileable texture" (2026-11-21): the tile wording
+    // made the model repeat a motif in quadrants, which showed as seam lines across the arena.
     // 2K is requested here (the comment above promised it, the spec never set it). NO `tileable`:
     // the picture is cover-scaled once, never tiled, and a smooth dark ground would trip the
     // flat-tile drop (pipeline.js) and kill this REQUIRED slot. `qa.ground` runs the fail-closed
@@ -154,9 +156,11 @@ export const SLOT_SPECS = {
       // The shooter arena renders this as the GROUND of a top-down arena: no
       // horizon, no sky — a side-view landscape here would show as a wall of sky
       // laid flat under the player.
-      ? `Create a seamless tileable ground texture, viewed from directly above (the camera points ` +
-        `straight down): ${subject}. The whole frame is ONE continuous flat surface from edge to edge ` +
-        `with even detail density and no single focal feature. There is no frame, border, wall, ledge, ` +
+      ? `Create one large, continuous ground surface, viewed from directly above (the camera points ` +
+        `straight down): ${subject}. The whole frame is ONE continuous flat surface from edge to edge, ` +
+        `evenly lit, with even detail density and no single focal feature. It is a single wide area, ` +
+        `not a repeating pattern: no motif is copied, no grid of copies, no mirrored halves and no ` +
+        `visible seams or quadrants. There is no frame, border, wall, ledge, ` +
         `parapet, building, skyline, horizon, sky, clouds, water edge, void or any surroundings, and ` +
         `no perspective or vertical surfaces: markings, cracks, stains, grates and debris lie flat in ` +
         `the surface. No characters, no text, no logo. ${style}`

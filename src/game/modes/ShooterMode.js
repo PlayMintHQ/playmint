@@ -3,7 +3,8 @@ import BaseMode from './BaseMode';
 import Projectile from '../objects/Projectile';
 import { buildNavGrid, computeFlowField, cellOf, steerPoint } from './arenaNav';
 import { COVER_BLOCK_PX, layoutArenaCover, resolveArenaRules, layoutArenaHazards, surfaceAt, navBlockRects, spawnRimPoints, SURFACE, isLethalSurface, arenaSurfaceKind, isStarryWorld } from './arenaHazards';
-import { drawArenaSurface } from './arenaSurface';
+import { drawArenaSurface, getArenaArtPlan } from './arenaSurface';
+import { planArenaArt, paintCoverSlab } from '../assetPipeline/arenaArt';
 import { installArenaDebug } from './arenaDebug';
 
 // AIM ASSIST is the default; the config flag (or the localStorage dev override,
@@ -40,6 +41,7 @@ function readManualAim(cfg) {
 // ground-anchor/flip logic for this mode and leaves the sprite origin centered.
 // Cover layout lives in arenaHazards.js (pure, node-testable); re-exported here.
 export { COVER_BLOCK_PX, layoutArenaCover };
+const SLAB_PX = COVER_BLOCK_PX / 2; // slabs are baked at half resolution and drawn at 2x (crisp under the pixel-art filter)
 
 export default class ShooterMode extends BaseMode {
   init() {
@@ -90,6 +92,7 @@ export default class ShooterMode extends BaseMode {
     this.projectiles = null;
     this.collectibles = null;
     this.cover = null;
+    this.coverShadow = null;
     this.coverRects = [];
     // Contextual hazards (2026-11-07, arenaHazards.js): rules from the world —
     // a rooftop has deadly edges, a volcano has lava pools, an arena has walls.
@@ -237,9 +240,6 @@ export default class ShooterMode extends BaseMode {
   buildCover() {
     const { scene } = this;
     const cfg = scene.gameConfig || {};
-    const useDyn = cfg.dynamicAssetUrls && scene.textures.exists('dyn_obstacle');
-    const texture = useDyn ? 'dyn_obstacle' : (scene.textures.exists('crate') ? 'crate' : null);
-    if (!texture) return;
     // layoutSeed (Quick Start) varies the arena per game; saved games keep theirs.
     const rnd = new Phaser.Math.RandomDataGenerator([String(cfg.layoutSeed || cfg.gameId || cfg.gameName || 'arena')]);
     const placements = layoutArenaCover({
@@ -250,17 +250,39 @@ export default class ShooterMode extends BaseMode {
       avoid: this.arena ? this.arena.pools.flatMap((pool) => pool.rects) : []
     });
     if (!placements.length) return;
+    // Cover is a code-drawn top-down SLAB (Readability Contract, arenaArt.js): a flat top face with an
+    // outline, bevel and contact shadow, lighter than the ground by a measured contrast. The picture
+    // is exactly the collider, and its perspective cannot be wrong (the generated crate sprites came
+    // out 3/4 isometric in a straight-down game).
+    const plan = scene.arenaArt || (this.arena ? getArenaArtPlan(scene, this.arena) : planArenaArt({}));
+    const key = 'pm_cover_slab';
+    if (scene.textures.exists(key)) scene.textures.remove(key);
+    const tex = scene.textures.createCanvas(key, SLAB_PX, SLAB_PX);
+    tex.getContext().putImageData(new ImageData(paintCoverSlab(SLAB_PX, plan.cover), SLAB_PX, SLAB_PX), 0, 0);
+    tex.refresh();
     this.cover = scene.physics.add.staticGroup();
-    const frame = scene.textures.get(texture)?.get(0);
-    const maxSide = frame ? Math.max(frame.width, frame.height) : 64;
     for (const p of placements) {
-      const block = this.cover.create(p.x, p.y, texture);
-      block.setScale(COVER_BLOCK_PX / maxSide);
+      const block = this.cover.create(p.x, p.y, key);
+      block.setScale(COVER_BLOCK_PX / SLAB_PX);
       block.setDepth(1);
       block.refreshBody();
       this.coverRects.push(new Phaser.Geom.Rectangle(
         block.x - block.displayWidth / 2, block.y - block.displayHeight / 2, block.displayWidth, block.displayHeight));
     }
+    this.drawCoverShadows();
+  }
+
+  // One soft contact shadow under every slab (offset down-right: the light is top-left, like the bevel).
+  drawCoverShadows() {
+    const { scene } = this;
+    if (this.coverShadow) { try { this.coverShadow.destroy(); } catch { /* scene already torn down */ } this.coverShadow = null; }
+    if (!this.coverRects.length) return;
+    const g = scene.add.graphics().setDepth(0.9);
+    for (let i = 3; i >= 1; i--) {
+      g.fillStyle(0x000000, 0.12);
+      for (const r of this.coverRects) g.fillRoundedRect(r.x + 3 + i * 2, r.y + 4 + i * 2, r.width, r.height, 8);
+    }
+    this.coverShadow = g;
   }
 
   // Cover and hazards are static for the run: the walkable grid is built once
@@ -299,11 +321,10 @@ export default class ShooterMode extends BaseMode {
       height: this.worldHeight,
       starry: isStarryWorld(words),
       hazardKind: hazardKind && hazardKind === arenaSurfaceKind(this.rules) ? hazardKind : null,
-      // Arena Kit art (generated surround + rim), used only while it still fits the
-      // CURRENT rules: a live edge change must never put a city street under water or
-      // a rooftop parapet on an island's shore. Old sets simply have neither.
-      useSurround: !!slots.surround && !slots.surround.dropped && (this.arena.edge === 'void' || hasPits),
-      useRim: !!slots.rim && !slots.rim.dropped && slots.rim.kind === this.arena.edge
+      // Generated surround (the drop), used only while it still fits the CURRENT rules: a live
+      // edge change must never put a city street under water. The edge itself is drawn by code
+      // (arenaSurface.js, Readability Contract); the generated rim strip is no longer used.
+      useSurround: !!slots.surround && !slots.surround.dropped && (this.arena.edge === 'void' || hasPits)
     });
     console.info(`[Shooter] arena rules: edge=${this.arena.edge}, hazard=${this.arena.hazard} ×${this.arena.pools.length}`);
   }
@@ -325,6 +346,7 @@ export default class ShooterMode extends BaseMode {
       }
       this.coverRects = this.cover.getChildren().map((block) => new Phaser.Geom.Rectangle(
         block.x - block.displayWidth / 2, block.y - block.displayHeight / 2, block.displayWidth, block.displayHeight));
+      this.drawCoverShadows();
     }
     this.buildNav();
     this.hazardGraceUntil = scene.time.now + 1500;
@@ -826,6 +848,7 @@ export default class ShooterMode extends BaseMode {
     }
     this.coverRects = [];
     this.walkRects = [];
+    if (this.coverShadow) { try { this.coverShadow.destroy(); } catch { /* scene already torn down */ } this.coverShadow = null; }
     if (this.arenaView) { this.arenaView.destroy(); this.arenaView = null; }
 
     if (this.gameInputListener) {
