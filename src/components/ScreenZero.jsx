@@ -3,10 +3,11 @@ import { GAME_PRESETS } from '../gameConfig';
 import { normalizeRunnerPacing, generateProceduralLayout } from '../game/promptUtils';
 import { generateGameConfig } from '../game/geminiService';
 import { isGeminiConfigured, createCancelToken } from '../game/assetPipeline';
-import { generateOrRestoreAssets, makePromptKey, THEME_KEYS, THEME_LABELS, pickRandomTheme, describeFailure, buildStaticBoot, listQuickStartEntries, restoreQuickStartWorld, readCacheOnlyFlag } from '../game/assetCache';
+import { generateOrRestoreAssets, makePromptKey, THEME_KEYS, THEME_LABELS, pickRandomTheme, describeFailure, isGuestLimit, buildStaticBoot, listQuickStartEntries, restoreQuickStartWorld, readCacheOnlyFlag } from '../game/assetCache';
 import { QUICK_START_WORLDS, viewForMode, makeQuickStartKey, pickQuickStartWorld, recordQuickStartPick, readRecent, quickStartTitle } from '../game/quickStart';
 import * as metrics from '../game/metrics';
 import AccountButton from '../auth/AccountButton';
+import { useAuth } from '../auth/authContext';
 import { IconRemix } from './Icons';
 import { remixOverParent, remixPromptFallback } from '../game/remix';
 
@@ -229,6 +230,8 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
   const [phaserLoaded, setPhaserLoaded] = useState(false);
   // { reason, config, retry, boot, themeKey } while the user chooses what to do after a failed run.
   const [fallbackChoice, setFallbackChoice] = useState(null);
+  const { status: authStatus, openSignIn } = useAuth();
+  const canSignIn = authStatus === 'guest';
   // Cancellation for the in-flight generation run. Every new run cancels the
   // previous one, and unmounting (✕ Close, successful boot, logo re-open cycle)
   // cancels whatever is still running — this is what makes the Generate button
@@ -378,7 +381,7 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
       return;
     }
     setTerminalLogs(prev => [...prev, `[ASSETS] ${reason}`]);
-    setFallbackChoice({ reason, config, retry, boot, themeKey: pickRandomTheme() });
+    setFallbackChoice({ reason, config, retry, boot, themeKey: pickRandomTheme(), guestLimit: isGuestLimit(err?.fallbackReason || err) });
   };
   const resetToPrompt = () => {
     setFallbackChoice(null);
@@ -555,6 +558,7 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
       setTerminalLogs(prev => [...prev, `[ASSETS] ${describeFailure(err)} Launching with the built-in artwork.`]);
       onStartTransition({
         ...toStaticThemeConfig(newConfig),
+        ...(isGuestLimit(err) ? { staticNotice: `${describeFailure(err)} Playing the built-in artwork instead.` } : {}),
         remixParentId: currentConfig?.remixParentId || null,
         remixParentTitle: currentConfig?.remixParentTitle || null
       });
@@ -1208,11 +1212,19 @@ const ScreenZero = ({ onGenerate, onClose, isOverlay, onStartTransition, onCompl
 
               {fallbackChoice ? (
                 <div data-testid="fallback-choice" style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontFamily: 'var(--pm-font-body, sans-serif)' }}>
-                  <div style={{ color: 'var(--pm-accent-orange)', fontSize: '13px', lineHeight: 1.45 }}>
+                  <div role="alert" style={{ color: 'var(--pm-accent-orange)', fontSize: '13px', lineHeight: 1.45 }}>
+                    {isGuestLimit(fallbackChoice.reason) || fallbackChoice.guestLimit
+                      ? <strong style={{ display: 'block', fontSize: '15px', marginBottom: '4px' }}>Free guest limit reached</strong>
+                      : null}
                     {fallbackChoice.reason} No AI art was made for this world.
                   </div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                    <button type="button" className="pm-btn pm-btn-primary" onClick={() => { const fc = fallbackChoice; setFallbackChoice(null); fc.retry(); }}>
+                    {fallbackChoice.guestLimit && canSignIn ? (
+                      <button type="button" className="pm-btn pm-btn-primary" data-testid="guest-limit-signin" onClick={() => openSignIn()}>
+                        Sign in to continue
+                      </button>
+                    ) : null}
+                    <button type="button" className={`pm-btn ${fallbackChoice.guestLimit && canSignIn ? 'pm-btn-outline' : 'pm-btn-primary'}`} onClick={() => { const fc = fallbackChoice; setFallbackChoice(null); fc.retry(); }}>
                       Try again
                     </button>
                     <button type="button" className="pm-btn pm-btn-outline" onClick={() => {

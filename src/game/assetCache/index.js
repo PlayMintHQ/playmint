@@ -622,13 +622,18 @@ export const THEME_KEYS = ['ice', 'lava', 'forest', 'city', 'space'];
 export const THEME_LABELS = { ice: 'Ice', lava: 'Lava', forest: 'Forest', city: 'City', space: 'Space' };
 export const pickRandomTheme = () => THEME_KEYS[Math.floor(Math.random() * THEME_KEYS.length)];
 
+// The server's guest cap (api/generate.js, 429 "Guest generation limit reached.").
+// The pipeline wraps provider errors in longer messages, so match on the text.
+export const GUEST_LIMIT_RE = /Guest generation limit reached|free guest session is over/i;
+export const isGuestLimit = (errOrText) => GUEST_LIMIT_RE.test(String(errOrText?.message ?? errOrText ?? ''));
+
 // A short, user-facing reason for a failed generation. The server's own wording
 // for the guest/daily limit is kept verbatim (it tells the user what to DO);
 // everything else is generic — raw provider errors are not for players.
 export const describeFailure = (err) => {
   const msg = String(err?.message || err || '');
   const limit = msg.match(/Guest generation limit reached\.(?: Sign in to create more games\.)?|Daily generation quota exceeded\.(?: Please return tomorrow\.)?/i);
-  if (limit) return limit[0];
+  if (limit) return isGuestLimit(limit[0]) ? 'Your free guest session is over — you have used all of your free AI generations. Sign in (it\'s free) to keep creating games.' : limit[0];
   if (err?.kind === 'quota' || /quota|rate limit|exhausted|credits/i.test(msg)) {
     return 'The AI art service is at its usage limit right now.';
   }

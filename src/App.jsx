@@ -7,7 +7,7 @@ import ScreenZero from './components/ScreenZero';
 import { GAME_PRESETS } from './gameConfig';
 import { generateGameConfig } from './game/geminiService';
 import { regenerateAssetSlots, createCancelToken, isGeminiConfigured } from './game/assetPipeline';
-import { generateOrRestoreAssets, forkGameArt, makePromptKey, getGameById, THEME_KEYS } from './game/assetCache';
+import { generateOrRestoreAssets, forkGameArt, makePromptKey, getGameById, THEME_KEYS, isGuestLimit } from './game/assetCache';
 import { frameImageFromSheet } from './game/assetPipeline/postprocess';
 import { encodeShareConfig, decodeShareConfig, hydrateAssetMetaLite, stripForShare } from './game/shareLink';
 import { generateTitle } from './game/promptUtils';
@@ -215,7 +215,7 @@ function App() {
       return null;
     }
   });
-  const { dialog: authDialog, status: authStatus, user, requireAuth } = useAuth();
+  const { dialog: authDialog, status: authStatus, user, requireAuth, openSignIn } = useAuth();
   const isSignInOpen = !!authDialog;
 
   // Saved games (2026-09-27, contract §2B). 'idle' | 'saving' | 'saved' | 'error'
@@ -1740,6 +1740,11 @@ function App() {
           }}
         >
           <span style={{ flex: 1 }}>{liveParams.staticNotice}</span>
+          {authStatus === 'guest' && isGuestLimit(liveParams.staticNotice) && (
+            <button type="button" className="pm-btn pm-btn-primary" data-testid="guest-limit-signin"
+              onClick={() => openSignIn()}
+              style={{ whiteSpace: 'nowrap', padding: '4px 12px', fontSize: '13px' }}>Sign in</button>
+          )}
           <button type="button" aria-label="Dismiss" onClick={() => setDismissedNotice(liveParams.saveRunId)}
             style={{ background: 'none', border: 'none', color: '#fff', fontSize: '18px', lineHeight: 1, cursor: 'pointer' }}>✕</button>
         </div>

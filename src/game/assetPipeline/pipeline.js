@@ -117,7 +117,7 @@ async function generateSlotImage(slot, prompt, seed, onProgress, maxAttemptsPerP
     throw new Error(`No Gemini API key configured — cannot generate "${slot}".`);
   }
   if (runState.skipGemini) {
-    throw new Error(`Gemini is unavailable for this run — skipping "${slot}".`);
+    throw new Error(`Gemini is unavailable for this run — skipping "${slot}".${runState.skipReason ? ` Cause: ${runState.skipReason}` : ''}`);
   }
   const budgetLeft = () => runState.imageCalls < (runState.maxImageCalls ?? Infinity);
   for (let attempt = 1; attempt <= maxAttemptsPerProvider; attempt++) {
@@ -144,7 +144,7 @@ async function generateSlotImage(slot, prompt, seed, onProgress, maxAttemptsPerP
       console.warn(`[AssetPipeline] Gemini failed for "${slot}" (attempt ${attempt}): ${err.message}`);
       // Bad key or safety block won't improve on retry
       if (err.kind === 'auth' || err.kind === 'safety' || err.kind === 'no-key') {
-        if (err.kind !== 'safety') runState.skipGemini = true;
+        if (err.kind !== 'safety') { runState.skipGemini = true; runState.skipReason = err.message; }
         break;
       }
       // A rejected param/prompt won't succeed on retry either, but it's scoped to
@@ -155,6 +155,7 @@ async function generateSlotImage(slot, prompt, seed, onProgress, maxAttemptsPerP
         // A long/absent retry window means daily or zero quota — dead for this run
         if (!err.retryDelayMs || err.retryDelayMs > 10000) {
           runState.skipGemini = true;
+          runState.skipReason = err.message;
           break;
         }
         if (attempt < maxAttemptsPerProvider) await sleep(err.retryDelayMs);
